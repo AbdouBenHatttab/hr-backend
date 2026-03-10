@@ -34,6 +34,9 @@ public class KafkaConfig {
     @Value("${app.kafka.topic.user-role-assigned}")
     private String userRoleAssignedTopic;
 
+    @Value("${app.kafka.topic.password-reset}")
+    private String passwordResetTopic;
+
     // ==================== PRODUCER ====================
 
     @Bean
@@ -78,6 +81,14 @@ public class KafkaConfig {
     @Bean
     public NewTopic userRoleAssignedTopic() {
         return TopicBuilder.name(userRoleAssignedTopic)
+                .partitions(3)
+                .replicas(1)
+                .build();
+    }
+
+    @Bean
+    public NewTopic passwordResetTopic() {
+        return TopicBuilder.name(passwordResetTopic)
                 .partitions(3)
                 .replicas(1)
                 .build();

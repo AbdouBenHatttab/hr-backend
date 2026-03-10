@@ -5,6 +5,7 @@ import org.keycloak.admin.client.KeycloakBuilder;
 import org.keycloak.admin.client.resource.RealmResource;
 import org.keycloak.admin.client.resource.UserResource;
 import org.keycloak.admin.client.resource.UsersResource;
+import org.keycloak.representations.idm.CredentialRepresentation;
 import org.keycloak.representations.idm.RoleRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.springframework.beans.factory.annotation.Value;
@@ -139,6 +140,39 @@ public class KeycloakAdminService {
         } catch (Exception e) {
             System.err.println("Error finding Keycloak user: " + e.getMessage());
             return null;
+        }
+    }
+
+    /**
+     * Reset user password in Keycloak
+     * @param keycloakUserId The Keycloak user ID (UUID)
+     * @param newPassword The new password to set
+     * @return true if successful, false otherwise
+     */
+    public boolean resetUserPassword(String keycloakUserId, String newPassword) {
+        try (Keycloak keycloak = getKeycloakInstance()) {
+            System.out.println("🔐 Resetting password for Keycloak user: " + keycloakUserId);
+
+            RealmResource realmResource = keycloak.realm(realm);
+            UsersResource usersResource = realmResource.users();
+            UserResource userResource = usersResource.get(keycloakUserId);
+
+            // Create new credential
+            CredentialRepresentation credential = new CredentialRepresentation();
+            credential.setType(CredentialRepresentation.PASSWORD);
+            credential.setValue(newPassword);
+            credential.setTemporary(false);
+
+            // Reset password
+            userResource.resetPassword(credential);
+
+            System.out.println("✅ Password successfully reset in Keycloak for user: " + keycloakUserId);
+            return true;
+
+        } catch (Exception e) {
+            System.err.println("❌ ERROR resetting password in Keycloak: " + e.getMessage());
+            e.printStackTrace();
+            return false;
         }
     }
 }
