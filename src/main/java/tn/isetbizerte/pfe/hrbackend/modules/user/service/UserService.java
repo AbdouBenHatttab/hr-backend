@@ -12,6 +12,9 @@ import tn.isetbizerte.pfe.hrbackend.modules.user.repository.UserRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.user.repository.PersonRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.user.repository.LoginHistoryRepository;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+
 import java.util.List;
 import java.util.Optional;
 
@@ -38,6 +41,10 @@ public class UserService {
         return userRepository.findAll();
     }
 
+    public Page<User> getAllUsers(Pageable pageable) {
+        return userRepository.findAll(pageable);
+    }
+
     public Optional<User> findByUsername(String username) {
         return userRepository.findByUsername(username);
     }
@@ -57,6 +64,10 @@ public class UserService {
 
     public List<User> getUsersByRole(TypeRole role) {
         return userRepository.findByRole(role);
+    }
+
+    public Page<User> getUsersByRole(TypeRole role, Pageable pageable) {
+        return userRepository.findByRole(role, pageable);
     }
 
     public List<User> getActiveUsers() {
@@ -144,6 +155,10 @@ public class UserService {
         return loginHistoryRepository.findAll();
     }
 
+    public Page<LoginHistory> getAllLoginHistory(Pageable pageable) {
+        return loginHistoryRepository.findAll(pageable);
+    }
+
     public List<LoginHistory> getLoginHistoryByUser(User user) {
         return loginHistoryRepository.findByUserOrderByLoginDateDesc(user);
     }
@@ -160,4 +175,3 @@ public class UserService {
         return loginHistoryRepository.count();
     }
 }
-

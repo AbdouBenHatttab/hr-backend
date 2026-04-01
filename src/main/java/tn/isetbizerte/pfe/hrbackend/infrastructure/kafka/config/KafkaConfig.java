@@ -37,6 +37,23 @@ public class KafkaConfig {
     @Value("${app.kafka.topic.password-reset}")
     private String passwordResetTopic;
 
+    @Value("${app.kafka.topic.leave-events}")
+    private String leaveEventsTopic;
+
+    @Value("${app.kafka.topic.loan-events}")
+    private String loanEventsTopic;
+
+    @Value("${app.kafka.topic.document-events}")
+    private String documentEventsTopic;
+
+    @Value("${app.kafka.topic.authorization-events}")
+    private String authorizationEventsTopic;
+
+    @Value("${app.kafka.topic.request-events}")
+    private String requestEventsTopic;
+
+    @Value("${app.kafka.topic.notification-events}")
+    private String notificationEventsTopic;
     // ==================== PRODUCER ====================
 
     @Bean
@@ -89,6 +106,54 @@ public class KafkaConfig {
     @Bean
     public NewTopic passwordResetTopic() {
         return TopicBuilder.name(passwordResetTopic)
+                .partitions(3)
+                .replicas(1)
+                .build();
+    }
+
+    @Bean
+    public NewTopic leaveEventsTopic() {
+        return TopicBuilder.name(leaveEventsTopic)
+                .partitions(3)
+                .replicas(1)
+                .build();
+    }
+
+    @Bean
+    public NewTopic loanEventsTopic() {
+        return TopicBuilder.name(loanEventsTopic)
+                .partitions(3)
+                .replicas(1)
+                .build();
+    }
+
+    @Bean
+    public NewTopic documentEventsTopic() {
+        return TopicBuilder.name(documentEventsTopic)
+                .partitions(3)
+                .replicas(1)
+                .build();
+    }
+
+    @Bean
+    public NewTopic authorizationEventsTopic() {
+        return TopicBuilder.name(authorizationEventsTopic)
+                .partitions(3)
+                .replicas(1)
+                .build();
+    }
+
+    @Bean
+    public NewTopic requestEventsTopic() {
+        return TopicBuilder.name(requestEventsTopic)
+                .partitions(3)
+                .replicas(1)
+                .build();
+    }
+
+    @Bean
+    public NewTopic notificationEventsTopic() {
+        return TopicBuilder.name(notificationEventsTopic)
                 .partitions(3)
                 .replicas(1)
                 .build();

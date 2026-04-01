@@ -267,6 +267,49 @@ public class AuthService {
         return new LoginResponse("Login failed");
     }
 
+    /**
+     * Refresh access token using a valid refresh token.
+     */
+    public LoginResponse refreshUserToken(String refreshToken) {
+        if (refreshToken == null || refreshToken.isBlank()) {
+            return new LoginResponse("Refresh token is required");
+        }
+
+        String tokenUrl = keycloakServerUrl + "/realms/" + realm + "/protocol/openid-connect/token";
+
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+
+            MultiValueMap<String, String> body = new LinkedMultiValueMap<>();
+            body.add("client_id", clientId);
+            if (clientSecret != null && !clientSecret.isEmpty()) {
+                body.add("client_secret", clientSecret);
+            }
+            body.add("grant_type", "refresh_token");
+            body.add("refresh_token", refreshToken);
+
+            HttpEntity<MultiValueMap<String, String>> request = new HttpEntity<>(body, headers);
+            ResponseEntity<Map> response = restTemplate.postForEntity(tokenUrl, request, Map.class);
+
+            if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
+                Map<String, Object> userInfo = parseJwtToken((String) response.getBody().get("access_token"));
+                String username = (String) userInfo.getOrDefault("username", "unknown");
+                return processTokenResponse(response.getBody(), username);
+            }
+        } catch (RestClientResponseException e) {
+            logger.warn("Refresh token rejected with status {} and body {}", e.getStatusCode().value(), e.getResponseBodyAsString());
+            return new LoginResponse("Session expired. Please login again.");
+        } catch (RestClientException e) {
+            logger.warn("Refresh token request failed: {}", e.getMessage());
+            return new LoginResponse("Authentication service unreachable. Please try again.");
+        } catch (Exception e) {
+            logger.error("Unexpected error while refreshing access token", e);
+        }
+
+        return new LoginResponse("Token refresh failed");
+    }
+
     private String mapKeycloakLoginError(RestClientResponseException e) {
         HttpStatus status = HttpStatus.resolve(e.getStatusCode().value());
         String body = e.getResponseBodyAsString();
@@ -361,6 +404,12 @@ public class AuthService {
         Map<String, Object> userInfo = new HashMap<>();
         try {
             Jwt jwt = jwtDecoder.decode(accessToken);
+
+            String username = jwt.getClaimAsString("preferred_username");
+            if (username == null || username.isEmpty()) {
+                username = jwt.getClaimAsString("sub");
+            }
+            userInfo.put("username", username);
 
             String email = jwt.getClaimAsString("email");
             if (email == null || email.isEmpty()) {

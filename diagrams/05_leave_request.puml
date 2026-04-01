@@ -1,0 +1,153 @@
+@startuml LeaveRequest
+title Leave Request — Full Lifecycle Flow
+
+skinparam sequenceArrowThickness 2
+skinparam roundcorner 8
+skinparam backgroundColor #FAFAFA
+skinparam sequence {
+  LifeLineBorderColor #1a6faf
+  ActorBorderColor #1a6faf
+  ParticipantBackgroundColor #EAF2FF
+  ParticipantBorderColor #1a6faf
+}
+
+actor       "Employee"               as EMP
+actor       "Team Leader"            as TL
+actor       "HR Manager"             as HR
+participant "EmployeeLeaveController" as ELC #EAF2FF
+participant "EmployeeLeaveService"   as ELS #EAF2FF
+database    "PostgreSQL"             as DB  #E8F5E9
+
+== Submit Leave Request ==
+
+EMP -> ELC : POST /api/employee/leave/request\n{ leaveType, startDate, endDate,\n  numberOfDays, reason }\nAuthorization: Bearer <EMPLOYEE_JWT>
+activate ELC
+
+ELC -> ELS : createLeaveRequest(username, dto)
+activate ELS
+
+ELS -> DB  : SELECT user WHERE username=?
+activate DB
+DB  --> ELS : User
+deactivate DB
+
+note right of ELS
+  validateLeaveRequestDates():
+  • startDate <= endDate
+  • numberOfDays matches range
+  • max 30 days per request
+  • dates must be today or future
+end note
+
+ELS -> DB  : INSERT leave_requests {\n  user_id, leaveType, startDate,\n  endDate, numberOfDays, reason,\n  teamLeaderDecision=PENDING,\n  hrDecision=PENDING,\n  status=PENDING,\n  requestDate=now() }
+activate DB
+DB  --> ELS : LeaveRequest (id=N)
+deactivate DB
+ELS --> ELC : LeaveRequestResponseDto
+deactivate ELS
+ELC --> EMP : 201 Created\n{ success:true, data: { id, status:PENDING, ... } }
+deactivate ELC
+
+== Team Leader Reviews ==
+
+TL -> ELC : GET /api/employee/leave/pending\nAuthorization: Bearer <TEAM_LEADER_JWT>
+activate ELC
+ELC -> ELS : getPendingLeaveRequests()
+activate ELS
+ELS -> DB  : SELECT * FROM leave_requests\nWHERE status='PENDING'
+DB  --> ELS : List<LeaveRequest>
+ELS --> ELC : List<LeaveRequestResponseDto>
+deactivate ELS
+ELC --> TL : 200 OK { data: [ pending requests... ] }
+deactivate ELC
+
+alt Team Leader APPROVES
+    TL -> ELC : POST /api/employee/leave/{id}/team-leader/approve
+    activate ELC
+    ELC -> ELS : teamLeaderDecision(leaveId, approve=true)
+    activate ELS
+    ELS -> DB  : UPDATE leave_requests\nSET teamLeaderDecision='APPROVED',\n    updatedAt=now()\nWHERE id=?
+    DB  --> ELS : saved
+    note right of ELS
+      recalculateStatus():
+      TL=APPROVED but HR still PENDING
+      → status stays PENDING
+    end note
+    ELS --> ELC : dto { teamLeaderDecision:APPROVED,\n  hrDecision:PENDING, status:PENDING }
+    deactivate ELS
+    ELC --> TL  : 200 OK { message:"Approved by Team Leader" }
+    deactivate ELC
+
+else Team Leader REJECTS
+    TL -> ELC : POST /api/employee/leave/{id}/team-leader/reject
+    activate ELC
+    ELC -> ELS : teamLeaderDecision(leaveId, approve=false)
+    activate ELS
+    ELS -> DB  : UPDATE leave_requests\nSET teamLeaderDecision='REJECTED',\n    status='REJECTED',\n    updatedAt=now()
+    DB  --> ELS : saved
+    ELS --> ELC : dto { status: REJECTED }
+    deactivate ELS
+    ELC --> TL  : 200 OK { message:"Rejected by Team Leader" }
+    deactivate ELC
+end
+
+== HR Manager Final Decision ==
+
+HR -> ELC : GET /api/employee/leave/all\nAuthorization: Bearer <HR_JWT>
+activate ELC
+ELC -> ELS : getAllLeaveRequests()
+activate ELS
+ELS -> DB  : SELECT * FROM leave_requests
+DB  --> ELS : List<LeaveRequest>
+ELS --> ELC : List<LeaveRequestResponseDto>
+deactivate ELS
+ELC --> HR : 200 OK { all requests }
+deactivate ELC
+
+alt HR APPROVES (after TL also approved)
+    HR -> ELC : POST /api/employee/leave/{id}/hr/approve
+    activate ELC
+    ELC -> ELS : hrDecision(leaveId, approve=true)
+    activate ELS
+    ELS -> DB  : UPDATE leave_requests\nSET hrDecision='APPROVED',\n    updatedAt=now()
+    DB  --> ELS : saved
+    note right of ELS
+      recalculateStatus():
+      TL=APPROVED AND HR=APPROVED
+      → status = APPROVED
+      → approvalDate = today
+    end note
+    ELS -> DB  : UPDATE leave_requests\nSET status='APPROVED',\n    approvalDate=today
+    DB  --> ELS : saved
+    ELS --> ELC : dto { status: APPROVED,\n  approvalDate: "2026-04-05" }
+    deactivate ELS
+    ELC --> HR  : 200 OK { message:"Approved by HR Manager" }
+    deactivate ELC
+
+else HR REJECTS
+    HR -> ELC : POST /api/employee/leave/{id}/hr/reject
+    activate ELC
+    ELC -> ELS : hrDecision(leaveId, approve=false)
+    activate ELS
+    ELS -> DB  : UPDATE leave_requests\nSET hrDecision='REJECTED',\n    status='REJECTED'
+    DB  --> ELS : saved
+    ELS --> ELC : dto { status: REJECTED }
+    deactivate ELS
+    ELC --> HR  : 200 OK { message:"Rejected by HR Manager" }
+    deactivate ELC
+end
+
+== Employee Checks Status ==
+
+EMP -> ELC : GET /api/employee/leave/my-requests
+activate ELC
+ELC -> ELS : getMyLeaveRequests(username)
+activate ELS
+ELS -> DB  : SELECT * FROM leave_requests\nWHERE user_id=?
+DB  --> ELS : List<LeaveRequest>
+ELS --> ELC : List<LeaveRequestResponseDto>
+deactivate ELS
+ELC --> EMP : 200 OK { data: [ all my requests ] }
+deactivate ELC
+
+@enduml

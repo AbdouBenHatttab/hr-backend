@@ -6,6 +6,9 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import tn.isetbizerte.pfe.hrbackend.modules.team.dto.AddMemberRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.team.dto.CreateTeamRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.team.service.TeamService;
@@ -57,11 +60,20 @@ public class TeamController {
      */
     @PreAuthorize("hasRole('HR_MANAGER')")
     @GetMapping("/api/hr/teams")
-    public ResponseEntity<Map<String, Object>> getAllTeams(@AuthenticationPrincipal Jwt jwt) {
+    public ResponseEntity<Map<String, Object>> getAllTeams(
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
         Map<String, Object> response = new HashMap<>();
+        Pageable pageable = PageRequest.of(page, size);
+        Page<Map<String, Object>> teams = teamService.getAllTeams(pageable);
         response.put("success", true);
         response.put("message", "All teams retrieved successfully");
-        response.put("data", teamService.getAllTeams());
+        response.put("data", teams.getContent());
+        response.put("page", page);
+        response.put("size", size);
+        response.put("totalCount", teams.getTotalElements());
+        response.put("totalPages", teams.getTotalPages());
         return ResponseEntity.ok(response);
     }
 

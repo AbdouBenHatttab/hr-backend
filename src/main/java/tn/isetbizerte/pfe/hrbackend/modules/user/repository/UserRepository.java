@@ -1,6 +1,8 @@
 package tn.isetbizerte.pfe.hrbackend.modules.user.repository;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Repository;
 import tn.isetbizerte.pfe.hrbackend.common.enums.TypeRole;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.Person;
@@ -17,8 +19,8 @@ public interface UserRepository extends JpaRepository<User, Long> {
     boolean existsByUsername(String username);
     boolean existsByKeycloakId(String keycloakId);
     List<User> findByRole(TypeRole role);
+    Page<User> findByRole(TypeRole role, Pageable pageable);
     List<User> findByActive(Boolean active);
     long countByRole(TypeRole role);
     long countByTeamId(Long teamId);
 }
-

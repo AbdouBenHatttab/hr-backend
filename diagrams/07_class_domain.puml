@@ -1,0 +1,148 @@
+@startuml ClassDiagram_Domain
+title Domain Model — Entities & Enums
+skinparam classAttributeIconSize 0
+skinparam classFontSize 13
+skinparam classFontStyle bold
+skinparam classBackgroundColor #EAF2FF
+skinparam classBorderColor #1a6faf
+skinparam classArrowColor #1a6faf
+skinparam enumBackgroundColor #FFF8E1
+skinparam enumBorderColor #F9A825
+skinparam packageBackgroundColor #F0F4FF
+skinparam packageBorderColor #1a6faf
+skinparam roundcorner 8
+skinparam shadowing false
+
+' ─── ENUMS ────────────────────────────────────────────────────────────────────
+
+package "common.enums" #F0F4FF {
+
+    enum TypeRole {
+        NEW_USER
+        EMPLOYEE
+        TEAM_LEADER
+        HR_MANAGER
+    }
+
+    enum LeaveType {
+        ANNUAL
+        SICK
+        UNPAID
+        MATERNITY
+        PATERNITY
+        OTHER
+    }
+
+    enum LeaveStatus {
+        PENDING
+        APPROVED
+        REJECTED
+    }
+
+    enum ApprovalDecision {
+        PENDING
+        APPROVED
+        REJECTED
+    }
+}
+
+' ─── ENTITIES ─────────────────────────────────────────────────────────────────
+
+package "modules.user.entity" #EAF2FF {
+
+    class Person {
+        - id : Long
+        - lastName : String
+        - firstName : String
+        - email : String  <<unique>>
+        - phone : String
+        - birthDate : LocalDate
+        - address : String
+        - maritalStatus : String
+        - numberOfChildren : int
+        --
+        + getEmployeeFullName() : String
+    }
+
+    class User {
+        - id : Long
+        - keycloakId : String  <<unique>>
+        - username : String  <<unique>>
+        - registrationDate : LocalDate
+        - emailVerified : Boolean
+        - active : Boolean
+        - role : TypeRole
+        --
+        + addLoginHistory(lh: LoginHistory) : void
+    }
+
+    class LoginHistory {
+        - id : Long
+        - loginDate : LocalDateTime
+        - success : Boolean
+    }
+}
+
+package "modules.employee.entity" #EAF2FF {
+
+    class LeaveRequest {
+        - id : Long
+        - leaveType : LeaveType
+        - startDate : LocalDate
+        - endDate : LocalDate
+        - numberOfDays : Integer
+        - reason : String
+        - requestDate : LocalDateTime
+        - teamLeaderDecision : ApprovalDecision
+        - hrDecision : ApprovalDecision
+        - status : LeaveStatus
+        - approvalDate : LocalDate
+        - createdAt : LocalDateTime
+        - updatedAt : LocalDateTime
+        --
+        + getEmployeeFullName() : String
+        + getEmployeeEmail() : String
+    }
+}
+
+package "modules.auth.entity" #EAF2FF {
+
+    class PasswordResetToken {
+        - id : Long
+        - token : String  <<unique>>
+        - userId : Long
+        - email : String
+        - createdAt : LocalDateTime
+        - expiresAt : LocalDateTime
+        - used : boolean
+    }
+}
+
+' ─── RELATIONSHIPS ────────────────────────────────────────────────────────────
+
+Person "1" <--> "1" User : person / user\n<<OneToOne>>
+
+User "1" --> "0..*" LoginHistory : loginHistories\n<<OneToMany>>
+
+User "1" --> "0..*" LeaveRequest : user\n<<ManyToOne>>
+
+User --> TypeRole : role
+
+LeaveRequest --> LeaveType    : leaveType
+LeaveRequest --> LeaveStatus  : status
+LeaveRequest --> ApprovalDecision : teamLeaderDecision
+LeaveRequest --> ApprovalDecision : hrDecision
+
+note bottom of PasswordResetToken
+  userId is a plain Long FK to User.id
+  (not a JPA @ManyToOne — by design,
+  avoids lazy-load issues on token lookup)
+end note
+
+note right of User
+  active = false on creation
+  active = true after HR assigns a real role
+  role = NEW_USER by default
+end note
+
+@enduml

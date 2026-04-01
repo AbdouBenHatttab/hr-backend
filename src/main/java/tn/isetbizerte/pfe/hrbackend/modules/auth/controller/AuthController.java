@@ -6,6 +6,7 @@ import org.springframework.web.bind.annotation.*;
 import tn.isetbizerte.pfe.hrbackend.common.dto.LoginRequest;
 import tn.isetbizerte.pfe.hrbackend.common.dto.LoginResponse;
 import tn.isetbizerte.pfe.hrbackend.common.dto.RegisterRequest;
+import tn.isetbizerte.pfe.hrbackend.modules.auth.dto.RefreshTokenRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.auth.service.AuthService;
 
 import java.util.HashMap;
@@ -58,6 +59,21 @@ public class AuthController {
         }
     }
 
+    @PostMapping("/refresh")
+    public ResponseEntity<LoginResponse> refresh(@RequestBody RefreshTokenRequest request) {
+        try {
+            LoginResponse result = authService.refreshUserToken(request.getRefreshToken());
+            if (result.isSuccess()) {
+                return ResponseEntity.ok(result);
+            } else {
+                return ResponseEntity.badRequest().body(result);
+            }
+        } catch (Exception e) {
+            LoginResponse errorResponse = new LoginResponse("Token refresh failed due to a server error. Please login again.");
+            return ResponseEntity.status(500).body(errorResponse);
+        }
+    }
+
     /**
      * Extract client IP address from request
      */
@@ -82,4 +98,3 @@ public class AuthController {
         return ipAddress != null ? ipAddress : "unknown";
     }
 }
-

@@ -28,6 +28,8 @@ public class LeaveRequestResponseDto {
     private Integer systemScore;
     private String  systemRecommendation;
     private String  decisionReason;
+    private String  approvedBy;
+    private String  rejectedBy;
 
     // Getters and Setters
     public Long getId() {
@@ -150,5 +152,10 @@ public class LeaveRequestResponseDto {
 
     public String getDecisionReason() { return decisionReason; }
     public void setDecisionReason(String d) { this.decisionReason = d; }
-}
 
+    public String getApprovedBy() { return approvedBy; }
+    public void setApprovedBy(String approvedBy) { this.approvedBy = approvedBy; }
+
+    public String getRejectedBy() { return rejectedBy; }
+    public void setRejectedBy(String rejectedBy) { this.rejectedBy = rejectedBy; }
+}

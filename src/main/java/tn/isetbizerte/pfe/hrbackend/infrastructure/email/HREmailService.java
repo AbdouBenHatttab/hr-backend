@@ -24,6 +24,7 @@ import java.time.format.DateTimeFormatter;
  *  4. Loan approved
  *  5. Loan rejected
  *  6. Password reset OTP
+ *  7. Task assigned
  */
 @Service
 public class HREmailService {
@@ -126,6 +127,20 @@ public class HREmailService {
         send(email,
             "Password Reset Request – " + COMPANY + " HRMS",
             buildPasswordResetBody(name, otpCode, expiresAt));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 7 — TASK ASSIGNED
+    // ═══════════════════════════════════════════════════════════════════
+
+    @Async
+    public void sendTaskAssigned(String email, String firstName, String lastName,
+                                 String taskTitle, String taskDescription, String projectName,
+                                 String priority, LocalDate startDate, LocalDate dueDate, String assignedBy) {
+        String name = firstName + " " + lastName;
+        send(email,
+            "New Task Assigned – " + COMPANY + " HRMS",
+            buildTaskAssignedBody(name, taskTitle, taskDescription, projectName, priority, startDate, dueDate, assignedBy));
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -338,6 +353,40 @@ public class HREmailService {
                 </p>
             </div>
             """.formatted(name, otpCode, expiresAt));
+    }
+
+    private String buildTaskAssignedBody(String name, String taskTitle, String taskDescription, String projectName,
+                                         String priority, LocalDate startDate, LocalDate dueDate, String assignedBy) {
+        String due = dueDate != null ? dueDate.format(DATE_FMT) : "No due date";
+        String start = startDate != null ? startDate.format(DATE_FMT) : "No start date";
+        String description = (taskDescription != null && !taskDescription.isBlank()) ? taskDescription : "No description provided";
+        String priorityLabel = priority != null ? priority.replace("_", " ") : "MEDIUM";
+        String assignedByValue = (assignedBy != null && !assignedBy.isBlank()) ? assignedBy : "Team Leader";
+
+        return wrap("New Task Assigned", "A task has been assigned to you", """
+            <p style="font-size:15px;color:#374151;line-height:1.8;">
+                Dear <strong>%s</strong>,
+            </p>
+            <p style="font-size:15px;color:#374151;line-height:1.8;">
+                A new task has been assigned to you. Please review the details below and
+                start working on it as soon as possible.
+            </p>
+            %s
+            <p style="font-size:15px;color:#374151;line-height:1.8;">
+                If you need clarification, please contact your Team Leader.
+            </p>
+            %s
+            """.formatted(name,
+                infoGrid(new String[][]{
+                    {"Task Title", taskTitle},
+                    {"What to do", description},
+                    {"Project", projectName},
+                    {"Priority", priorityLabel},
+                    {"Start Date", start},
+                    {"Due Date", due},
+                    {"Assigned By", assignedByValue}
+                }),
+                actionButton("Open My Tasks", frontendUrl + "/employee/tasks", "#2563EB")));
     }
 
     // ═══════════════════════════════════════════════════════════════════

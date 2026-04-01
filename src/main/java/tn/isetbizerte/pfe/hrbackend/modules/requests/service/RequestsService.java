@@ -1,11 +1,16 @@
 package tn.isetbizerte.pfe.hrbackend.modules.requests.service;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.security.access.AccessDeniedException;
 import tn.isetbizerte.pfe.hrbackend.common.enums.*;
 import tn.isetbizerte.pfe.hrbackend.common.exception.BadRequestException;
 import tn.isetbizerte.pfe.hrbackend.common.exception.ResourceNotFoundException;
 import tn.isetbizerte.pfe.hrbackend.common.exception.UnauthorizedException;
+import tn.isetbizerte.pfe.hrbackend.common.event.RequestEvent;
+import tn.isetbizerte.pfe.hrbackend.infrastructure.kafka.producer.RequestEventProducer;
+import tn.isetbizerte.pfe.hrbackend.modules.history.service.RequestHistoryService;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.entity.*;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.repository.*;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
@@ -18,8 +23,11 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 @Service
+@Slf4j
 public class RequestsService {
 
     private final DocumentRequestRepository      documentRepo;
@@ -29,6 +37,8 @@ public class RequestsService {
     private final PersonRepository               personRepository;
     private final LoanScoreEngine                loanScoreEngine;
     private final HREmailService                 emailService;
+    private final RequestEventProducer           requestEventProducer;
+    private final RequestHistoryService          historyService;
 
     public RequestsService(DocumentRequestRepository documentRepo,
                            LoanRequestRepository loanRepo,
@@ -36,7 +46,9 @@ public class RequestsService {
                            UserRepository userRepository,
                            PersonRepository personRepository,
                            LoanScoreEngine loanScoreEngine,
-                           HREmailService emailService) {
+                           HREmailService emailService,
+                           RequestEventProducer requestEventProducer,
+                           RequestHistoryService historyService) {
         this.documentRepo     = documentRepo;
         this.loanRepo         = loanRepo;
         this.authRepo         = authRepo;
@@ -44,6 +56,8 @@ public class RequestsService {
         this.personRepository = personRepository;
         this.loanScoreEngine  = loanScoreEngine;
         this.emailService     = emailService;
+        this.requestEventProducer  = requestEventProducer;
+        this.historyService   = historyService;
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -58,31 +72,59 @@ public class RequestsService {
         req.setDocumentType(DocumentType.valueOf(documentType));
         req.setNotes(notes);
         documentRepo.save(req);
+        historyService.record(
+                "DOCUMENT",
+                "CREATED",
+                req.getId(),
+                req.getUser().getKeycloakId(),
+                req.getNotes()
+        );
         return mapDocument(req);
     }
 
-    public List<Map<String, Object>> getMyDocumentRequests(String username) {
+    public Page<Map<String, Object>> getMyDocumentRequests(String username, Pageable pageable) {
         User user = getUser(username);
-        return documentRepo.findByUserOrderByRequestedAtDesc(user)
-                .stream().map(this::mapDocument).collect(Collectors.toList());
+        return documentRepo.findByUserOrderByRequestedAtDesc(user, pageable)
+                .map(this::mapDocument);
     }
 
-    public List<Map<String, Object>> getAllDocumentRequests() {
-        return documentRepo.findAllByOrderByRequestedAtDesc()
-                .stream().map(this::mapDocument).collect(Collectors.toList());
+    public Page<Map<String, Object>> getAllDocumentRequests(Pageable pageable) {
+        return documentRepo.findAllByOrderByRequestedAtDesc(pageable)
+                .map(this::mapDocument);
     }
 
     @Transactional
-    public Map<String, Object> decideDocument(Long id, boolean approve, String hrNote) {
+    public Map<String, Object> decideDocument(Long id, boolean approve, String hrNote, String decidedByKeycloakId) {
         DocumentRequest req = documentRepo.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Document request not found: " + id));
         if (req.getStatus() != RequestStatus.PENDING)
             throw new BadRequestException("Request already " + req.getStatus().name().toLowerCase());
         req.setStatus(approve ? RequestStatus.APPROVED : RequestStatus.REJECTED);
         req.setHrNote(hrNote);
+        if (approve) req.setApprovedBy(decidedByKeycloakId);
+        else req.setRejectedBy(decidedByKeycloakId);
         req.setProcessedAt(LocalDateTime.now());
         if (approve) req.setVerificationToken(UUID.randomUUID().toString());
         documentRepo.save(req);
+        log.info("Document {} by HR. requestId={} actorId={}",
+                approve ? "approved" : "rejected", req.getId(), decidedByKeycloakId);
+        historyService.record(
+                "DOCUMENT",
+                approve ? "HR_APPROVED" : "HR_REJECTED",
+                req.getId(),
+                decidedByKeycloakId,
+                hrNote
+        );
+        requestEventProducer.publish(
+                new RequestEvent(
+                        approve ? "DOCUMENT_APPROVED" : "DOCUMENT_REJECTED",
+                        "DOCUMENT",
+                        req.getId(),
+                        req.getUser().getKeycloakId(),
+                        decidedByKeycloakId,
+                        hrNote
+                )
+        );
         return mapDocument(req);
     }
 
@@ -91,14 +133,14 @@ public class RequestsService {
     // ─────────────────────────────────────────────────────────────
 
     @Transactional
-    public Map<String, Object> createLoanRequest(String username, String loanType,
+    public Map<String, Object> createLoanRequest(String username, LoanType loanType,
                                                   BigDecimal amount, int repaymentMonths, String reason) {
         User user = getUser(username);
         validateLoanEligibility(user, amount);
 
         LoanRequest req = new LoanRequest();
         req.setUser(user);
-        req.setLoanType(LoanType.valueOf(loanType));
+        req.setLoanType(loanType);
         req.setAmount(amount);
         req.setRepaymentMonths(repaymentMonths);
         req.setReason(reason);
@@ -114,6 +156,13 @@ public class RequestsService {
         }
 
         loanRepo.save(req);
+        historyService.record(
+                "LOAN",
+                "CREATED",
+                req.getId(),
+                req.getUser().getKeycloakId(),
+                req.getReason()
+        );
         return mapLoan(req);
     }
 
@@ -209,25 +258,27 @@ public class RequestsService {
         return result;
     }
 
-    public List<Map<String, Object>> getMyLoanRequests(String username) {
+    public Page<Map<String, Object>> getMyLoanRequests(String username, Pageable pageable) {
         User user = getUser(username);
-        return loanRepo.findByUserOrderByRequestedAtDesc(user)
-                .stream().map(this::mapLoan).collect(Collectors.toList());
+        return loanRepo.findByUserOrderByRequestedAtDesc(user, pageable)
+                .map(this::mapLoan);
     }
 
-    public List<Map<String, Object>> getAllLoanRequests() {
-        return loanRepo.findAllByOrderByRequestedAtDesc()
-                .stream().map(this::mapLoan).collect(Collectors.toList());
+    public Page<Map<String, Object>> getAllLoanRequests(Pageable pageable) {
+        return loanRepo.findAllByOrderByRequestedAtDesc(pageable)
+                .map(this::mapLoan);
     }
 
     @Transactional
-    public Map<String, Object> decideLoan(Long id, boolean approve, String hrNote) {
+    public Map<String, Object> decideLoan(Long id, boolean approve, String hrNote, String decidedByKeycloakId) {
         LoanRequest req = loanRepo.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Loan request not found: " + id));
         if (req.getStatus() != RequestStatus.PENDING)
             throw new BadRequestException("Request already " + req.getStatus().name().toLowerCase());
         req.setStatus(approve ? RequestStatus.APPROVED : RequestStatus.REJECTED);
         req.setHrNote(hrNote);
+        if (approve) req.setApprovedBy(decidedByKeycloakId);
+        else req.setRejectedBy(decidedByKeycloakId);
         req.setProcessedAt(LocalDateTime.now());
         if (approve) {
             req.setVerificationToken(UUID.randomUUID().toString());
@@ -242,6 +293,25 @@ public class RequestsService {
             }
         }
         loanRepo.save(req);
+        log.info("Loan {} by HR. requestId={} actorId={}",
+                approve ? "approved" : "rejected", req.getId(), decidedByKeycloakId);
+        historyService.record(
+                "LOAN",
+                approve ? "HR_APPROVED" : "HR_REJECTED",
+                req.getId(),
+                decidedByKeycloakId,
+                hrNote
+        );
+        requestEventProducer.publish(
+                new RequestEvent(
+                        approve ? "LOAN_APPROVED" : "LOAN_REJECTED",
+                        "LOAN",
+                        req.getId(),
+                        req.getUser().getKeycloakId(),
+                        decidedByKeycloakId,
+                        hrNote
+                )
+        );
         // Send email notification
         sendLoanDecisionEmail(req, approve);
         return mapLoan(req);
@@ -268,6 +338,7 @@ public class RequestsService {
             }
         } catch (Exception e) {
             // Email failure must never break the main flow
+            log.error("Failed to send loan decision email. requestId={}", req.getId(), e);
         }
     }
 
@@ -286,31 +357,59 @@ public class RequestsService {
         req.setEndDate(endDate);
         req.setReason(reason);
         authRepo.save(req);
+        historyService.record(
+                "AUTH",
+                "CREATED",
+                req.getId(),
+                req.getUser().getKeycloakId(),
+                req.getReason()
+        );
         return mapAuth(req);
     }
 
-    public List<Map<String, Object>> getMyAuthRequests(String username) {
+    public Page<Map<String, Object>> getMyAuthRequests(String username, Pageable pageable) {
         User user = getUser(username);
-        return authRepo.findByUserOrderByRequestedAtDesc(user)
-                .stream().map(this::mapAuth).collect(Collectors.toList());
+        return authRepo.findByUserOrderByRequestedAtDesc(user, pageable)
+                .map(this::mapAuth);
     }
 
-    public List<Map<String, Object>> getAllAuthRequests() {
-        return authRepo.findAllByOrderByRequestedAtDesc()
-                .stream().map(this::mapAuth).collect(Collectors.toList());
+    public Page<Map<String, Object>> getAllAuthRequests(Pageable pageable) {
+        return authRepo.findAllByOrderByRequestedAtDesc(pageable)
+                .map(this::mapAuth);
     }
 
     @Transactional
-    public Map<String, Object> decideAuth(Long id, boolean approve, String hrNote) {
+    public Map<String, Object> decideAuth(Long id, boolean approve, String hrNote, String decidedByKeycloakId) {
         AuthorizationRequest req = authRepo.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Authorization request not found: " + id));
         if (req.getStatus() != RequestStatus.PENDING)
             throw new BadRequestException("Request already " + req.getStatus().name().toLowerCase());
         req.setStatus(approve ? RequestStatus.APPROVED : RequestStatus.REJECTED);
         req.setHrNote(hrNote);
+        if (approve) req.setApprovedBy(decidedByKeycloakId);
+        else req.setRejectedBy(decidedByKeycloakId);
         req.setProcessedAt(LocalDateTime.now());
         if (approve) req.setVerificationToken(UUID.randomUUID().toString());
         authRepo.save(req);
+        log.info("Authorization {} by HR. requestId={} actorId={}",
+                approve ? "approved" : "rejected", req.getId(), decidedByKeycloakId);
+        historyService.record(
+                "AUTH",
+                approve ? "HR_APPROVED" : "HR_REJECTED",
+                req.getId(),
+                decidedByKeycloakId,
+                hrNote
+        );
+        requestEventProducer.publish(
+                new RequestEvent(
+                        approve ? "AUTH_APPROVED" : "AUTH_REJECTED",
+                        "AUTH",
+                        req.getId(),
+                        req.getUser().getKeycloakId(),
+                        decidedByKeycloakId,
+                        hrNote
+                )
+        );
         return mapAuth(req);
     }
 
@@ -323,8 +422,7 @@ public class RequestsService {
                 .orElseThrow(() -> new ResourceNotFoundException("Document request not found: " + id));
         if (req.getStatus() != RequestStatus.APPROVED)
             throw new BadRequestException("PDF only available for approved requests.");
-        validateOwnerOrHR(req.getUser().getKeycloakId(), requesterKeycloakId,
-                req.getUser().getRole() == TypeRole.HR_MANAGER);
+        validateOwnerOrHR(req.getUser().getKeycloakId(), requesterKeycloakId);
         return req;
     }
 
@@ -333,8 +431,7 @@ public class RequestsService {
                 .orElseThrow(() -> new ResourceNotFoundException("Loan request not found: " + id));
         if (req.getStatus() != RequestStatus.APPROVED)
             throw new BadRequestException("PDF only available for approved requests.");
-        validateOwnerOrHR(req.getUser().getKeycloakId(), requesterKeycloakId,
-                req.getUser().getRole() == TypeRole.HR_MANAGER);
+        validateOwnerOrHR(req.getUser().getKeycloakId(), requesterKeycloakId);
         return req;
     }
 
@@ -343,8 +440,7 @@ public class RequestsService {
                 .orElseThrow(() -> new ResourceNotFoundException("Authorization request not found: " + id));
         if (req.getStatus() != RequestStatus.APPROVED)
             throw new BadRequestException("PDF only available for approved requests.");
-        validateOwnerOrHR(req.getUser().getKeycloakId(), requesterKeycloakId,
-                req.getUser().getRole() == TypeRole.HR_MANAGER);
+        validateOwnerOrHR(req.getUser().getKeycloakId(), requesterKeycloakId);
         return req;
     }
 
@@ -352,9 +448,13 @@ public class RequestsService {
     // HELPERS
     // ─────────────────────────────────────────────────────────────
 
-    private void validateOwnerOrHR(String ownerKeycloakId, String requesterKeycloakId, boolean isHR) {
-        if (!isHR && !ownerKeycloakId.equals(requesterKeycloakId))
-            throw new UnauthorizedException("You can only download your own documents.");
+    private void validateOwnerOrHR(String ownerKeycloakId, String requesterKeycloakId) {
+        User requester = userRepository.findByKeycloakId(requesterKeycloakId)
+                .orElseThrow(() -> new ResourceNotFoundException("Requester user not found"));
+        boolean isHR = requester.getRole() == TypeRole.HR_MANAGER;
+        if (!isHR && !ownerKeycloakId.equals(requesterKeycloakId)) {
+            throw new AccessDeniedException("You can only download your own documents.");
+        }
     }
 
     private User getUser(String username) {
@@ -376,6 +476,8 @@ public class RequestsService {
         m.put("documentTypeLabel", fmt(r.getDocumentType().name()));
         m.put("notes",        r.getNotes());
         m.put("status",       r.getStatus().name());
+        m.put("approvedBy",   r.getApprovedBy());
+        m.put("rejectedBy",   r.getRejectedBy());
         m.put("hrNote",       r.getHrNote());
         m.put("requestedAt",  r.getRequestedAt());
         m.put("processedAt",  r.getProcessedAt());
@@ -393,6 +495,8 @@ public class RequestsService {
         m.put("repaymentMonths", r.getRepaymentMonths());
         m.put("reason",          r.getReason());
         m.put("status",          r.getStatus().name());
+        m.put("approvedBy",      r.getApprovedBy());
+        m.put("rejectedBy",      r.getRejectedBy());
         m.put("hrNote",          r.getHrNote());
         m.put("requestedAt",     r.getRequestedAt());
         m.put("processedAt",     r.getProcessedAt());
@@ -422,6 +526,8 @@ public class RequestsService {
         m.put("endDate",           r.getEndDate());
         m.put("reason",            r.getReason());
         m.put("status",            r.getStatus().name());
+        m.put("approvedBy",        r.getApprovedBy());
+        m.put("rejectedBy",        r.getRejectedBy());
         m.put("hrNote",            r.getHrNote());
         m.put("requestedAt",       r.getRequestedAt());
         m.put("processedAt",       r.getProcessedAt());
@@ -430,3 +536,9 @@ public class RequestsService {
         return m;
     }
 }
+
+
+
+
+
+

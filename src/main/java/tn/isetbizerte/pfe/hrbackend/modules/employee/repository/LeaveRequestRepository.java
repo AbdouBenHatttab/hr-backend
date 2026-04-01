@@ -2,6 +2,8 @@ package tn.isetbizerte.pfe.hrbackend.modules.employee.repository;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 import tn.isetbizerte.pfe.hrbackend.common.enums.LeaveStatus;
@@ -28,6 +30,7 @@ public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, Long
     Optional<LeaveRequest> findByVerificationToken(String verificationToken);
 
     List<LeaveRequest> findByUser(User user);
+    Page<LeaveRequest> findByUser(User user, Pageable pageable);
     List<LeaveRequest> findByStatus(LeaveStatus status);
     List<LeaveRequest> findByUserAndStatus(User user, LeaveStatus status);
 
@@ -40,7 +43,7 @@ public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, Long
            "JOIN FETCH u.person " +
            "WHERE u.team.id = :teamId " +
            "AND lr.status = 'PENDING'")
-    List<LeaveRequest> findPendingByTeamId(@Param("teamId") Long teamId);
+    Page<LeaveRequest> findPendingByTeamId(@Param("teamId") Long teamId, Pageable pageable);
 
     /**
      * Get all leave requests (any status) for employees in a specific team.
@@ -49,7 +52,7 @@ public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, Long
            "JOIN FETCH lr.user u " +
            "JOIN FETCH u.person " +
            "WHERE u.team.id = :teamId")
-    List<LeaveRequest> findAllByTeamId(@Param("teamId") Long teamId);
+    Page<LeaveRequest> findAllByTeamId(@Param("teamId") Long teamId, Pageable pageable);
 
     /**
      * Count APPROVED/PENDING leaves for a team that overlap with [start, end].
@@ -92,4 +95,3 @@ public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, Long
     double avgLeaveDaysPerTeamMember(@Param("teamId") Long teamId,
                                      @Param("since")   java.time.LocalDate since);
 }
-

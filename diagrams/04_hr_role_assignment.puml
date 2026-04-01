@@ -1,0 +1,151 @@
+@startuml HR_RoleAssignment
+title HR Manager — Role Assignment & User Management Flow
+
+skinparam sequenceArrowThickness 2
+skinparam roundcorner 8
+skinparam backgroundColor #FAFAFA
+skinparam sequence {
+  LifeLineBorderColor #1a6faf
+  ActorBorderColor #1a6faf
+  ParticipantBackgroundColor #EAF2FF
+  ParticipantBorderColor #1a6faf
+}
+
+actor       "HR Manager (Frontend)"  as HR
+participant "HRController"           as HC  #EAF2FF
+participant "HRService"              as HS  #EAF2FF
+participant "UserService"            as US  #EAF2FF
+participant "KeycloakAdminService"   as KAS #EAF2FF
+participant "Keycloak Admin API"     as KA  #FFF3E0
+participant "KafkaEventProducer"     as KP  #FFF8E1
+participant "Kafka Broker"           as KB  #FFF3CD
+participant "UserRoleEventConsumer"  as EC  #FFF8E1
+participant "EmailNotificationService" as EN #EAF2FF
+database    "PostgreSQL"             as DB  #E8F5E9
+
+== View Pending Users ==
+
+HR -> HC  : GET /api/hr/pending-approvals\nAuthorization: Bearer <HR_JWT>
+activate HC
+HC -> HS  : getPendingApprovals()
+activate HS
+HS -> US  : getUsersByRole(NEW_USER)
+activate US
+US -> DB  : SELECT users WHERE role='NEW_USER'
+activate DB
+DB --> US : List<User>
+deactivate DB
+US --> HS : List<User>
+deactivate US
+HS --> HC : List<Map> { id, username,\n  fullName, email, registrationDate }
+deactivate HS
+HC --> HR : 200 OK { pendingUsers: [...] }
+deactivate HC
+
+== View All Users ==
+
+HR -> HC  : GET /api/hr/users
+activate HC
+HC -> HS  : getAllUsersWithDetails()
+activate HS
+HS -> US  : getAllUsers()
+activate US
+US -> DB  : SELECT * FROM users\nJOIN persons ON user.person_id
+DB --> US : List<User>
+deactivate US
+HS --> HC : List<Map> with personalInfo nested
+deactivate HS
+HC --> HR : 200 OK { users: [...] }
+deactivate HC
+
+== Assign Role to User ==
+
+HR -> HC  : POST /api/hr/assign-role\n{ userId: 5, role: "EMPLOYEE" }
+activate HC
+HC -> HS  : assignRoleToUser(userId, role, assignedBy)
+activate HS
+
+HS -> US  : findById(userId)
+activate US
+US -> DB  : SELECT * FROM users WHERE id=5
+DB --> US : User { keycloakId, role:NEW_USER }
+deactivate US
+
+alt User not found
+    HS --> HC : throws ResourceNotFoundException
+    HC --> HR : 404 Not Found
+else Invalid role string
+    HS --> HC : throws BadRequestException
+    HC --> HR : 400 Bad Request
+else Valid
+    HS -> KAS : assignRoleToUser(keycloakId, "EMPLOYEE")
+    activate KAS
+
+    KAS -> KA : GET realm roles (find EMPLOYEE role)
+    activate KA
+    KA --> KAS : RoleRepresentation
+    deactivate KA
+
+    KAS -> KA : GET user current roles
+    activate KA
+    KA --> KAS : [ NEW_USER, default-roles-... ]
+    deactivate KA
+
+    KAS -> KA : DELETE old app roles\n(EMPLOYEE/TEAM_LEADER/HR_MANAGER/NEW_USER)
+    activate KA
+    KA --> KAS : 204
+    deactivate KA
+
+    KAS -> KA : POST assign EMPLOYEE role
+    activate KA
+    KA --> KAS : 204
+    deactivate KA
+
+    KAS --> HS : true
+    deactivate KAS
+
+    HS -> US  : saveUser(user)\n(role=EMPLOYEE, active=true)
+    activate US
+    US -> DB  : UPDATE users SET\n  role='EMPLOYEE', active=true\n  WHERE id=5
+    DB --> US : saved
+    deactivate US
+
+    HS -> KP  : publishUserRoleAssignedEvent\n(UserRoleAssignedEvent)
+    activate KP
+    KP -> KB  : send to "user-role-assigned"\n{ userId, username, email,\n  firstName, lastName,\n  oldRole, newRole, assignedBy }
+    KB --> KP : ack
+    deactivate KP
+
+    HS --> HC : AssignRoleResponse {\n  success:true,\n  userId, username,\n  oldRole:"NEW_USER",\n  newRole:"EMPLOYEE",\n  note:"User must re-login" }
+end
+deactivate HS
+HC --> HR : 200 OK AssignRoleResponse
+deactivate HC
+
+== Async: Email Notification ==
+
+KB -> EC  : consume "user-role-assigned"
+activate EC
+EC -> EN  : sendRoleAssignmentNotification\n(UserRoleAssignedEvent)
+activate EN
+EN --> "User Email" : 📧 Welcome email\n(HTML, includes login URL)
+deactivate EN
+deactivate EC
+
+== View Login History ==
+
+HR -> HC  : GET /api/hr/login-history
+activate HC
+HC -> HS  : getLoginHistory()
+activate HS
+HS -> US  : getAllLoginHistory()
+activate US
+US -> DB  : SELECT * FROM login_history\nJOIN users
+DB --> US : List<LoginHistory>
+deactivate US
+HS --> HC : List<Map> { id, loginDate,\n  userId, username }
+deactivate HS
+HC --> HR : 200 OK { loginHistory: [...] }
+deactivate HC
+
+@enduml

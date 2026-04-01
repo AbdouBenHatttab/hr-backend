@@ -101,6 +101,19 @@ public class TaskController {
         return ResponseEntity.ok(res);
     }
 
+    /** GET /api/employee/tasks/{taskId} — get details for one task */
+    @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER')")
+    @GetMapping("/api/employee/tasks/{taskId}")
+    public ResponseEntity<Map<String, Object>> getMyTaskById(
+            @PathVariable Long taskId,
+            @AuthenticationPrincipal Jwt jwt) {
+        String username = jwt.getClaimAsString("preferred_username");
+        Map<String, Object> res = new HashMap<>();
+        res.put("success", true);
+        res.put("data", taskService.getMyTaskById(username, taskId));
+        return ResponseEntity.ok(res);
+    }
+
     /** PATCH /api/employee/tasks/{taskId}/status — employee updates own task status */
     @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER')")
     @PatchMapping("/api/employee/tasks/{taskId}/status")

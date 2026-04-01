@@ -1,6 +1,9 @@
 package tn.isetbizerte.pfe.hrbackend.modules.hr.controller;
 
 import org.springframework.http.ResponseEntity;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
@@ -38,15 +41,22 @@ public class HRController {
      * Get all users with their personal information
      */
     @GetMapping("/users")
-    public Map<String, Object> getAllUsers(@AuthenticationPrincipal Jwt jwt) {
+    public Map<String, Object> getAllUsers(
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
         Map<String, Object> response = new HashMap<>();
 
-        List<Map<String, Object>> users = hrService.getAllUsersWithDetails();
+        Pageable pageable = PageRequest.of(page, size);
+        Page<Map<String, Object>> users = hrService.getAllUsersWithDetails(pageable);
 
         response.put("message", "All users retrieved successfully");
         response.put("requestedBy", jwt.getClaimAsString("preferred_username"));
-        response.put("totalCount", users.size());
-        response.put("users", users);
+        response.put("totalCount", users.getTotalElements());
+        response.put("totalPages", users.getTotalPages());
+        response.put("page", page);
+        response.put("size", size);
+        response.put("users", users.getContent());
 
         return response;
     }
@@ -55,15 +65,22 @@ public class HRController {
      * Get all login history (simplified: date/time, id, username only)
      */
     @GetMapping("/login-history")
-    public Map<String, Object> getLoginHistory(@AuthenticationPrincipal Jwt jwt) {
+    public Map<String, Object> getLoginHistory(
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
         Map<String, Object> response = new HashMap<>();
 
-        List<Map<String, Object>> historyList = hrService.getLoginHistory();
+        Pageable pageable = PageRequest.of(page, size);
+        Page<Map<String, Object>> historyList = hrService.getLoginHistory(pageable);
 
         response.put("message", "Login history retrieved successfully");
         response.put("requestedBy", jwt.getClaimAsString("preferred_username"));
-        response.put("totalCount", historyList.size());
-        response.put("loginHistory", historyList);
+        response.put("totalCount", historyList.getTotalElements());
+        response.put("totalPages", historyList.getTotalPages());
+        response.put("page", page);
+        response.put("size", size);
+        response.put("loginHistory", historyList.getContent());
 
         return response;
     }
@@ -72,17 +89,24 @@ public class HRController {
      * Get users waiting for role assignment (NEW_USER role only)
      */
     @GetMapping("/pending-approvals")
-    public Map<String, Object> getPendingApprovals(@AuthenticationPrincipal Jwt jwt) {
+    public Map<String, Object> getPendingApprovals(
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
         Map<String, Object> response = new HashMap<>();
 
-        List<Map<String, Object>> pendingUsers = hrService.getPendingApprovals();
+        Pageable pageable = PageRequest.of(page, size);
+        Page<Map<String, Object>> pendingUsers = hrService.getPendingApprovals(pageable);
 
         response.put("message", "Pending role assignments");
         response.put("note", "These users have NEW_USER role and are waiting for HR Manager to assign EMPLOYEE or TEAM_LEADER role");
         response.put("requestedBy", jwt.getClaimAsString("preferred_username"));
         response.put("instructions", "Use POST /api/hr/assign-role endpoint to assign roles");
-        response.put("totalCount", pendingUsers.size());
-        response.put("pendingUsers", pendingUsers);
+        response.put("totalCount", pendingUsers.getTotalElements());
+        response.put("totalPages", pendingUsers.getTotalPages());
+        response.put("page", page);
+        response.put("size", size);
+        response.put("pendingUsers", pendingUsers.getContent());
 
         return response;
     }

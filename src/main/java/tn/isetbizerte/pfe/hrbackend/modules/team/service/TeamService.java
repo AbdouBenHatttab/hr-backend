@@ -17,6 +17,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.PageImpl;
 
 @Service
 public class TeamService {
@@ -90,6 +93,37 @@ public class TeamService {
                 return null;
             }
         }).filter(t -> t != null).collect(Collectors.toList());
+    }
+
+    /** HR views all teams with pagination. */
+    public Page<Map<String, Object>> getAllTeams(Pageable pageable) {
+        Page<Team> page = teamRepository.findAll(pageable);
+        List<Long> ids = page.getContent().stream()
+                .map(Team::getId)
+                .collect(Collectors.toList());
+
+        List<Map<String, Object>> content = ids.stream().map(id -> {
+            try {
+                Team withLeader  = teamRepository.findByIdWithDetails(id).orElse(null);
+                Team withMembers = teamRepository.findByIdWithMembers(id).orElse(null);
+
+                if (withLeader == null && withMembers == null) return null;
+
+                Team base = withLeader != null ? withLeader : withMembers;
+                User leader = withLeader != null ? withLeader.getTeamLeader() : null;
+                List<User> members = withMembers != null && withMembers.getMembers() != null
+                        ? withMembers.getMembers()
+                        : List.of();
+
+                return buildTeamResponse(base.getId(), base.getName(), base.getDescription(),
+                        base.getCreatedAt(), leader, members);
+            } catch (Exception e) {
+                logger.error("Error loading team {}: {}", id, e.getMessage());
+                return null;
+            }
+        }).filter(t -> t != null).collect(Collectors.toList());
+
+        return new PageImpl<>(content, pageable, page.getTotalElements());
     }
 
     /** HR views a single team by ID. */

@@ -118,6 +118,13 @@
             <artifactId>spring-kafka</artifactId>
         </dependency>
 
+        <!-- Lombok for @Slf4j and boilerplate reduction -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <scope>provided</scope>
+        </dependency>
+
         <!-- ZXing — QR code generation for PDF verification -->
         <dependency>
             <groupId>com.google.zxing</groupId>

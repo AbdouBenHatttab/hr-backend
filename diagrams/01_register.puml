@@ -1,0 +1,78 @@
+@startuml Register
+title User Registration Flow
+
+skinparam sequenceArrowThickness 2
+skinparam roundcorner 8
+skinparam sequenceParticipant underline
+skinparam backgroundColor #FAFAFA
+skinparam sequence {
+  LifeLineBorderColor #1a6faf
+  ActorBorderColor #1a6faf
+  ParticipantBackgroundColor #EAF2FF
+  ParticipantBorderColor #1a6faf
+}
+
+actor       "Client (Frontend)"      as C
+participant "AuthController"         as AC  #EAF2FF
+participant "AuthService"            as AS  #EAF2FF
+participant "Keycloak Admin API"     as KC  #FFF3E0
+participant "UserService"            as US  #EAF2FF
+database    "PostgreSQL"             as DB  #E8F5E9
+
+C  -> AC  : POST /public/auth/register\n{ username, password, firstName,\n  lastName, email, phone, ... }
+
+activate AC
+AC -> AS  : registerUser(RegisterRequest)
+activate AS
+
+AS -> KC  : POST /realms/master/token\n{ admin credentials }
+activate KC
+KC --> AS : admin_access_token
+deactivate KC
+
+AS -> KC  : POST /admin/realms/hr-realm/users\n{ username, email, firstName, lastName,\n  credentials, enabled:true }
+activate KC
+alt User already exists
+    KC --> AS : 409 Conflict
+    AS --> AC : { success:false, message:"email/username already in use" }
+    AC --> C  : 400 Bad Request
+else Registration successful
+    KC --> AS : 201 Created (Location header)
+deactivate KC
+
+AS -> KC  : GET /admin/realms/hr-realm/users?username=...
+activate KC
+KC --> AS : [ { id: "keycloak-uuid", ... } ]
+deactivate KC
+
+AS -> US  : saveRegisteredUser(RegisterRequest, keycloakId)
+activate US
+
+US -> DB  : INSERT INTO persons\n(firstName, lastName, email, phone,\n birthDate, address, maritalStatus,\n numberOfChildren)
+activate DB
+DB --> US : Person saved
+deactivate DB
+
+US -> DB  : INSERT INTO users\n(keycloakId, username, role=NEW_USER,\n active=false, registrationDate=today)
+activate DB
+DB --> US : User saved
+deactivate DB
+
+US --> AS : saved
+deactivate US
+
+AS --> AC : { success:true, message:"User registered successfully",\n  username: "..." }
+end
+deactivate AS
+AC --> C  : 200 OK\n{ success:true, username, message }
+deactivate AC
+
+note right of C
+  User is created with:
+  • role = NEW_USER
+  • active = false
+  Must wait for HR Manager
+  to assign a real role.
+end note
+
+@enduml

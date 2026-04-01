@@ -6,9 +6,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tn.isetbizerte.pfe.hrbackend.common.enums.TaskStatus;
 import tn.isetbizerte.pfe.hrbackend.common.enums.TypeRole;
+import tn.isetbizerte.pfe.hrbackend.common.event.NotificationEvent;
 import tn.isetbizerte.pfe.hrbackend.common.exception.BadRequestException;
 import tn.isetbizerte.pfe.hrbackend.common.exception.ResourceNotFoundException;
 import tn.isetbizerte.pfe.hrbackend.common.exception.UnauthorizedException;
+import tn.isetbizerte.pfe.hrbackend.infrastructure.email.HREmailService;
+import tn.isetbizerte.pfe.hrbackend.infrastructure.kafka.producer.NotificationEventProducer;
+import tn.isetbizerte.pfe.hrbackend.modules.notification.service.NotificationService;
 import tn.isetbizerte.pfe.hrbackend.modules.task.dto.CreateProjectRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.task.dto.CreateTaskRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.task.entity.Project;
@@ -35,13 +39,22 @@ public class TaskService {
     private final TaskRepository    taskRepository;
     private final TeamRepository    teamRepository;
     private final UserRepository    userRepository;
+    private final NotificationEventProducer notificationEventProducer;
+    private final HREmailService hrEmailService;
+    private final NotificationService notificationService;
 
     public TaskService(ProjectRepository projectRepository, TaskRepository taskRepository,
-                       TeamRepository teamRepository, UserRepository userRepository) {
+                       TeamRepository teamRepository, UserRepository userRepository,
+                       NotificationEventProducer notificationEventProducer,
+                       HREmailService hrEmailService,
+                       NotificationService notificationService) {
         this.projectRepository = projectRepository;
         this.taskRepository    = taskRepository;
         this.teamRepository    = teamRepository;
         this.userRepository    = userRepository;
+        this.notificationEventProducer = notificationEventProducer;
+        this.hrEmailService = hrEmailService;
+        this.notificationService = notificationService;
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -110,6 +123,7 @@ public class TaskService {
         task.setProject(project);
         task.setAssignee(assignee);
         taskRepository.save(task);
+        notifyAssigneeOfTaskAssignment(task, assignee, leaderKeycloakId);
         logger.info("Task '{}' created in project '{}'", task.getTitle(), project.getName());
         return mapTask(task);
     }
@@ -137,6 +151,19 @@ public class TaskService {
                 .orElseThrow(() -> new ResourceNotFoundException("User not found: " + username));
         return taskRepository.findByAssigneeId(user.getId())
                 .stream().map(this::mapTask).collect(Collectors.toList());
+    }
+
+    public Map<String, Object> getMyTaskById(String username, Long taskId) {
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found: " + username));
+        Task task = taskRepository.findById(taskId)
+                .orElseThrow(() -> new ResourceNotFoundException("Task not found: " + taskId));
+
+        if (task.getAssignee() == null || !task.getAssignee().getId().equals(user.getId())) {
+            throw new UnauthorizedException("You can only view your own tasks.");
+        }
+
+        return mapTask(task);
     }
 
     @Transactional
@@ -170,6 +197,89 @@ public class TaskService {
     private Team getTeamByLeader(String keycloakId) {
         return teamRepository.findByTeamLeaderKeycloakId(keycloakId)
                 .orElseThrow(() -> new ResourceNotFoundException("No team assigned to this Team Leader."));
+    }
+
+    private void notifyAssigneeOfTaskAssignment(Task task, User assignee, String leaderKeycloakId) {
+        String assigneeKeycloakId = assignee.getKeycloakId();
+        String leaderName = resolveLeaderName(leaderKeycloakId);
+
+        String notificationMessage = String.format(
+                "New task assigned: %s (Project: %s, Priority: %s, Start: %s, Due: %s)",
+                task.getTitle(),
+                task.getProject().getName(),
+                task.getPriority().name(),
+                task.getStartDate() != null ? task.getStartDate().toString() : "No start date",
+                task.getDueDate() != null ? task.getDueDate().toString() : "No due date"
+        );
+
+        try {
+            notificationEventProducer.publish(
+                    new NotificationEvent(
+                            assigneeKeycloakId,
+                            notificationMessage,
+                            "TASK_ASSIGNED",
+                            "TASK",
+                            task.getId(),
+                            "/employee/tasks?taskId=" + task.getId()
+                    )
+            );
+            logger.info("Task assignment notification sent for taskId={} to userId={}",
+                    task.getId(), assigneeKeycloakId);
+        } catch (Exception e) {
+            logger.error("Failed to publish task assignment notification for taskId={}",
+                    task.getId(), e);
+            // Fallback to direct persistence when Kafka is unavailable
+            try {
+                notificationService.createNotification(
+                        assigneeKeycloakId,
+                        notificationMessage,
+                        "TASK_ASSIGNED",
+                        "TASK",
+                        task.getId(),
+                        "/employee/tasks?taskId=" + task.getId()
+                );
+                logger.info("Task assignment notification persisted directly for taskId={} to userId={}",
+                        task.getId(), assigneeKeycloakId);
+            } catch (Exception fallbackEx) {
+                logger.error("Failed direct notification fallback for taskId={}", task.getId(), fallbackEx);
+            }
+        }
+
+        try {
+            if (assignee.getPerson() != null && assignee.getPerson().getEmail() != null
+                    && !assignee.getPerson().getEmail().isBlank()) {
+                hrEmailService.sendTaskAssigned(
+                        assignee.getPerson().getEmail(),
+                        assignee.getPerson().getFirstName(),
+                        assignee.getPerson().getLastName(),
+                        task.getTitle(),
+                        task.getProject().getName(),
+                        task.getDescription(),
+                        task.getPriority().name(),
+                        task.getStartDate(),
+                        task.getDueDate(),
+                        leaderName
+                );
+                logger.info("Task assignment email sent for taskId={} to {}",
+                        task.getId(), assignee.getPerson().getEmail());
+            } else {
+                logger.warn("Task assignment email skipped (missing assignee email) for taskId={}",
+                        task.getId());
+            }
+        } catch (Exception e) {
+            logger.error("Failed to send task assignment email for taskId={}", task.getId(), e);
+        }
+    }
+
+    private String resolveLeaderName(String leaderKeycloakId) {
+        return userRepository.findByKeycloakId(leaderKeycloakId)
+                .map(leader -> {
+                    if (leader.getPerson() != null) {
+                        return leader.getPerson().getFirstName() + " " + leader.getPerson().getLastName();
+                    }
+                    return leader.getUsername();
+                })
+                .orElse("Team Leader");
     }
 
     private Map<String, Object> mapProject(Project p) {

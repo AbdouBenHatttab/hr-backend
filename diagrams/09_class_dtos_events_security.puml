@@ -1,0 +1,264 @@
+@startuml ClassDiagram_DTOs_Events
+title DTOs · Events · Security Classes
+skinparam classAttributeIconSize 0
+skinparam classFontSize 12
+skinparam classFontStyle bold
+skinparam classBackgroundColor #EAF2FF
+skinparam classBorderColor #1a6faf
+skinparam classArrowColor #555555
+skinparam packageBackgroundColor #F8FBFF
+skinparam packageBorderColor #1a6faf
+skinparam roundcorner 8
+skinparam shadowing false
+
+' ══════════════════════════════════════════════════════════════════
+' DTOs — AUTH
+' ══════════════════════════════════════════════════════════════════
+package "common.dto" #EAF2FF {
+
+    class LoginRequest {
+        - username : String
+        - password : String
+    }
+
+    class LoginResponse {
+        - success : boolean
+        - message : String
+        - accessToken : String
+        - refreshToken : String
+        - tokenType : String
+        - expiresIn : int
+        - username : String
+        - email : String
+        - roles : List<String>
+        --
+        + LoginResponse(errorMessage)
+        + LoginResponse(token, refresh, type,\n  expires, username, email, roles)
+    }
+
+    class RegisterRequest {
+        - username : String
+        - password : String
+        - firstName : String
+        - lastName : String
+        - email : String
+        - phone : String
+        - birthDate : LocalDate
+        - address : String
+        - maritalStatus : String
+        - numberOfChildren : int
+    }
+}
+
+' ══════════════════════════════════════════════════════════════════
+' DTOs — AUTH (password reset)
+' ══════════════════════════════════════════════════════════════════
+package "modules.auth.dto" #EAF2FF {
+
+    class ForgotPasswordRequest {
+        - email : String
+    }
+
+    class ResetPasswordRequest {
+        - token : String
+        - newPassword : String
+    }
+}
+
+' ══════════════════════════════════════════════════════════════════
+' DTOs — HR
+' ══════════════════════════════════════════════════════════════════
+package "modules.hr.dto" #EAF2FF {
+
+    class AssignRoleRequest {
+        - userId : Long
+        - role : String
+    }
+
+    class AssignRoleResponse {
+        - success : boolean
+        - message : String
+        - userId : Long
+        - username : String
+        - oldRole : String
+        - newRole : String
+        - assignedBy : String
+        - timestamp : LocalDateTime
+        - eventPublished : boolean
+        - note : String
+        --
+        + {static} builder() : AssignRoleResponseBuilder
+    }
+
+    class "AssignRoleResponse.AssignRoleResponseBuilder" as ARB {
+        + success(v) : Builder
+        + message(v) : Builder
+        + userId(v) : Builder
+        + username(v) : Builder
+        + oldRole(v) : Builder
+        + newRole(v) : Builder
+        + assignedBy(v) : Builder
+        + timestamp(v) : Builder
+        + eventPublished(v) : Builder
+        + note(v) : Builder
+        + build() : AssignRoleResponse
+    }
+
+    AssignRoleResponse +-- ARB
+}
+
+' ══════════════════════════════════════════════════════════════════
+' DTOs — LEAVE
+' ══════════════════════════════════════════════════════════════════
+package "modules.employee.dto" #EAF2FF {
+
+    class CreateLeaveRequestDto {
+        - leaveType : LeaveType  <<@NotNull>>
+        - startDate : LocalDate  <<@FutureOrPresent>>
+        - endDate : LocalDate    <<@FutureOrPresent>>
+        - numberOfDays : Integer <<@Positive>>
+        - reason : String        <<@Size(max=1000)>>
+    }
+
+    class LeaveRequestResponseDto {
+        - id : Long
+        - employeeFullName : String
+        - employeeEmail : String
+        - leaveType : LeaveType
+        - startDate : LocalDate
+        - endDate : LocalDate
+        - numberOfDays : Integer
+        - reason : String
+        - requestDate : LocalDateTime
+        - teamLeaderDecision : ApprovalDecision
+        - hrDecision : ApprovalDecision
+        - status : LeaveStatus
+        - approvalDate : LocalDate
+        - createdAt : LocalDateTime
+    }
+}
+
+' ══════════════════════════════════════════════════════════════════
+' EVENTS (Kafka messages)
+' ══════════════════════════════════════════════════════════════════
+package "common.event  <<Serializable>>" #FFF8E1 {
+
+    class UserRoleAssignedEvent {
+        - userId : Long
+        - username : String
+        - email : String
+        - firstName : String
+        - lastName : String
+        - oldRole : String
+        - newRole : String
+        - assignedBy : String
+        - timestamp : LocalDateTime
+    }
+
+    class PasswordResetEvent {
+        - email : String
+        - firstName : String
+        - lastName : String
+        - resetToken : String
+        - timestamp : LocalDateTime
+        - expiryTime : LocalDateTime
+    }
+}
+
+' ══════════════════════════════════════════════════════════════════
+' SECURITY
+' ══════════════════════════════════════════════════════════════════
+package "security" #FFE0B2 {
+
+    class SecurityConfig {
+        - keycloakRoleConverter : KeycloakRoleConverter
+        - corsConfigurationSource : CorsConfigurationSource
+        --
+        + securityFilterChain(http) : SecurityFilterChain
+        + jwtAuthenticationConverter() : JwtAuthenticationConverter
+    }
+
+    class KeycloakRoleConverter {
+        - userRepository : UserRepository
+        --
+        + convert(jwt : Jwt) : Collection<GrantedAuthority>
+        - extractRolesFromJwt(jwt) : Set<String>
+        - fallbackToDatabase(jwt) : Set<String>
+    }
+
+    class CorsConfig {
+        --
+        + corsConfigurationSource() : CorsConfigurationSource
+        ' Allowed origins: localhost:5173, 4173, 3000
+        ' Allowed methods: GET POST PUT DELETE OPTIONS
+    }
+}
+
+' ══════════════════════════════════════════════════════════════════
+' KAFKA INFRASTRUCTURE
+' ══════════════════════════════════════════════════════════════════
+package "infrastructure.kafka" #FFF3CD {
+
+    class KafkaEventProducer {
+        - kafkaTemplate : KafkaTemplate
+        - objectMapper : ObjectMapper
+        --
+        + publishUserRoleAssignedEvent(event) : void
+    }
+
+    class PasswordResetKafkaProducer {
+        - kafkaTemplate : KafkaTemplate
+        - objectMapper : ObjectMapper
+        --
+        + publishPasswordResetEvent(event) : void
+    }
+
+    class UserRoleEventConsumer {
+        - emailNotificationService : EmailNotificationService
+        - objectMapper : ObjectMapper
+        --
+        + handleUserRoleAssignedEvent(json) : void
+    }
+
+    class PasswordResetKafkaConsumer {
+        - passwordResetEmailService : PasswordResetEmailService
+        - objectMapper : ObjectMapper
+        --
+        + consumePasswordResetEvent(json) : void
+    }
+}
+
+' ══════════════════════════════════════════════════════════════════
+' RELATIONSHIPS
+' ══════════════════════════════════════════════════════════════════
+
+KafkaEventProducer        ..>  UserRoleAssignedEvent  : publishes
+PasswordResetKafkaProducer ..> PasswordResetEvent     : publishes
+UserRoleEventConsumer      ..>  UserRoleAssignedEvent  : consumes
+PasswordResetKafkaConsumer ..>  PasswordResetEvent     : consumes
+
+SecurityConfig             ..>  KeycloakRoleConverter
+
+note top of UserRoleAssignedEvent
+  Topic: "user-role-assigned"
+  Triggered by: HRService.assignRoleToUser()
+  Consumer sends welcome email via
+  EmailNotificationService
+end note
+
+note top of PasswordResetEvent
+  Topic: "password-reset"
+  Triggered by: PasswordResetService.initiatePasswordReset()
+  Consumer sends OTP email via
+  PasswordResetEmailService
+end note
+
+note right of KeycloakRoleConverter
+  1st: reads roles from JWT realm_access
+  2nd: fallback → DB lookup by keycloakId/username
+  3rd: defaults to NEW_USER
+  Adds "ROLE_" prefix to each role
+  (Spring Security convention)
+end note
+
+@enduml

@@ -14,6 +14,9 @@ public class DocumentRequest {
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Version
+    private Long version;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
@@ -29,6 +32,9 @@ public class DocumentRequest {
     @Column(nullable = false)
     private RequestStatus status = RequestStatus.PENDING;
 
+    private String approvedBy;
+    private String rejectedBy;
+
     private String hrNote;
 
     @Column(unique = true)
@@ -43,6 +49,9 @@ public class DocumentRequest {
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
 
+    public Long getVersion() { return version; }
+    public void setVersion(Long version) { this.version = version; }
+
     public User getUser() { return user; }
     public void setUser(User user) { this.user = user; }
 
@@ -54,6 +63,12 @@ public class DocumentRequest {
 
     public RequestStatus getStatus() { return status; }
     public void setStatus(RequestStatus status) { this.status = status; }
+
+    public String getApprovedBy() { return approvedBy; }
+    public void setApprovedBy(String approvedBy) { this.approvedBy = approvedBy; }
+
+    public String getRejectedBy() { return rejectedBy; }
+    public void setRejectedBy(String rejectedBy) { this.rejectedBy = rejectedBy; }
 
     public String getHrNote() { return hrNote; }
     public void setHrNote(String hrNote) { this.hrNote = hrNote; }

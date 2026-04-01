@@ -18,6 +18,9 @@ public class LeaveRequest {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Version
+    private Long version;
+
     @ManyToOne
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
@@ -65,6 +68,9 @@ public class LeaveRequest {
     @Column(length = 2000)
     private String  decisionReason;        // human-readable explanation
 
+    private String approvedBy;
+    private String rejectedBy;
+
     // Running total of leave days taken in last 12 months (updated on approval)
     // nullable=true so Hibernate can add this column to existing tables without failing
     @Column(nullable = true)
@@ -90,6 +96,14 @@ public class LeaveRequest {
 
     public void setId(Long id) {
         this.id = id;
+    }
+
+    public Long getVersion() {
+        return version;
+    }
+
+    public void setVersion(Long version) {
+        this.version = version;
     }
 
     public User getUser() {
@@ -205,6 +219,22 @@ public class LeaveRequest {
     public String getDecisionReason() { return decisionReason; }
     public void setDecisionReason(String decisionReason) { this.decisionReason = decisionReason; }
 
+    public String getApprovedBy() {
+        return approvedBy;
+    }
+
+    public void setApprovedBy(String approvedBy) {
+        this.approvedBy = approvedBy;
+    }
+
+    public String getRejectedBy() {
+        return rejectedBy;
+    }
+
+    public void setRejectedBy(String rejectedBy) {
+        this.rejectedBy = rejectedBy;
+    }
+
     public Integer getTotalLeaveTakenLast12Months() {
         return totalLeaveTakenLast12Months != null ? totalLeaveTakenLast12Months : 0;
     }
@@ -232,4 +262,3 @@ public class LeaveRequest {
         return "Unknown";
     }
 }
-

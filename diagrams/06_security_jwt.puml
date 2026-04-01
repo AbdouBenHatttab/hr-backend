@@ -1,0 +1,73 @@
+@startuml SecurityFilter
+title JWT Security & Role Verification Flow\n(applies to every protected endpoint)
+
+skinparam sequenceArrowThickness 2
+skinparam roundcorner 8
+skinparam backgroundColor #FAFAFA
+skinparam sequence {
+  LifeLineBorderColor #1a6faf
+  ActorBorderColor #1a6faf
+  ParticipantBackgroundColor #EAF2FF
+  ParticipantBorderColor #1a6faf
+}
+
+actor       "Client"                  as C
+participant "Spring Security Filter"  as SF  #FFE0B2
+participant "JwtDecoder"              as JD  #EAF2FF
+participant "KeycloakRoleConverter"   as KRC #EAF2FF
+database    "PostgreSQL"              as DB  #E8F5E9
+participant "Controller"              as CT  #EAF2FF
+
+C  -> SF  : HTTP Request\nAuthorization: Bearer <JWT>
+
+activate SF
+
+SF -> JD  : decode(token)
+activate JD
+
+alt Token missing or malformed
+    JD --> SF : throws JwtException
+    SF --> C  : 401 Unauthorized
+else Token valid
+    JD --> SF : Jwt { sub, preferred_username,\n  realm_access.roles, exp, ... }
+deactivate JD
+
+SF -> KRC : convert(Jwt) → GrantedAuthorities
+activate KRC
+
+alt realm_access.roles present in JWT
+    KRC --> SF : [ ROLE_EMPLOYEE, ... ]
+else No roles in JWT (fallback to DB)
+    KRC -> DB : findByKeycloakId(sub)\nor findByUsername(preferred_username)
+    activate DB
+    DB  --> KRC : User { role }
+    deactivate DB
+    KRC --> SF : [ ROLE_{user.role} ]
+end
+deactivate KRC
+
+note right of SF
+  SecurityConfig rules:
+  /public/**         → permitAll
+  /api/new-user/**   → ROLE_NEW_USER
+  /api/employee/**   → ROLE_EMPLOYEE,
+                       ROLE_TEAM_LEADER,
+                       ROLE_HR_MANAGER
+  /api/leader/**     → ROLE_TEAM_LEADER
+  /api/hr/**         → ROLE_HR_MANAGER
+  /api/reports/**    → any authenticated
+end note
+
+alt Insufficient role (403)
+    SF --> C  : 403 Forbidden
+else Role matches endpoint
+    SF -> CT  : forward request +\nAuthentication context
+    activate CT
+    CT --> SF : Response
+    deactivate CT
+    SF --> C  : 200 OK (or other success)
+end
+end
+deactivate SF
+
+@enduml

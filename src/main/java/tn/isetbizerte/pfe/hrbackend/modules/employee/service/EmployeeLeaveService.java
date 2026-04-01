@@ -1,7 +1,7 @@
 package tn.isetbizerte.pfe.hrbackend.modules.employee.service;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tn.isetbizerte.pfe.hrbackend.common.enums.ApprovalDecision;
@@ -14,6 +14,9 @@ import tn.isetbizerte.pfe.hrbackend.modules.employee.entity.LeaveRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.employee.repository.LeaveRequestRepository;
 import tn.isetbizerte.pfe.hrbackend.common.enums.TypeRole;
 import tn.isetbizerte.pfe.hrbackend.common.exception.UnauthorizedException;
+import tn.isetbizerte.pfe.hrbackend.common.event.RequestEvent;
+import tn.isetbizerte.pfe.hrbackend.infrastructure.kafka.producer.RequestEventProducer;
+import tn.isetbizerte.pfe.hrbackend.modules.history.service.RequestHistoryService;
 import tn.isetbizerte.pfe.hrbackend.modules.team.entity.Team;
 import tn.isetbizerte.pfe.hrbackend.modules.team.repository.TeamRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
@@ -25,13 +28,14 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
+@Slf4j
 public class EmployeeLeaveService {
-
-    private static final Logger logger = LoggerFactory.getLogger(EmployeeLeaveService.class);
     private static final int MAX_LEAVE_DAYS_PER_REQUEST = 30;
 
     private final LeaveRequestRepository leaveRequestRepository;
@@ -40,6 +44,8 @@ public class EmployeeLeaveService {
     private final PersonRepository        personRepository;
     private final LeaveScoreEngine        leaveScoreEngine;
     private final HREmailService          emailService;
+    private final RequestEventProducer    requestEventProducer;
+    private final RequestHistoryService   historyService;
 
     public EmployeeLeaveService(
             LeaveRequestRepository leaveRequestRepository,
@@ -47,7 +53,9 @@ public class EmployeeLeaveService {
             TeamRepository teamRepository,
             PersonRepository personRepository,
             LeaveScoreEngine leaveScoreEngine,
-            HREmailService emailService
+            HREmailService emailService,
+            RequestEventProducer requestEventProducer,
+            RequestHistoryService historyService
     ) {
         this.leaveRequestRepository = leaveRequestRepository;
         this.userRepository         = userRepository;
@@ -55,6 +63,8 @@ public class EmployeeLeaveService {
         this.personRepository       = personRepository;
         this.leaveScoreEngine       = leaveScoreEngine;
         this.emailService           = emailService;
+        this.requestEventProducer   = requestEventProducer;
+        this.historyService         = historyService;
     }
 
     /**
@@ -65,7 +75,7 @@ public class EmployeeLeaveService {
      */
     @Transactional
     public LeaveRequestResponseDto createLeaveRequest(String username, CreateLeaveRequestDto dto) {
-        logger.info("Creating leave request for user: {}", username);
+        log.info("Creating leave request for user: {}", username);
 
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found: " + username));
@@ -84,16 +94,23 @@ public class EmployeeLeaveService {
         // Team Leader's leave goes directly to HR — TL step auto-approved
         if (user.getRole() == TypeRole.TEAM_LEADER) {
             leaveRequest.setTeamLeaderDecision(ApprovalDecision.APPROVED);
-            logger.info("Team Leader leave request — TL step auto-approved, routing directly to HR");
+            log.info("Team Leader leave request — TL step auto-approved, routing directly to HR");
         }
 
         // Run scoring engine immediately on creation
         leaveScoreEngine.evaluate(leaveRequest);
-        logger.info("Leave scored: score={}, recommendation={}",
+        log.info("Leave scored: score={}, recommendation={}",
                 leaveRequest.getSystemScore(), leaveRequest.getSystemRecommendation());
 
         LeaveRequest saved = leaveRequestRepository.save(leaveRequest);
-        logger.info("Leave request created with ID: {} for user: {}", saved.getId(), username);
+        historyService.record(
+                "LEAVE",
+                "CREATED",
+                saved.getId(),
+                user.getKeycloakId(),
+                saved.getReason()
+        );
+        log.info("Leave request created with ID: {} for user: {}", saved.getId(), username);
 
         return mapToResponseDto(saved);
     }
@@ -101,23 +118,39 @@ public class EmployeeLeaveService {
     /**
      * Get all leave requests for an employee
      */
-    public List<LeaveRequestResponseDto> getMyLeaveRequests(String username) {
-        logger.info("Fetching leave requests for user: {}", username);
+    public Page<LeaveRequestResponseDto> getMyLeaveRequests(String username, Pageable pageable) {
+        log.info("Fetching leave requests for user: {}", username);
 
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found: " + username));
 
-        return leaveRequestRepository.findByUser(user).stream()
-                .map(this::mapToResponseDto)
-                .collect(Collectors.toList());
+        return leaveRequestRepository.findByUser(user, pageable)
+                .map(this::mapToResponseDto);
     }
 
     /**
      * Get a specific leave request by ID
      */
-    public LeaveRequestResponseDto getLeaveRequestById(Long leaveId) {
+    @Transactional(readOnly = true)
+    public LeaveRequestResponseDto getLeaveRequestById(Long leaveId, String requesterKeycloakId) {
         LeaveRequest leaveRequest = leaveRequestRepository.findById(leaveId)
                 .orElseThrow(() -> new ResourceNotFoundException("Leave request not found with ID: " + leaveId));
+
+        User requester = userRepository.findByKeycloakId(requesterKeycloakId)
+                .orElseThrow(() -> new ResourceNotFoundException("Requester user not found"));
+
+        boolean isOwner = leaveRequest.getUser() != null
+                && requesterKeycloakId.equals(leaveRequest.getUser().getKeycloakId());
+        boolean isHR = requester.getRole() == TypeRole.HR_MANAGER;
+        boolean isTeamLeaderOfEmployee = requester.getRole() == TypeRole.TEAM_LEADER
+                && leaveRequest.getUser() != null
+                && leaveRequest.getUser().getTeam() != null
+                && leaveRequest.getUser().getTeam().getTeamLeader() != null
+                && requesterKeycloakId.equals(leaveRequest.getUser().getTeam().getTeamLeader().getKeycloakId());
+
+        if (!isOwner && !isTeamLeaderOfEmployee && !isHR) {
+            throw new AccessDeniedException("You are not allowed to view this leave request.");
+        }
 
         return mapToResponseDto(leaveRequest);
     }
@@ -125,29 +158,27 @@ public class EmployeeLeaveService {
     /**
      * Get pending leave requests for a Team Leader — only their team's requests.
      */
-    public List<LeaveRequestResponseDto> getPendingLeaveRequestsForTeamLeader(String keycloakId) {
-        logger.info("Fetching pending leave requests for team leader: {}", keycloakId);
+    public Page<LeaveRequestResponseDto> getPendingLeaveRequestsForTeamLeader(String keycloakId, Pageable pageable) {
+        log.info("Fetching pending leave requests for team leader: {}", keycloakId);
 
         Team team = teamRepository.findByTeamLeaderKeycloakId(keycloakId)
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "No team assigned to this Team Leader. Ask HR to create and assign you a team."));
 
-        return leaveRequestRepository.findPendingByTeamId(team.getId()).stream()
-                .map(this::mapToResponseDto)
-                .collect(Collectors.toList());
+        return leaveRequestRepository.findPendingByTeamId(team.getId(), pageable)
+                .map(this::mapToResponseDto);
     }
 
     /**
      * Get all leave requests for a Team Leader's team (any status).
      */
-    public List<LeaveRequestResponseDto> getAllLeaveRequestsForTeamLeader(String keycloakId) {
+    public Page<LeaveRequestResponseDto> getAllLeaveRequestsForTeamLeader(String keycloakId, Pageable pageable) {
         Team team = teamRepository.findByTeamLeaderKeycloakId(keycloakId)
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "No team assigned to this Team Leader."));
 
-        return leaveRequestRepository.findAllByTeamId(team.getId()).stream()
-                .map(this::mapToResponseDto)
-                .collect(Collectors.toList());
+        return leaveRequestRepository.findAllByTeamId(team.getId(), pageable)
+                .map(this::mapToResponseDto);
     }
 
     /**
@@ -156,7 +187,12 @@ public class EmployeeLeaveService {
      */
     @Transactional
     public LeaveRequestResponseDto teamLeaderDecision(Long leaveId, boolean approve, String leaderKeycloakId) {
-        logger.info("Team Leader {} leave request ID: {}", approve ? "approving" : "rejecting", leaveId);
+        return teamLeaderDecision(leaveId, approve, leaderKeycloakId, null);
+    }
+
+    @Transactional
+    public LeaveRequestResponseDto teamLeaderDecision(Long leaveId, boolean approve, String leaderKeycloakId, String decisionReason) {
+        log.info("Team Leader {} leave request ID: {}", approve ? "approving" : "rejecting", leaveId);
 
         // Fetch the leave request
         LeaveRequest leave = leaveRequestRepository.findById(leaveId)
@@ -183,10 +219,36 @@ public class EmployeeLeaveService {
         leave.setUpdatedAt(LocalDateTime.now());
 
         if (!approve) {
+            if (decisionReason == null || decisionReason.isBlank()) {
+                throw new BadRequestException("Rejection reason is required.");
+            }
+            leave.setDecisionReason(decisionReason.trim());
+            leave.setRejectedBy(leaderKeycloakId);
             leave.setStatus(LeaveStatus.REJECTED);
+            historyService.record(
+                    "LEAVE",
+                    "TL_REJECTED",
+                    leave.getId(),
+                    leaderKeycloakId,
+                    decisionReason.trim()
+            );
+            requestEventProducer.publish(
+                    new RequestEvent("LEAVE_REJECTED", "LEAVE", leave.getId(), leave.getUser().getKeycloakId(), leaderKeycloakId, decisionReason.trim())
+            );
             // Email: TL rejected
             sendLeaveDecisionEmail(leave, false);
         } else {
+            leave.setApprovedBy(leaderKeycloakId);
+            historyService.record(
+                    "LEAVE",
+                    "TL_APPROVED",
+                    leave.getId(),
+                    leaderKeycloakId,
+                    null
+            );
+            requestEventProducer.publish(
+                    new RequestEvent("LEAVE_APPROVED", "LEAVE", leave.getId(), leave.getUser().getKeycloakId(), leaderKeycloakId, null)
+            );
             recalculateStatus(leave);
         }
 
@@ -199,7 +261,17 @@ public class EmployeeLeaveService {
      */
     @Transactional
     public LeaveRequestResponseDto hrDecision(Long leaveId, boolean approve) {
-        logger.info("HR Manager {} leave request ID: {}", approve ? "approving" : "rejecting", leaveId);
+        return hrDecision(leaveId, approve, null);
+    }
+
+    @Transactional
+    public LeaveRequestResponseDto hrDecision(Long leaveId, boolean approve, String decisionReason) {
+        return hrDecision(leaveId, approve, decisionReason, null);
+    }
+
+    @Transactional
+    public LeaveRequestResponseDto hrDecision(Long leaveId, boolean approve, String decisionReason, String hrKeycloakId) {
+        log.info("HR Manager {} leave request ID: {}", approve ? "approving" : "rejecting", leaveId);
 
         LeaveRequest leave = leaveRequestRepository.findById(leaveId)
                 .orElseThrow(() -> new ResourceNotFoundException("Leave request not found with ID: " + leaveId));
@@ -219,9 +291,35 @@ public class EmployeeLeaveService {
         leave.setUpdatedAt(LocalDateTime.now());
 
         if (!approve) {
+            if (decisionReason == null || decisionReason.isBlank()) {
+                throw new BadRequestException("Rejection reason is required.");
+            }
+            leave.setDecisionReason(decisionReason.trim());
+            leave.setRejectedBy(hrKeycloakId);
             leave.setStatus(LeaveStatus.REJECTED);
+            historyService.record(
+                    "LEAVE",
+                    "HR_REJECTED",
+                    leave.getId(),
+                    hrKeycloakId,
+                    decisionReason.trim()
+            );
+            requestEventProducer.publish(
+                    new RequestEvent("LEAVE_REJECTED", "LEAVE", leave.getId(), leave.getUser().getKeycloakId(), hrKeycloakId, decisionReason.trim())
+            );
             sendLeaveDecisionEmail(leave, false);
         } else {
+            leave.setApprovedBy(hrKeycloakId);
+            historyService.record(
+                    "LEAVE",
+                    "HR_APPROVED",
+                    leave.getId(),
+                    hrKeycloakId,
+                    null
+            );
+            requestEventProducer.publish(
+                    new RequestEvent("LEAVE_APPROVED", "LEAVE", leave.getId(), leave.getUser().getKeycloakId(), hrKeycloakId, null)
+            );
             recalculateStatus(leave);
         }
 
@@ -231,10 +329,9 @@ public class EmployeeLeaveService {
     /**
      * Get all leave requests — HR overview.
      */
-    public List<LeaveRequestResponseDto> getAllLeaveRequests() {
-        return leaveRequestRepository.findAll().stream()
-                .map(this::mapToResponseDto)
-                .collect(Collectors.toList());
+    public Page<LeaveRequestResponseDto> getAllLeaveRequests(Pageable pageable) {
+        return leaveRequestRepository.findAll(pageable)
+                .map(this::mapToResponseDto);
     }
 
     /**
@@ -258,10 +355,10 @@ public class EmployeeLeaveService {
                 int current = (person.getCurrentMonthlyDeductions() != null) ? 0 : 0; // placeholder
                 // We track leave on the LeaveRequest itself, not on Person
                 // The repository query sumLeaveDaysSince handles the 12-month window dynamically
-                logger.info("Leave request ID {} fully APPROVED — {} day(s) added to employee record",
+                log.info("Leave request ID {} fully APPROVED — {} day(s) added to employee record",
                         leave.getId(), leave.getNumberOfDays());
             }
-            logger.info("Leave request ID {} fully APPROVED — verification token generated", leave.getId());
+            log.info("Leave request ID {} fully APPROVED — verification token generated", leave.getId());
             // Email: fully approved by HR
             sendLeaveDecisionEmail(leave, true);
         }
@@ -292,7 +389,7 @@ public class EmployeeLeaveService {
                         leaveType, leave.getStartDate(), leave.getEndDate(), reason, refId);
             }
         } catch (Exception e) {
-            logger.warn("Could not send leave decision email: {}", e.getMessage());
+            log.warn("Could not send leave decision email: {}", e.getMessage());
         }
     }
 
@@ -356,7 +453,8 @@ public class EmployeeLeaveService {
         dto.setSystemScore(leaveRequest.getSystemScore());
         dto.setSystemRecommendation(leaveRequest.getSystemRecommendation());
         dto.setDecisionReason(leaveRequest.getDecisionReason());
+        dto.setApprovedBy(leaveRequest.getApprovedBy());
+        dto.setRejectedBy(leaveRequest.getRejectedBy());
         return dto;
     }
 }
-

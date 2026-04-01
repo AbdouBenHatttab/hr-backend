@@ -13,6 +13,8 @@ import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.Person;
 import tn.isetbizerte.pfe.hrbackend.modules.user.service.UserService;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -63,6 +65,10 @@ public class HRService {
                 .collect(Collectors.toList());
     }
 
+    public Page<Map<String, Object>> getAllUsersWithDetails(Pageable pageable) {
+        return userService.getAllUsers(pageable).map(this::mapUserToDetails);
+    }
+
     /**
      * Get users pending approval (NEW_USER role)
      */
@@ -85,6 +91,23 @@ public class HRService {
                 .collect(Collectors.toList());
     }
 
+    public Page<Map<String, Object>> getPendingApprovals(Pageable pageable) {
+        return userService.getUsersByRole(TypeRole.NEW_USER, pageable).map(user -> {
+            Map<String, Object> userInfo = new HashMap<>();
+            userInfo.put("id", user.getId());
+            userInfo.put("username", user.getUsername());
+            userInfo.put("registrationDate", user.getRegistrationDate());
+            userInfo.put("role", user.getRole());
+
+            if (user.getPerson() != null) {
+                Person person = user.getPerson();
+                userInfo.put("fullName", person.getFirstName() + " " + person.getLastName());
+                userInfo.put("email", person.getEmail());
+            }
+            return userInfo;
+        });
+    }
+
     /**
      * Get all login history (simplified: date/time, id, username only)
      */
@@ -99,6 +122,17 @@ public class HRService {
                     return historyInfo;
                 })
                 .collect(Collectors.toList());
+    }
+
+    public Page<Map<String, Object>> getLoginHistory(Pageable pageable) {
+        return userService.getAllLoginHistory(pageable).map(history -> {
+            Map<String, Object> historyInfo = new HashMap<>();
+            historyInfo.put("id", history.getId());
+            historyInfo.put("loginDate", history.getLoginDate());
+            historyInfo.put("userId", history.getUser() != null ? history.getUser().getId() : null);
+            historyInfo.put("username", history.getUser() != null ? history.getUser().getUsername() : "Unknown");
+            return historyInfo;
+        });
     }
 
     /**
@@ -331,4 +365,3 @@ public class HRService {
         return userInfo;
     }
 }
-

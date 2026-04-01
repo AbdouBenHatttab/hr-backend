@@ -15,6 +15,9 @@ public class LoanRequest {
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Version
+    private Long version;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
@@ -47,6 +50,9 @@ public class LoanRequest {
     private String  decisionReason;
     private Boolean meetingRequired;  // nullable — set by scoring engine
 
+    private String approvedBy;
+    private String rejectedBy;
+
     @Column(unique = true)
     private String verificationToken;
 
@@ -57,6 +63,9 @@ public class LoanRequest {
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
+
+    public Long getVersion() { return version; }
+    public void setVersion(Long version) { this.version = version; }
 
     public User getUser() { return user; }
     public void setUser(User user) { this.user = user; }
@@ -93,6 +102,12 @@ public class LoanRequest {
 
     public Boolean getMeetingRequired() { return meetingRequired; }
     public void setMeetingRequired(Boolean m) { this.meetingRequired = m; }
+
+    public String getApprovedBy() { return approvedBy; }
+    public void setApprovedBy(String approvedBy) { this.approvedBy = approvedBy; }
+
+    public String getRejectedBy() { return rejectedBy; }
+    public void setRejectedBy(String rejectedBy) { this.rejectedBy = rejectedBy; }
 
     public String getVerificationToken() { return verificationToken; }
     public void setVerificationToken(String verificationToken) { this.verificationToken = verificationToken; }

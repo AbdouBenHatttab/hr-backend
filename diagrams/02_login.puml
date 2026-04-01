@@ -1,0 +1,82 @@
+@startuml Login
+title User Login Flow
+
+skinparam sequenceArrowThickness 2
+skinparam roundcorner 8
+skinparam backgroundColor #FAFAFA
+skinparam sequence {
+  LifeLineBorderColor #1a6faf
+  ActorBorderColor #1a6faf
+  ParticipantBackgroundColor #EAF2FF
+  ParticipantBorderColor #1a6faf
+}
+
+actor       "Client (Frontend)"       as C
+participant "AuthController"          as AC  #EAF2FF
+participant "AuthService"             as AS  #EAF2FF
+participant "Keycloak Token Endpoint" as KC  #FFF3E0
+participant "JwtDecoder"              as JD  #EAF2FF
+participant "UserService"             as US  #EAF2FF
+database    "PostgreSQL"              as DB  #E8F5E9
+
+C  -> AC  : POST /public/auth/login\n{ username, password }
+
+activate AC
+note right of AC : Extracts IP address\nand User-Agent from\nHttpServletRequest
+AC -> AS  : loginUser(LoginRequest, ipAddress, userAgent)
+activate AS
+
+AS -> KC  : POST /realms/hr-realm/\nprotocol/openid-connect/token\n{ client_id, client_secret,\n  grant_type:password,\n  username, password,\n  scope: openid profile email roles }
+activate KC
+
+alt Invalid credentials
+    KC --> AS : 401 { error: "invalid_grant" }
+    AS -> US  : saveLoginHistory(username, ip, ua, success=false)
+    US -> DB  : INSERT login_history (user, success=false)
+    DB --> US : saved
+    AS --> AC : LoginResponse(success=false,\n  "Invalid username or password")
+    AC --> C  : 400 Bad Request
+
+else Successful authentication
+    KC --> AS : 200 { access_token, refresh_token,\n  token_type, expires_in }
+deactivate KC
+
+AS -> US  : saveLoginHistory(username, ip, ua, success=true)
+activate US
+US -> DB  : INSERT login_history (user, loginDate, success=true)
+DB --> US : saved
+deactivate US
+
+AS -> JD  : decode(accessToken)
+activate JD
+JD --> AS : Jwt { claims: email,\n  realm_access.roles:[...] }
+deactivate JD
+
+note right of AS
+  extractPrimaryRoleFromRoles()
+  Priority: HR_MANAGER > TEAM_LEADER
+           > EMPLOYEE > NEW_USER
+end note
+
+AS -> US  : updateUserRoleByUsername(username, primaryRole)
+activate US
+US -> DB  : UPDATE users SET role = primaryRole\nWHERE username = ?
+DB --> US : updated
+deactivate US
+
+AS --> AC : LoginResponse {\n  success: true,\n  accessToken, refreshToken,\n  tokenType, expiresIn,\n  username, email,\n  roles: [primaryRole]\n}
+end
+deactivate AS
+
+AC --> C  : 200 OK\nLoginResponse
+deactivate AC
+
+note right of C
+  Frontend stores:
+  • accessToken → sessionStorage
+  • refreshToken → sessionStorage
+  • user object → sessionStorage
+  Redirects to role-based dashboard.
+end note
+
+@enduml

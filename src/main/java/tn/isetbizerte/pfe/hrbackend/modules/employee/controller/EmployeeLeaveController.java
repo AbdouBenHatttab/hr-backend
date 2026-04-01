@@ -3,11 +3,15 @@ package tn.isetbizerte.pfe.hrbackend.modules.employee.controller;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 import tn.isetbizerte.pfe.hrbackend.modules.employee.dto.CreateLeaveRequestDto;
+import tn.isetbizerte.pfe.hrbackend.modules.employee.dto.LeaveDecisionRequestDto;
 import tn.isetbizerte.pfe.hrbackend.modules.employee.dto.LeaveRequestResponseDto;
 import tn.isetbizerte.pfe.hrbackend.modules.employee.service.EmployeeLeaveService;
 
@@ -56,16 +60,23 @@ public class EmployeeLeaveController {
     @PreAuthorize("hasAnyRole('EMPLOYEE', 'TEAM_LEADER')")
     @GetMapping("/my-requests")
     public ResponseEntity<Map<String, Object>> getMyLeaveRequests(
-            @AuthenticationPrincipal Jwt jwt
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size
     ) {
         String username = jwt.getClaimAsString("preferred_username");
-        List<LeaveRequestResponseDto> leaves = employeeLeaveService.getMyLeaveRequests(username);
+        Pageable pageable = PageRequest.of(page, size);
+        Page<LeaveRequestResponseDto> leaves = employeeLeaveService.getMyLeaveRequests(username, pageable);
 
         Map<String, Object> response = new HashMap<>();
         response.put("success", true);
         response.put("message", "Your leave requests retrieved successfully");
-        response.put("count", leaves.size());
-        response.put("data", leaves);
+        response.put("count", leaves.getNumberOfElements());
+        response.put("totalCount", leaves.getTotalElements());
+        response.put("totalPages", leaves.getTotalPages());
+        response.put("page", page);
+        response.put("size", size);
+        response.put("data", leaves.getContent());
 
         return ResponseEntity.ok(response);
     }
@@ -76,10 +87,12 @@ public class EmployeeLeaveController {
      * NOTE: keep this AFTER all fixed-path GETs (/pending, /all, /my-requests)
      * so Spring matches those first before trying to parse {leaveId}.
      */
-    @PreAuthorize("hasAnyRole('EMPLOYEE', 'TEAM_LEADER')")
+    @PreAuthorize("hasAnyRole('EMPLOYEE', 'TEAM_LEADER', 'HR_MANAGER')")
     @GetMapping("/{leaveId}")
-    public ResponseEntity<Map<String, Object>> getLeaveRequest(@PathVariable Long leaveId) {
-        LeaveRequestResponseDto leave = employeeLeaveService.getLeaveRequestById(leaveId);
+    public ResponseEntity<Map<String, Object>> getLeaveRequest(
+            @PathVariable Long leaveId,
+            @AuthenticationPrincipal Jwt jwt) {
+        LeaveRequestResponseDto leave = employeeLeaveService.getLeaveRequestById(leaveId, jwt.getSubject());
 
         Map<String, Object> response = new HashMap<>();
         response.put("success", true);
@@ -102,16 +115,23 @@ public class EmployeeLeaveController {
     @PreAuthorize("hasRole('TEAM_LEADER')")
     @GetMapping("/pending")
     public ResponseEntity<Map<String, Object>> getPendingLeaveRequests(
-            @AuthenticationPrincipal Jwt jwt) {
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
 
-        List<LeaveRequestResponseDto> leaves =
-                employeeLeaveService.getPendingLeaveRequestsForTeamLeader(jwt.getSubject());
+        Pageable pageable = PageRequest.of(page, size);
+        Page<LeaveRequestResponseDto> leaves =
+                employeeLeaveService.getPendingLeaveRequestsForTeamLeader(jwt.getSubject(), pageable);
 
         Map<String, Object> response = new HashMap<>();
         response.put("success", true);
         response.put("message", "Pending leave requests retrieved successfully");
-        response.put("count", leaves.size());
-        response.put("data", leaves);
+        response.put("count", leaves.getNumberOfElements());
+        response.put("totalCount", leaves.getTotalElements());
+        response.put("totalPages", leaves.getTotalPages());
+        response.put("page", page);
+        response.put("size", size);
+        response.put("data", leaves.getContent());
 
         return ResponseEntity.ok(response);
     }
@@ -123,17 +143,24 @@ public class EmployeeLeaveController {
     @PreAuthorize("hasRole('TEAM_LEADER')")
     @GetMapping("/my-team")
     public ResponseEntity<Map<String, Object>> getTeamLeaveRequests(
-            @AuthenticationPrincipal Jwt jwt) {
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
 
         String keycloakId = jwt.getSubject();
-        List<LeaveRequestResponseDto> leaves =
-                employeeLeaveService.getAllLeaveRequestsForTeamLeader(keycloakId);
+        Pageable pageable = PageRequest.of(page, size);
+        Page<LeaveRequestResponseDto> leaves =
+                employeeLeaveService.getAllLeaveRequestsForTeamLeader(keycloakId, pageable);
 
         Map<String, Object> response = new HashMap<>();
         response.put("success", true);
         response.put("message", "Team leave requests retrieved successfully");
-        response.put("count", leaves.size());
-        response.put("data", leaves);
+        response.put("count", leaves.getNumberOfElements());
+        response.put("totalCount", leaves.getTotalElements());
+        response.put("totalPages", leaves.getTotalPages());
+        response.put("page", page);
+        response.put("size", size);
+        response.put("data", leaves.getContent());
 
         return ResponseEntity.ok(response);
     }
@@ -144,14 +171,21 @@ public class EmployeeLeaveController {
      */
     @PreAuthorize("hasRole('HR_MANAGER')")
     @GetMapping("/all")
-    public ResponseEntity<Map<String, Object>> getAllLeaveRequests() {
-        List<LeaveRequestResponseDto> leaves = employeeLeaveService.getAllLeaveRequests();
+    public ResponseEntity<Map<String, Object>> getAllLeaveRequests(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+        Pageable pageable = PageRequest.of(page, size);
+        Page<LeaveRequestResponseDto> leaves = employeeLeaveService.getAllLeaveRequests(pageable);
 
         Map<String, Object> response = new HashMap<>();
         response.put("success", true);
         response.put("message", "All leave requests retrieved successfully");
-        response.put("count", leaves.size());
-        response.put("data", leaves);
+        response.put("count", leaves.getNumberOfElements());
+        response.put("totalCount", leaves.getTotalElements());
+        response.put("totalPages", leaves.getTotalPages());
+        response.put("page", page);
+        response.put("size", size);
+        response.put("data", leaves.getContent());
 
         return ResponseEntity.ok(response);
     }
@@ -182,9 +216,10 @@ public class EmployeeLeaveController {
     @PostMapping("/{leaveId}/team-leader/reject")
     public ResponseEntity<Map<String, Object>> teamLeaderReject(
             @PathVariable Long leaveId,
+            @Valid @RequestBody LeaveDecisionRequestDto request,
             @AuthenticationPrincipal Jwt jwt) {
         String keycloakId = jwt.getSubject();
-        LeaveRequestResponseDto leave = employeeLeaveService.teamLeaderDecision(leaveId, false, keycloakId);
+        LeaveRequestResponseDto leave = employeeLeaveService.teamLeaderDecision(leaveId, false, keycloakId, request.getReason());
         Map<String, Object> response = new HashMap<>();
         response.put("success", true);
         response.put("message", "Leave request rejected by Team Leader");
@@ -198,8 +233,10 @@ public class EmployeeLeaveController {
      */
     @PreAuthorize("hasRole('HR_MANAGER')")
     @PostMapping("/{leaveId}/hr/approve")
-    public ResponseEntity<Map<String, Object>> hrApprove(@PathVariable Long leaveId) {
-        LeaveRequestResponseDto leave = employeeLeaveService.hrDecision(leaveId, true);
+    public ResponseEntity<Map<String, Object>> hrApprove(
+            @PathVariable Long leaveId,
+            @AuthenticationPrincipal Jwt jwt) {
+        LeaveRequestResponseDto leave = employeeLeaveService.hrDecision(leaveId, true, null, jwt.getSubject());
         Map<String, Object> response = new HashMap<>();
         response.put("success", true);
         response.put("message", "Leave request approved by HR Manager");
@@ -213,8 +250,11 @@ public class EmployeeLeaveController {
      */
     @PreAuthorize("hasRole('HR_MANAGER')")
     @PostMapping("/{leaveId}/hr/reject")
-    public ResponseEntity<Map<String, Object>> hrReject(@PathVariable Long leaveId) {
-        LeaveRequestResponseDto leave = employeeLeaveService.hrDecision(leaveId, false);
+    public ResponseEntity<Map<String, Object>> hrReject(
+            @PathVariable Long leaveId,
+            @Valid @RequestBody LeaveDecisionRequestDto request,
+            @AuthenticationPrincipal Jwt jwt) {
+        LeaveRequestResponseDto leave = employeeLeaveService.hrDecision(leaveId, false, request.getReason(), jwt.getSubject());
         Map<String, Object> response = new HashMap<>();
         response.put("success", true);
         response.put("message", "Leave request rejected by HR Manager");
@@ -222,4 +262,3 @@ public class EmployeeLeaveController {
         return ResponseEntity.ok(response);
     }
 }
-

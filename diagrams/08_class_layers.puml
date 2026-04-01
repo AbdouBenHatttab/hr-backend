@@ -1,0 +1,236 @@
+@startuml ClassDiagram_Layers
+title Layered Architecture — Controllers · Services · Repositories
+skinparam classAttributeIconSize 0
+skinparam classFontSize 12
+skinparam classFontStyle bold
+skinparam classBackgroundColor #EAF2FF
+skinparam classBorderColor #1a6faf
+skinparam classArrowColor #555555
+skinparam interfaceBackgroundColor #E8F5E9
+skinparam interfaceBorderColor #2e7d32
+skinparam packageBackgroundColor #F8FBFF
+skinparam packageBorderColor #1a6faf
+skinparam roundcorner 8
+skinparam shadowing false
+
+' ══════════════════════════════════════════════════════════════════
+' CONTROLLERS
+' ══════════════════════════════════════════════════════════════════
+package "Controllers  @RestController" #F0F4FF {
+
+    class AuthController {
+        - authService : AuthService
+        --
+        + register(RegisterRequest) : ResponseEntity
+        + login(LoginRequest, HttpServletRequest) : ResponseEntity
+    }
+
+    class PasswordResetController {
+        - passwordResetService : PasswordResetService
+        --
+        + forgotPassword(ForgotPasswordRequest) : ResponseEntity
+        + resetPassword(ResetPasswordRequest) : ResponseEntity
+    }
+
+    class HRController {
+        - hrService : HRService
+        --
+        + getDashboard(Jwt) : Map
+        + getAllUsers(Jwt) : Map
+        + getLoginHistory(Jwt) : Map
+        + getPendingApprovals(Jwt) : Map
+        + assignRoleToUser(AssignRoleRequest, Jwt) : ResponseEntity
+    }
+
+    class EmployeeLeaveController {
+        - employeeLeaveService : EmployeeLeaveService
+        --
+        + createLeaveRequest(dto, Jwt) : ResponseEntity
+        + getMyLeaveRequests(Jwt) : ResponseEntity
+        + getLeaveRequestById(leaveId) : ResponseEntity
+        + getPendingLeaveRequests() : ResponseEntity
+        + getAllLeaveRequests() : ResponseEntity
+        + teamLeaderApprove(leaveId) : ResponseEntity
+        + teamLeaderReject(leaveId) : ResponseEntity
+        + hrApprove(leaveId) : ResponseEntity
+        + hrReject(leaveId) : ResponseEntity
+    }
+}
+
+' ══════════════════════════════════════════════════════════════════
+' SERVICES
+' ══════════════════════════════════════════════════════════════════
+package "Services  @Service" #EAF2FF {
+
+    class AuthService {
+        - restTemplate : RestTemplate
+        - userService : UserService
+        - jwtDecoder : JwtDecoder
+        - objectMapper : ObjectMapper
+        --
+        + registerUser(RegisterRequest) : Map
+        + loginUser(LoginRequest, ip, ua) : LoginResponse
+        - getAdminToken() : String
+        - getUserIdFromKeycloak(token, username) : String
+        - saveUserToDatabase(RegisterRequest, kcId) : void
+        - processTokenResponse(tokenData, username) : LoginResponse
+        - syncUserRoleToDatabase(username, role) : void
+        - parseJwtToken(token) : Map
+        - extractPrimaryRoleFromRoles(roles) : String
+        - formatRegistrationError(msg) : String
+    }
+
+    class PasswordResetService {
+        - personRepository : PersonRepository
+        - userRepository : UserRepository
+        - passwordResetTokenRepository : PasswordResetTokenRepository
+        - kafkaProducer : PasswordResetKafkaProducer
+        - keycloakAdminService : KeycloakAdminService
+        - secureRandom : SecureRandom
+        --
+        + initiatePasswordReset(email) : void
+        + resetPassword(token, newPassword) : void
+        - generateUniqueResetToken() : String
+        - generateResetToken() : String
+        - validatePassword(password) : void
+    }
+
+    class UserService {
+        - userRepository : UserRepository
+        - personRepository : PersonRepository
+        - loginHistoryRepository : LoginHistoryRepository
+        --
+        + getAllUsers() : List<User>
+        + findByUsername(username) : Optional<User>
+        + findByKeycloakId(kcId) : Optional<User>
+        + findById(id) : Optional<User>
+        + getUserByUsername(username) : User
+        + getUsersByRole(role) : List<User>
+        + getActiveUsers() : List<User>
+        + saveUser(user) : User
+        + saveRegisteredUser(req, kcId) : void
+        + updateUserRole(username, role) : User
+        + updateUserRoleByUsername(username, roleStr) : User
+        + countUsers() : long
+        + countUsersByRole(role) : long
+        + getAllPersons() : List<Person>
+        + savePerson(person) : Person
+        + countPersons() : long
+        + getAllLoginHistory() : List<LoginHistory>
+        + getLoginHistoryByUser(user) : List<LoginHistory>
+        + saveLoginHistory(username, ip, ua, success) : void
+        + countLoginHistory() : long
+    }
+
+    class HRService {
+        - userService : UserService
+        - keycloakAdminService : KeycloakAdminService
+        - kafkaEventProducer : KafkaEventProducer
+        --
+        + getDashboardStatistics() : Map
+        + getAllUsersWithDetails() : List<Map>
+        + getPendingApprovals() : List<Map>
+        + getLoginHistory() : List<Map>
+        + assignRoleToUser(userId, roleStr, assignedBy) : AssignRoleResponse
+        + findUserById(userId) : Optional<User>
+        + updateUserRole(username, role) : User
+        - publishRoleAssignedEvent(user, oldRole, newRole, by) : boolean
+        - mapUserToDetails(user) : Map
+    }
+
+    class KeycloakAdminService {
+        - keycloak : Keycloak
+        - realm : String
+        --
+        + assignRoleToUser(kcUserId, roleName) : boolean
+        + findKeycloakUserIdByUsername(username) : String
+        + resetUserPassword(kcUserId, newPassword) : boolean
+    }
+
+    class EmployeeLeaveService {
+        - leaveRequestRepository : LeaveRequestRepository
+        - userRepository : UserRepository
+        --
+        + createLeaveRequest(username, dto) : LeaveRequestResponseDto
+        + getMyLeaveRequests(username) : List<LeaveRequestResponseDto>
+        + getLeaveRequestById(leaveId) : LeaveRequestResponseDto
+        + getPendingLeaveRequests() : List<LeaveRequestResponseDto>
+        + getAllLeaveRequests() : List<LeaveRequestResponseDto>
+        + teamLeaderDecision(leaveId, approve) : LeaveRequestResponseDto
+        + hrDecision(leaveId, approve) : LeaveRequestResponseDto
+        - recalculateStatus(leave) : void
+        - validateLeaveRequestDates(start, end, days) : void
+        - mapToResponseDto(leave) : LeaveRequestResponseDto
+    }
+}
+
+' ══════════════════════════════════════════════════════════════════
+' REPOSITORIES
+' ══════════════════════════════════════════════════════════════════
+package "Repositories  extends JpaRepository" #E8F5E9 {
+
+    interface UserRepository {
+        + findByUsername(username) : Optional<User>
+        + findByKeycloakId(kcId) : Optional<User>
+        + findByPerson(person) : Optional<User>
+        + existsByUsername(username) : boolean
+        + existsByKeycloakId(kcId) : boolean
+        + findByRole(role) : List<User>
+        + findByActive(active) : List<User>
+        + countByRole(role) : long
+    }
+
+    interface PersonRepository {
+        + findByEmail(email) : Optional<Person>
+        + existsByEmail(email) : boolean
+    }
+
+    interface LoginHistoryRepository {
+        + findByUser(user) : List<LoginHistory>
+        + findByUserOrderByLoginDateDesc(user) : List<LoginHistory>
+        + findByUserAndSuccessOrderByLoginDateDesc(user, success) : List<LoginHistory>
+        + findByLoginDateBetween(start, end) : List<LoginHistory>
+    }
+
+    interface LeaveRequestRepository {
+        + findByUser(user) : List<LeaveRequest>
+        + findByStatus(status) : List<LeaveRequest>
+        + findByUserAndStatus(user, status) : List<LeaveRequest>
+    }
+
+    interface PasswordResetTokenRepository {
+        + findByTokenAndUsedFalse(token) : Optional<PasswordResetToken>
+        + existsByToken(token) : boolean
+        + deleteByUserId(userId) : void
+        + deleteByExpiresAtBefore(dateTime) : int
+    }
+}
+
+' ══════════════════════════════════════════════════════════════════
+' DEPENDENCIES (Controller → Service → Repository)
+' ══════════════════════════════════════════════════════════════════
+
+AuthController           ..>  AuthService
+PasswordResetController  ..>  PasswordResetService
+HRController             ..>  HRService
+EmployeeLeaveController  ..>  EmployeeLeaveService
+
+AuthService              ..>  UserService
+AuthService              ..>  KeycloakAdminService
+
+PasswordResetService     ..>  UserRepository
+PasswordResetService     ..>  PersonRepository
+PasswordResetService     ..>  PasswordResetTokenRepository
+PasswordResetService     ..>  KeycloakAdminService
+
+HRService                ..>  UserService
+HRService                ..>  KeycloakAdminService
+
+EmployeeLeaveService     ..>  LeaveRequestRepository
+EmployeeLeaveService     ..>  UserRepository
+
+UserService              ..>  UserRepository
+UserService              ..>  PersonRepository
+UserService              ..>  LoginHistoryRepository
+
+@enduml
