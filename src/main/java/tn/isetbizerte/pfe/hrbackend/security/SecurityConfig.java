@@ -1,6 +1,5 @@
 package tn.isetbizerte.pfe.hrbackend.security;
 
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -9,30 +8,35 @@ import org.springframework.security.config.annotation.web.configurers.AbstractHt
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.web.cors.CorsConfigurationSource;
 
 @Configuration
 @EnableMethodSecurity
 public class SecurityConfig {
 
-    @Autowired
-    private KeycloakRoleConverter keycloakRoleConverter;
+    private final KeycloakRoleConverter keycloakRoleConverter;
+    private final CorsConfigurationSource corsConfigurationSource;
+
+    public SecurityConfig(KeycloakRoleConverter keycloakRoleConverter, CorsConfigurationSource corsConfigurationSource) {
+        this.keycloakRoleConverter = keycloakRoleConverter;
+        this.corsConfigurationSource = corsConfigurationSource;
+    }
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
+                .cors(cors -> cors.configurationSource(corsConfigurationSource))
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        // Public endpoints - no authentication required
                         .requestMatchers("/public/**").permitAll()
                         .requestMatchers("/error").permitAll()
-                        .requestMatchers("/test-roles").authenticated()  // Allow authenticated users to test roles
-                        // Role-based endpoints
-                        .requestMatchers("/api/new-user/**").hasRole("NEW_USER")
-                        .requestMatchers("/api/employee/**").hasRole("EMPLOYEE")
+                            .requestMatchers("/api/new-user/**").hasRole("NEW_USER")
+                        .requestMatchers("/api/me", "/api/me/**").hasAnyRole("EMPLOYEE", "TEAM_LEADER", "HR_MANAGER")
+                        .requestMatchers("/api/employee/**").hasAnyRole("EMPLOYEE", "TEAM_LEADER", "HR_MANAGER")
                         .requestMatchers("/api/leader/**").hasRole("TEAM_LEADER")
                         .requestMatchers("/api/hr/**").hasRole("HR_MANAGER")
-                        // All other requests need authentication
+                        .requestMatchers("/api/reports/**").hasAnyRole("EMPLOYEE", "TEAM_LEADER", "HR_MANAGER")
                         .anyRequest().authenticated()
                 )
                 .oauth2ResourceServer(oauth ->

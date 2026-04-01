@@ -1,13 +1,14 @@
 package tn.isetbizerte.pfe.hrbackend.modules.hr.service;
 
 import org.keycloak.admin.client.Keycloak;
-import org.keycloak.admin.client.KeycloakBuilder;
 import org.keycloak.admin.client.resource.RealmResource;
 import org.keycloak.admin.client.resource.UserResource;
 import org.keycloak.admin.client.resource.UsersResource;
 import org.keycloak.representations.idm.CredentialRepresentation;
 import org.keycloak.representations.idm.RoleRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -20,6 +21,12 @@ import java.util.List;
 @Service
 public class KeycloakAdminService {
 
+    private static final Logger logger = LoggerFactory.getLogger(KeycloakAdminService.class);
+
+    private static final List<String> APPLICATION_ROLES = List.of("EMPLOYEE", "TEAM_LEADER", "HR_MANAGER", "NEW_USER");
+
+    private final Keycloak keycloak;
+
     @Value("${keycloak.auth-server-url}")
     private String keycloakServerUrl;
 
@@ -29,20 +36,9 @@ public class KeycloakAdminService {
     @Value("${keycloak.admin.username}")
     private String adminUsername;
 
-    @Value("${keycloak.admin.password}")
-    private String adminPassword;
 
-    /**
-     * Get Keycloak Admin client instance
-     */
-    private Keycloak getKeycloakInstance() {
-        return KeycloakBuilder.builder()
-                .serverUrl(keycloakServerUrl)
-                .realm("master")
-                .username(adminUsername)
-                .password(adminPassword)
-                .clientId("admin-cli")
-                .build();
+    public KeycloakAdminService(Keycloak keycloak) {
+        this.keycloak = keycloak;
     }
 
     /**
@@ -52,71 +48,37 @@ public class KeycloakAdminService {
      * @return true if successful, false otherwise
      */
     public boolean assignRoleToUser(String keycloakUserId, String roleName) {
-        try (Keycloak keycloak = getKeycloakInstance()) {
-            System.out.println("🔄 Starting role assignment...");
-            System.out.println("   Keycloak Server: " + keycloakServerUrl);
-            System.out.println("   Realm: " + realm);
-            System.out.println("   User ID: " + keycloakUserId);
-            System.out.println("   Role to assign: " + roleName);
+        try {
+            logger.info("Assigning role '{}' to Keycloak user '{}' in realm '{}'", roleName, keycloakUserId, realm);
 
             RealmResource realmResource = keycloak.realm(realm);
             UsersResource usersResource = realmResource.users();
             UserResource userResource = usersResource.get(keycloakUserId);
-
-            System.out.println("✓ User resource obtained");
-
-            // Get the role representation
             RoleRepresentation role = realmResource.roles().get(roleName).toRepresentation();
 
-            if (role == null) {
-                System.err.println("❌ ERROR: Role '" + roleName + "' does not exist in Keycloak realm '" + realm + "'");
-                System.err.println("   Available roles must be created in Keycloak first!");
-                return false;
-            }
+            logger.debug("Role '{}' found in Keycloak", role.getName());
 
-            System.out.println("✓ Role representation found: " + role.getName());
-
-            // Get current roles
             List<RoleRepresentation> currentRoles = userResource.roles().realmLevel().listEffective();
-            System.out.println("✓ Current roles: " + currentRoles.size() + " role(s)");
+            logger.debug("User currently has {} role(s)", currentRoles.size());
 
-            for (RoleRepresentation cr : currentRoles) {
-                System.out.println("   - " + cr.getName());
-            }
-
-            // Remove old application roles (keep only default roles)
             for (RoleRepresentation currentRole : currentRoles) {
                 String currentRoleName = currentRole.getName();
-                if (currentRoleName.equals("EMPLOYEE") ||
-                    currentRoleName.equals("TEAM_LEADER") ||
-                    currentRoleName.equals("HR_MANAGER") ||
-                    currentRoleName.equals("NEW_USER")) {
-                    System.out.println("   Removing old role: " + currentRoleName);
+                if (APPLICATION_ROLES.contains(currentRoleName)) {
+                    logger.debug("Removing old role: {}", currentRoleName);
                     userResource.roles().realmLevel().remove(Collections.singletonList(currentRole));
                 }
             }
 
-            System.out.println("✓ Old roles removed");
-
-            // Assign the new role
-            System.out.println("🔄 Assigning new role: " + roleName);
             userResource.roles().realmLevel().add(Collections.singletonList(role));
-
-            System.out.println("✅ SUCCESS: Role '" + roleName + "' assigned to user in Keycloak!");
+            logger.info("Role '{}' successfully assigned to Keycloak user '{}'", roleName, keycloakUserId);
             return true;
 
         } catch (NullPointerException e) {
-            System.err.println("❌ ERROR (NullPointerException): " + e.getMessage());
-            System.err.println("   Possible causes:");
-            System.err.println("   1. Role does not exist in Keycloak");
-            System.err.println("   2. User does not exist in Keycloak");
-            System.err.println("   3. Keycloak connection failed");
-            e.printStackTrace();
+            logger.error("Role '{}' not found in Keycloak realm '{}'", roleName, realm, e);
             return false;
         } catch (Exception e) {
-            System.err.println("❌ ERROR assigning role in Keycloak: " + e.getMessage());
-            System.err.println("   Exception type: " + e.getClass().getSimpleName());
-            e.printStackTrace();
+            logger.error("Failed to assign role '{}' to Keycloak user '{}' on server '{}' with admin '{}'",
+                    roleName, keycloakUserId, keycloakServerUrl, adminUsername, e);
             return false;
         }
     }
@@ -127,18 +89,20 @@ public class KeycloakAdminService {
      * @return Keycloak user ID (UUID) or null if not found
      */
     public String findKeycloakUserIdByUsername(String username) {
-        try (Keycloak keycloak = getKeycloakInstance()) {
+        try {
             RealmResource realmResource = keycloak.realm(realm);
             UsersResource usersResource = realmResource.users();
 
             List<UserRepresentation> users = usersResource.search(username, true);
 
             if (!users.isEmpty()) {
+                logger.debug("Found Keycloak user '{}' with id '{}'", username, users.get(0).getId());
                 return users.get(0).getId();
             }
+            logger.warn("No Keycloak user found for username '{}' in realm '{}'", username, realm);
             return null;
         } catch (Exception e) {
-            System.err.println("Error finding Keycloak user: " + e.getMessage());
+            logger.error("Failed to find Keycloak user by username '{}'", username, e);
             return null;
         }
     }
@@ -150,30 +114,26 @@ public class KeycloakAdminService {
      * @return true if successful, false otherwise
      */
     public boolean resetUserPassword(String keycloakUserId, String newPassword) {
-        try (Keycloak keycloak = getKeycloakInstance()) {
-            System.out.println("🔐 Resetting password for Keycloak user: " + keycloakUserId);
+        try {
+            logger.info("Resetting password for Keycloak user '{}'", keycloakUserId);
 
             RealmResource realmResource = keycloak.realm(realm);
             UsersResource usersResource = realmResource.users();
             UserResource userResource = usersResource.get(keycloakUserId);
 
-            // Create new credential
             CredentialRepresentation credential = new CredentialRepresentation();
             credential.setType(CredentialRepresentation.PASSWORD);
             credential.setValue(newPassword);
             credential.setTemporary(false);
 
-            // Reset password
             userResource.resetPassword(credential);
 
-            System.out.println("✅ Password successfully reset in Keycloak for user: " + keycloakUserId);
+            logger.info("Password successfully reset in Keycloak for user '{}'", keycloakUserId);
             return true;
 
         } catch (Exception e) {
-            System.err.println("❌ ERROR resetting password in Keycloak: " + e.getMessage());
-            e.printStackTrace();
+            logger.error("Failed to reset password for Keycloak user '{}'", keycloakUserId, e);
             return false;
         }
     }
 }
-

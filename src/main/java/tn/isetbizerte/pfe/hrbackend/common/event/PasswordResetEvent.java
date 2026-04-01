@@ -1,4 +1,4 @@
-package tn.isetbizerte.pfe.hrbackend.modules.auth.service;
+package tn.isetbizerte.pfe.hrbackend.common.event;
 
 import java.io.Serializable;
 import java.time.LocalDateTime;
@@ -22,7 +22,7 @@ public class PasswordResetEvent implements Serializable {
     }
 
     public PasswordResetEvent(String email, String firstName, String lastName,
-                               String resetToken, LocalDateTime timestamp, LocalDateTime expiryTime) {
+                              String resetToken, LocalDateTime timestamp, LocalDateTime expiryTime) {
         this.email = email;
         this.firstName = firstName;
         this.lastName = lastName;
@@ -31,7 +31,6 @@ public class PasswordResetEvent implements Serializable {
         this.expiryTime = expiryTime;
     }
 
-    // Getters and Setters
     public String getEmail() {
         return email;
     }

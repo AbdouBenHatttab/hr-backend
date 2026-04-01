@@ -2,21 +2,21 @@ package tn.isetbizerte.pfe.hrbackend.modules.auth.service;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tn.isetbizerte.pfe.hrbackend.common.event.PasswordResetEvent;
 import tn.isetbizerte.pfe.hrbackend.common.exception.BadRequestException;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.kafka.producer.PasswordResetKafkaProducer;
+import tn.isetbizerte.pfe.hrbackend.modules.auth.entity.PasswordResetToken;
+import tn.isetbizerte.pfe.hrbackend.modules.auth.repository.PasswordResetTokenRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.hr.service.KeycloakAdminService;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.Person;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
 import tn.isetbizerte.pfe.hrbackend.modules.user.repository.PersonRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.user.repository.UserRepository;
 
+import java.security.SecureRandom;
 import java.time.LocalDateTime;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Random;
 
 /**
  * Service for handling password reset logic
@@ -26,21 +26,29 @@ public class PasswordResetService {
 
     private static final Logger logger = LoggerFactory.getLogger(PasswordResetService.class);
     private static final int TOKEN_EXPIRY_MINUTES = 15;
+    private static final String TOKEN_CHARACTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    private static final int TOKEN_LENGTH = 6;
 
-    // In-memory storage for reset tokens (use Redis in production)
-    private final Map<String, TokenData> resetTokens = new HashMap<>();
+    private final PersonRepository personRepository;
+    private final UserRepository userRepository;
+    private final PasswordResetTokenRepository passwordResetTokenRepository;
+    private final PasswordResetKafkaProducer kafkaProducer;
+    private final KeycloakAdminService keycloakAdminService;
+    private final SecureRandom secureRandom = new SecureRandom();
 
-    @Autowired
-    private PersonRepository personRepository;
-
-    @Autowired
-    private UserRepository userRepository;
-
-    @Autowired
-    private PasswordResetKafkaProducer kafkaProducer;
-
-    @Autowired
-    private KeycloakAdminService keycloakAdminService;
+    public PasswordResetService(
+            PersonRepository personRepository,
+            UserRepository userRepository,
+            PasswordResetTokenRepository passwordResetTokenRepository,
+            PasswordResetKafkaProducer kafkaProducer,
+            KeycloakAdminService keycloakAdminService
+    ) {
+        this.personRepository = personRepository;
+        this.userRepository = userRepository;
+        this.passwordResetTokenRepository = passwordResetTokenRepository;
+        this.kafkaProducer = kafkaProducer;
+        this.keycloakAdminService = keycloakAdminService;
+    }
 
     /**
      * Initiate password reset process
@@ -48,27 +56,41 @@ public class PasswordResetService {
      */
     @Transactional
     public void initiatePasswordReset(String email) {
-        logger.info("🔐 Password reset initiated for email: {}", email);
+        logger.info("Password reset initiated for email: {}", email);
 
-        // Find person by email
-        Person person = personRepository.findByEmail(email)
-                .orElseThrow(() -> new BadRequestException("No account found with email: " + email));
+        // Silent return if email not found — prevents user enumeration
+        java.util.Optional<Person> personOpt = personRepository.findByEmail(email);
+        if (personOpt.isEmpty()) {
+            logger.info("Password reset requested for unknown email (silently ignored): {}", email);
+            return;
+        }
+        Person person = personOpt.get();
 
-        // Get associated user
-        User user = userRepository.findByPerson(person)
-                .orElseThrow(() -> new BadRequestException("User account not found for email: " + email));
+        java.util.Optional<User> userOpt = userRepository.findByPerson(person);
+        if (userOpt.isEmpty()) {
+            logger.warn("Person found but no linked user for email: {}", email);
+            return;
+        }
+        User user = userOpt.get();
 
-        // Generate unique reset token
-        String resetToken = generateResetToken();
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime expiryTime = now.plusMinutes(TOKEN_EXPIRY_MINUTES);
+        String resetToken = generateUniqueResetToken();
 
-        // Store token with user info
-        resetTokens.put(resetToken, new TokenData(user.getId(), email, expiryTime));
+        // Keep only one valid token per user.
+        passwordResetTokenRepository.deleteByUserId(user.getId());
 
-        logger.info("✅ Reset token generated for user: {} (expires in {} minutes)", user.getUsername(), TOKEN_EXPIRY_MINUTES);
+        PasswordResetToken tokenEntity = new PasswordResetToken(
+                resetToken,
+                user.getId(),
+                email,
+                now,
+                expiryTime
+        );
+        passwordResetTokenRepository.save(tokenEntity);
 
-        // Publish Kafka event
+        logger.info("Reset token persisted for user: {} (expires in {} minutes)", user.getUsername(), TOKEN_EXPIRY_MINUTES);
+
         PasswordResetEvent event = new PasswordResetEvent(
                 email,
                 person.getFirstName(),
@@ -79,7 +101,12 @@ public class PasswordResetService {
         );
 
         kafkaProducer.publishPasswordResetEvent(event);
-        logger.info("📤 Password reset event published to Kafka for: {}", email);
+        logger.info("Password reset event published to Kafka for: {}", email);
+
+        int cleanedRows = passwordResetTokenRepository.deleteByExpiresAtBefore(LocalDateTime.now());
+        if (cleanedRows > 0) {
+            logger.debug("Cleaned {} expired password reset token(s)", cleanedRows);
+        }
     }
 
     /**
@@ -89,54 +116,51 @@ public class PasswordResetService {
      */
     @Transactional
     public void resetPassword(String token, String newPassword) {
-        logger.info("🔐 Attempting password reset with token");
+        logger.info("Attempting password reset with token");
 
-        // Validate token
-        TokenData tokenData = resetTokens.get(token);
-        if (tokenData == null) {
-            throw new BadRequestException("Invalid or expired reset token");
-        }
+        PasswordResetToken tokenData = passwordResetTokenRepository.findByTokenAndUsedFalse(token)
+                .orElseThrow(() -> new BadRequestException("Invalid or expired reset token"));
 
-        // Check if token expired
-        if (LocalDateTime.now().isAfter(tokenData.expiryTime)) {
-            resetTokens.remove(token);
+        if (LocalDateTime.now().isAfter(tokenData.getExpiresAt())) {
+            passwordResetTokenRepository.delete(tokenData);
             throw new BadRequestException("Reset token has expired. Please request a new one.");
         }
 
-        // Find user
-        User user = userRepository.findById(tokenData.userId)
+        User user = userRepository.findById(tokenData.getUserId())
                 .orElseThrow(() -> new BadRequestException("User not found"));
 
-        // Validate password strength
         validatePassword(newPassword);
 
-        // Update password in Keycloak
         boolean success = keycloakAdminService.resetUserPassword(user.getKeycloakId(), newPassword);
-
         if (!success) {
             throw new BadRequestException("Failed to reset password in authentication system");
         }
 
-        // Remove used token
-        resetTokens.remove(token);
+        tokenData.setUsed(true);
+        passwordResetTokenRepository.save(tokenData);
 
-        logger.info("✅ Password successfully reset for user: {}", user.getUsername());
+        logger.info("Password successfully reset for user: {}", user.getUsername());
     }
 
     /**
      * Generate a 6-character random alphanumeric reset token
-     * Format: Random mix of uppercase letters and numbers (e.g., A3B7K9, 2X4Y9Z, K5M2P8)
      */
-    private String generateResetToken() {
-        String characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-        Random random = new Random();
-        StringBuilder token = new StringBuilder(6);
-
-        for (int i = 0; i < 6; i++) {
-            int index = random.nextInt(characters.length());
-            token.append(characters.charAt(index));
+    private String generateUniqueResetToken() {
+        for (int attempt = 0; attempt < 10; attempt++) {
+            String candidate = generateResetToken();
+            if (!passwordResetTokenRepository.existsByToken(candidate)) {
+                return candidate;
+            }
         }
+        throw new IllegalStateException("Unable to generate a unique reset token");
+    }
 
+    private String generateResetToken() {
+        StringBuilder token = new StringBuilder(TOKEN_LENGTH);
+        for (int i = 0; i < TOKEN_LENGTH; i++) {
+            int index = secureRandom.nextInt(TOKEN_CHARACTERS.length());
+            token.append(TOKEN_CHARACTERS.charAt(index));
+        }
         return token.toString();
     }
 
@@ -157,20 +181,4 @@ public class PasswordResetService {
             throw new BadRequestException("Password must contain at least one digit");
         }
     }
-
-    /**
-     * Inner class to store token data
-     */
-    private static class TokenData {
-        Long userId;
-        String email;
-        LocalDateTime expiryTime;
-
-        TokenData(Long userId, String email, LocalDateTime expiryTime) {
-            this.userId = userId;
-            this.email = email;
-            this.expiryTime = expiryTime;
-        }
-    }
 }
-

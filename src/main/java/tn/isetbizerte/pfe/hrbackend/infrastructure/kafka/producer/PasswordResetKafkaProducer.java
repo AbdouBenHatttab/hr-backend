@@ -3,12 +3,11 @@ package tn.isetbizerte.pfe.hrbackend.infrastructure.kafka.producer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.SendResult;
 import org.springframework.stereotype.Service;
-import tn.isetbizerte.pfe.hrbackend.modules.auth.service.PasswordResetEvent;
+import tn.isetbizerte.pfe.hrbackend.common.event.PasswordResetEvent;
 
 import java.util.concurrent.CompletableFuture;
 
@@ -20,18 +19,20 @@ public class PasswordResetKafkaProducer {
 
     private static final Logger logger = LoggerFactory.getLogger(PasswordResetKafkaProducer.class);
 
-    @Autowired
-    private KafkaTemplate<String, String> kafkaTemplate;
+    private final KafkaTemplate<String, String> kafkaTemplate;
+    private final ObjectMapper objectMapper;
+    private final String passwordResetTopic;
 
-    @Autowired
-    private ObjectMapper objectMapper;
+    public PasswordResetKafkaProducer(
+            KafkaTemplate<String, String> kafkaTemplate,
+            ObjectMapper objectMapper,
+            @Value("${app.kafka.topic.password-reset}") String passwordResetTopic
+    ) {
+        this.kafkaTemplate = kafkaTemplate;
+        this.objectMapper = objectMapper;
+        this.passwordResetTopic = passwordResetTopic;
+    }
 
-    @Value("${app.kafka.topic.password-reset}")
-    private String passwordResetTopic;
-
-    /**
-     * Publish password reset event to Kafka
-     */
     public void publishPasswordResetEvent(PasswordResetEvent event) {
         logger.info("Publishing PasswordResetEvent for email: {}", event.getEmail());
 
@@ -46,17 +47,17 @@ public class PasswordResetKafkaProducer {
 
             future.whenComplete((result, ex) -> {
                 if (ex == null) {
-                    logger.info("✅ Successfully published password reset event for: {} to topic: {} offset: {}",
+                    logger.info("Successfully published password reset event for '{}' to topic '{}' at offset {}",
                             event.getEmail(),
                             passwordResetTopic,
                             result.getRecordMetadata().offset());
                 } else {
-                    logger.error("❌ Failed to publish password reset event for: {}", event.getEmail(), ex);
+                    logger.error("Failed to publish password reset event for '{}'", event.getEmail(), ex);
                 }
             });
 
         } catch (Exception e) {
-            logger.error("❌ Error serializing password reset event: {}", e.getMessage(), e);
+            logger.error("Failed to serialize password reset event for '{}'", event.getEmail(), e);
             throw new RuntimeException("Failed to publish password reset event", e);
         }
     }

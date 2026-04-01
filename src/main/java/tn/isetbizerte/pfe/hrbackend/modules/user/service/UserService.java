@@ -1,6 +1,8 @@
 package tn.isetbizerte.pfe.hrbackend.modules.user.service;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import tn.isetbizerte.pfe.hrbackend.common.dto.RegisterRequest;
 import tn.isetbizerte.pfe.hrbackend.common.enums.TypeRole;
 import tn.isetbizerte.pfe.hrbackend.common.exception.ResourceNotFoundException;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
@@ -10,7 +12,6 @@ import tn.isetbizerte.pfe.hrbackend.modules.user.repository.UserRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.user.repository.PersonRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.user.repository.LoginHistoryRepository;
 
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -99,7 +100,7 @@ public class UserService {
     }
 
     public long countUsersByRole(TypeRole role) {
-        return userRepository.findByRole(role).size();
+        return userRepository.countByRole(role);
     }
 
     // Person operations
@@ -109,6 +110,29 @@ public class UserService {
 
     public Person savePerson(Person person) {
         return personRepository.save(person);
+    }
+
+    @Transactional
+    public void saveRegisteredUser(RegisterRequest registerRequest, String keycloakUserId) {
+        Person person = new Person();
+        person.setFirstName(registerRequest.getFirstName());
+        person.setLastName(registerRequest.getLastName());
+        person.setEmail(registerRequest.getEmail());
+        person.setPhone(registerRequest.getPhone());
+        person.setBirthDate(registerRequest.getBirthDate());
+        person.setAddress(registerRequest.getAddress());
+        person.setMaritalStatus(registerRequest.getMaritalStatus());
+        person.setNumberOfChildren(registerRequest.getNumberOfChildren());
+        person.setDepartment(registerRequest.getDepartment());
+
+        User user = new User(keycloakUserId, registerRequest.getUsername());
+        user.setEmailVerified(true);
+        user.setActive(false);
+        user.setPerson(person);
+        person.setUser(user);
+
+        personRepository.save(person);
+        userRepository.save(user);
     }
 
     public long countPersons() {

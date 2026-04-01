@@ -1,0 +1,410 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jasperReport xmlns="http://jasperreports.sourceforge.net/jasperreports"
+              xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+              xsi:schemaLocation="http://jasperreports.sourceforge.net/jasperreports http://jasperreports.sourceforge.net/xsd/jasperreport.xsd"
+              name="leave_approval"
+              pageWidth="595"
+              pageHeight="842"
+              columnWidth="535"
+              leftMargin="30"
+              rightMargin="30"
+              topMargin="20"
+              bottomMargin="20">
+
+    <!-- ═══ PARAMETERS ═══════════════════════════════════════════════════════ -->
+    <parameter name="companyName"        class="java.lang.String"/>
+    <parameter name="referenceNumber"    class="java.lang.String"/>
+    <parameter name="employeeFullName"   class="java.lang.String"/>
+    <parameter name="employeeEmail"      class="java.lang.String"/>
+    <parameter name="employeeDepartment" class="java.lang.String"/>
+    <parameter name="leaveType"          class="java.lang.String"/>
+    <parameter name="leaveStartDate"     class="java.lang.String"/>
+    <parameter name="leaveEndDate"       class="java.lang.String"/>
+    <parameter name="numberOfDays"       class="java.lang.String"/>
+    <parameter name="reason"             class="java.lang.String"/>
+    <parameter name="requestDate"        class="java.lang.String"/>
+    <parameter name="teamLeaderDecision" class="java.lang.String"/>
+    <parameter name="hrManagerDecision"  class="java.lang.String"/>
+    <parameter name="approvalDate"       class="java.lang.String"/>
+    <parameter name="logoStream"         class="java.io.InputStream"/>
+    <parameter name="qrCodeStream"       class="java.io.InputStream"/>
+    <parameter name="verifyUrl"          class="java.lang.String"/>
+
+    <background><band splitType="Stretch"/></background>
+
+    <!-- ═══ HEADER ══════════════════════════════════════════════════════════ -->
+    <title>
+        <band height="115" splitType="Stretch">
+
+            <!-- Dark navy top bar -->
+            <rectangle>
+                <reportElement x="0" y="0" width="535" height="75" backcolor="#0F172A" forecolor="#0F172A"/>
+                <graphicElement><pen lineWidth="0"/></graphicElement>
+            </rectangle>
+
+            <!-- Accent stripe -->
+            <rectangle>
+                <reportElement x="0" y="75" width="535" height="4" backcolor="#2563EB" forecolor="#2563EB"/>
+                <graphicElement><pen lineWidth="0"/></graphicElement>
+            </rectangle>
+
+            <!-- Logo -->
+            <image scaleImage="RetainShape">
+                <reportElement x="12" y="10" width="50" height="50"/>
+                <imageExpression><![CDATA[$P{logoStream}]]></imageExpression>
+            </image>
+
+            <!-- Company name -->
+            <textField>
+                <reportElement x="72" y="10" width="300" height="26" forecolor="#FFFFFF"/>
+                <textElement verticalAlignment="Middle">
+                    <font size="15" isBold="true" fontName="SansSerif"/>
+                </textElement>
+                <textFieldExpression><![CDATA[$P{companyName}]]></textFieldExpression>
+            </textField>
+
+            <!-- Document title -->
+            <staticText>
+                <reportElement x="72" y="38" width="300" height="18" forecolor="#93C5FD"/>
+                <textElement verticalAlignment="Middle">
+                    <font size="9" fontName="SansSerif"/>
+                </textElement>
+                <text><![CDATA[Annual Leave Authorization Certificate]]></text>
+            </staticText>
+
+            <!-- Reference number top-right -->
+            <staticText>
+                <reportElement x="370" y="10" width="165" height="13" forecolor="#94A3B8"/>
+                <textElement textAlignment="Right">
+                    <font size="7" fontName="SansSerif"/>
+                </textElement>
+                <text><![CDATA[REFERENCE NO.]]></text>
+            </staticText>
+            <textField>
+                <reportElement x="370" y="24" width="165" height="18" forecolor="#FFFFFF"/>
+                <textElement textAlignment="Right">
+                    <font size="12" isBold="true" fontName="SansSerif"/>
+                </textElement>
+                <textFieldExpression><![CDATA[$P{referenceNumber}]]></textFieldExpression>
+            </textField>
+            <staticText>
+                <reportElement x="370" y="46" width="165" height="14" forecolor="#64748B"/>
+                <textElement textAlignment="Right">
+                    <font size="7" fontName="SansSerif"/>
+                </textElement>
+                <text><![CDATA[Confidential — HR Use Only]]></text>
+            </staticText>
+
+            <!-- Approved on — below accent stripe -->
+            <staticText>
+                <reportElement x="0" y="85" width="80" height="18" forecolor="#64748B"/>
+                <textElement verticalAlignment="Middle">
+                    <font size="7" isBold="true" fontName="SansSerif"/>
+                </textElement>
+                <text><![CDATA[DATE OF ISSUE]]></text>
+            </staticText>
+            <textField>
+                <reportElement x="82" y="85" width="200" height="18" forecolor="#1E293B"/>
+                <textElement verticalAlignment="Middle">
+                    <font size="8" isBold="true" fontName="SansSerif"/>
+                </textElement>
+                <textFieldExpression><![CDATA[$P{approvalDate}]]></textFieldExpression>
+            </textField>
+
+            <!-- APPROVED stamp on right -->
+            <rectangle>
+                <reportElement x="400" y="82" width="135" height="24" backcolor="#DCFCE7" forecolor="#DCFCE7"/>
+                <graphicElement><pen lineWidth="0"/></graphicElement>
+            </rectangle>
+            <staticText>
+                <reportElement x="400" y="82" width="135" height="24" forecolor="#15803D"/>
+                <textElement textAlignment="Center" verticalAlignment="Middle">
+                    <font size="11" isBold="true" fontName="SansSerif"/>
+                </textElement>
+                <text><![CDATA[✓  APPROVED]]></text>
+            </staticText>
+
+        </band>
+    </title>
+
+    <!-- ═══ DETAIL ══════════════════════════════════════════════════════════ -->
+    <detail>
+
+        <!-- ── 1. EMPLOYEE INFORMATION ── -->
+        <band height="130" splitType="Stretch">
+
+            <!-- Section header -->
+            <rectangle>
+                <reportElement x="0" y="12" width="535" height="20" backcolor="#1E3A5F" forecolor="#1E3A5F"/>
+                <graphicElement><pen lineWidth="0"/></graphicElement>
+            </rectangle>
+            <staticText>
+                <reportElement x="10" y="12" width="400" height="20" forecolor="#FFFFFF"/>
+                <textElement verticalAlignment="Middle">
+                    <font size="8" isBold="true" fontName="SansSerif"/>
+                </textElement>
+                <text><![CDATA[EMPLOYEE INFORMATION]]></text>
+            </staticText>
+
+            <!-- Full Name -->
+            <staticText>
+                <reportElement x="0" y="40" width="175" height="16" forecolor="#64748B"/>
+                <textElement verticalAlignment="Middle"><font size="8" isBold="true" fontName="SansSerif"/></textElement>
+                <text><![CDATA[Full Name]]></text>
+            </staticText>
+            <textField>
+                <reportElement x="180" y="40" width="355" height="16" forecolor="#0F172A"/>
+                <textElement verticalAlignment="Middle"><font size="9" isBold="true" fontName="SansSerif"/></textElement>
+                <textFieldExpression><![CDATA[$P{employeeFullName}]]></textFieldExpression>
+            </textField>
+            <line><reportElement x="0" y="57" width="535" height="1" forecolor="#E2E8F0"/></line>
+
+            <!-- Department -->
+            <staticText>
+                <reportElement x="0" y="62" width="175" height="16" forecolor="#64748B"/>
+                <textElement verticalAlignment="Middle"><font size="8" isBold="true" fontName="SansSerif"/></textElement>
+                <text><![CDATA[Department]]></text>
+            </staticText>
+            <textField isBlankWhenNull="true">
+                <reportElement x="180" y="62" width="355" height="16" forecolor="#0F172A"/>
+                <textElement verticalAlignment="Middle"><font size="8" fontName="SansSerif"/></textElement>
+                <textFieldExpression><![CDATA[$P{employeeDepartment} != null && !$P{employeeDepartment}.isEmpty() ? $P{employeeDepartment} : "—"]]></textFieldExpression>
+            </textField>
+            <line><reportElement x="0" y="79" width="535" height="1" forecolor="#E2E8F0"/></line>
+
+            <!-- Email -->
+            <staticText>
+                <reportElement x="0" y="84" width="175" height="16" forecolor="#64748B"/>
+                <textElement verticalAlignment="Middle"><font size="8" isBold="true" fontName="SansSerif"/></textElement>
+                <text><![CDATA[Email Address]]></text>
+            </staticText>
+            <textField>
+                <reportElement x="180" y="84" width="355" height="16" forecolor="#0F172A"/>
+                <textElement verticalAlignment="Middle"><font size="8" fontName="SansSerif"/></textElement>
+                <textFieldExpression><![CDATA[$P{employeeEmail}]]></textFieldExpression>
+            </textField>
+            <line><reportElement x="0" y="101" width="535" height="1" forecolor="#E2E8F0"/></line>
+
+            <!-- Request Date -->
+            <staticText>
+                <reportElement x="0" y="106" width="175" height="16" forecolor="#64748B"/>
+                <textElement verticalAlignment="Middle"><font size="8" isBold="true" fontName="SansSerif"/></textElement>
+                <text><![CDATA[Request Submitted]]></text>
+            </staticText>
+            <textField>
+                <reportElement x="180" y="106" width="355" height="16" forecolor="#0F172A"/>
+                <textElement verticalAlignment="Middle"><font size="8" fontName="SansSerif"/></textElement>
+                <textFieldExpression><![CDATA[$P{requestDate}]]></textFieldExpression>
+            </textField>
+
+        </band>
+
+        <!-- ── 2. LEAVE DETAILS ── -->
+        <band height="155" splitType="Stretch">
+
+            <rectangle>
+                <reportElement x="0" y="12" width="535" height="20" backcolor="#1E3A5F" forecolor="#1E3A5F"/>
+                <graphicElement><pen lineWidth="0"/></graphicElement>
+            </rectangle>
+            <staticText>
+                <reportElement x="10" y="12" width="400" height="20" forecolor="#FFFFFF"/>
+                <textElement verticalAlignment="Middle">
+                    <font size="8" isBold="true" fontName="SansSerif"/>
+                </textElement>
+                <text><![CDATA[LEAVE DETAILS]]></text>
+            </staticText>
+
+            <!-- Leave Type -->
+            <staticText>
+                <reportElement x="0" y="40" width="175" height="16" forecolor="#64748B"/>
+                <textElement verticalAlignment="Middle"><font size="8" isBold="true" fontName="SansSerif"/></textElement>
+                <text><![CDATA[Leave Type]]></text>
+            </staticText>
+            <textField>
+                <reportElement x="180" y="40" width="355" height="16" forecolor="#0F172A"/>
+                <textElement verticalAlignment="Middle"><font size="9" isBold="true" fontName="SansSerif"/></textElement>
+                <textFieldExpression><![CDATA[$P{leaveType}]]></textFieldExpression>
+            </textField>
+            <line><reportElement x="0" y="57" width="535" height="1" forecolor="#E2E8F0"/></line>
+
+            <!-- Start + End dates on same row -->
+            <staticText>
+                <reportElement x="0" y="62" width="80" height="16" forecolor="#64748B"/>
+                <textElement verticalAlignment="Middle"><font size="8" isBold="true" fontName="SansSerif"/></textElement>
+                <text><![CDATA[Start Date]]></text>
+            </staticText>
+            <textField>
+                <reportElement x="85" y="62" width="155" height="16" forecolor="#0F172A"/>
+                <textElement verticalAlignment="Middle"><font size="8" fontName="SansSerif"/></textElement>
+                <textFieldExpression><![CDATA[$P{leaveStartDate}]]></textFieldExpression>
+            </textField>
+            <staticText>
+                <reportElement x="260" y="62" width="80" height="16" forecolor="#64748B"/>
+                <textElement verticalAlignment="Middle"><font size="8" isBold="true" fontName="SansSerif"/></textElement>
+                <text><![CDATA[End Date]]></text>
+            </staticText>
+            <textField>
+                <reportElement x="345" y="62" width="190" height="16" forecolor="#0F172A"/>
+                <textElement verticalAlignment="Middle"><font size="8" fontName="SansSerif"/></textElement>
+                <textFieldExpression><![CDATA[$P{leaveEndDate}]]></textFieldExpression>
+            </textField>
+            <line><reportElement x="0" y="79" width="535" height="1" forecolor="#E2E8F0"/></line>
+
+            <!-- Duration -->
+            <staticText>
+                <reportElement x="0" y="84" width="175" height="16" forecolor="#64748B"/>
+                <textElement verticalAlignment="Middle"><font size="8" isBold="true" fontName="SansSerif"/></textElement>
+                <text><![CDATA[Duration]]></text>
+            </staticText>
+            <!-- Duration highlighted box -->
+            <rectangle>
+                <reportElement x="178" y="83" width="110" height="18" backcolor="#DBEAFE" forecolor="#DBEAFE"/>
+                <graphicElement><pen lineWidth="0"/></graphicElement>
+            </rectangle>
+            <textField>
+                <reportElement x="180" y="84" width="110" height="16" forecolor="#1D4ED8"/>
+                <textElement verticalAlignment="Middle" textAlignment="Center">
+                    <font size="8" isBold="true" fontName="SansSerif"/>
+                </textElement>
+                <textFieldExpression><![CDATA[$P{numberOfDays}]]></textFieldExpression>
+            </textField>
+            <line><reportElement x="0" y="102" width="535" height="1" forecolor="#E2E8F0"/></line>
+
+            <!-- Reason -->
+            <staticText>
+                <reportElement x="0" y="107" width="175" height="16" forecolor="#64748B"/>
+                <textElement verticalAlignment="Middle"><font size="8" isBold="true" fontName="SansSerif"/></textElement>
+                <text><![CDATA[Reason / Purpose]]></text>
+            </staticText>
+            <textField isStretchWithOverflow="true">
+                <reportElement x="180" y="107" width="355" height="40" forecolor="#0F172A"/>
+                <textElement verticalAlignment="Top"><font size="8" fontName="SansSerif"/></textElement>
+                <textFieldExpression><![CDATA[$P{reason}]]></textFieldExpression>
+            </textField>
+
+        </band>
+
+        <!-- ── 3. AUTHORIZATION CHAIN ── -->
+        <band height="100" splitType="Stretch">
+
+            <rectangle>
+                <reportElement x="0" y="12" width="535" height="20" backcolor="#1E3A5F" forecolor="#1E3A5F"/>
+                <graphicElement><pen lineWidth="0"/></graphicElement>
+            </rectangle>
+            <staticText>
+                <reportElement x="10" y="12" width="400" height="20" forecolor="#FFFFFF"/>
+                <textElement verticalAlignment="Middle">
+                    <font size="8" isBold="true" fontName="SansSerif"/>
+                </textElement>
+                <text><![CDATA[AUTHORIZATION CHAIN]]></text>
+            </staticText>
+
+            <!-- Team Leader box -->
+            <rectangle>
+                <reportElement x="0" y="40" width="260" height="50" backcolor="#F8FAFC" forecolor="#E2E8F0"/>
+                <graphicElement><pen lineWidth="0.5"/></graphicElement>
+            </rectangle>
+            <staticText>
+                <reportElement x="10" y="45" width="240" height="14" forecolor="#64748B"/>
+                <textElement><font size="7" isBold="true" fontName="SansSerif"/></textElement>
+                <text><![CDATA[TEAM LEADER]]></text>
+            </staticText>
+            <textField>
+                <reportElement x="10" y="62" width="240" height="20" forecolor="#059669"/>
+                <textElement verticalAlignment="Middle">
+                    <font size="10" isBold="true" fontName="SansSerif"/>
+                </textElement>
+                <textFieldExpression><![CDATA["✓  " + $P{teamLeaderDecision}]]></textFieldExpression>
+            </textField>
+
+            <!-- HR Manager box -->
+            <rectangle>
+                <reportElement x="275" y="40" width="260" height="50" backcolor="#F8FAFC" forecolor="#E2E8F0"/>
+                <graphicElement><pen lineWidth="0.5"/></graphicElement>
+            </rectangle>
+            <staticText>
+                <reportElement x="285" y="45" width="240" height="14" forecolor="#64748B"/>
+                <textElement><font size="7" isBold="true" fontName="SansSerif"/></textElement>
+                <text><![CDATA[HR MANAGER]]></text>
+            </staticText>
+            <textField>
+                <reportElement x="285" y="62" width="240" height="20" forecolor="#059669"/>
+                <textElement verticalAlignment="Middle">
+                    <font size="10" isBold="true" fontName="SansSerif"/>
+                </textElement>
+                <textFieldExpression><![CDATA["✓  " + $P{hrManagerDecision}]]></textFieldExpression>
+            </textField>
+
+        </band>
+
+        <!-- ── 4. FOOTER: QR + legal note ── -->
+        <band height="130" splitType="Stretch">
+
+            <!-- Light top border -->
+            <line><reportElement x="0" y="12" width="535" height="1" forecolor="#CBD5E1"/></line>
+
+            <!-- QR code -->
+            <image scaleImage="RetainShape" isUsingCache="false">
+                <reportElement x="0" y="20" width="90" height="90">
+                    <printWhenExpression><![CDATA[$P{qrCodeStream} != null]]></printWhenExpression>
+                </reportElement>
+                <imageExpression><![CDATA[$P{qrCodeStream}]]></imageExpression>
+            </image>
+
+            <!-- QR label -->
+            <staticText>
+                <reportElement x="100" y="20" width="435" height="16" forecolor="#0F172A">
+                    <printWhenExpression><![CDATA[$P{qrCodeStream} != null]]></printWhenExpression>
+                </reportElement>
+                <textElement verticalAlignment="Middle">
+                    <font size="9" isBold="true" fontName="SansSerif"/>
+                </textElement>
+                <text><![CDATA[Scan QR code to verify authenticity of this document]]></text>
+            </staticText>
+
+            <!-- QR sub-label -->
+            <staticText>
+                <reportElement x="100" y="38" width="435" height="14" forecolor="#64748B">
+                    <printWhenExpression><![CDATA[$P{qrCodeStream} != null]]></printWhenExpression>
+                </reportElement>
+                <textElement><font size="7" fontName="SansSerif"/></textElement>
+                <text><![CDATA[Use any QR scanner app. The code links to our secure document verification portal.]]></text>
+            </staticText>
+
+            <!-- Divider between QR and legal text -->
+            <line><reportElement x="100" y="58" width="435" height="1" forecolor="#E2E8F0"/></line>
+
+            <!-- Legal / confidentiality notice -->
+            <staticText>
+                <reportElement x="100" y="64" width="435" height="46" forecolor="#94A3B8"/>
+                <textElement>
+                    <font size="7" isItalic="true" fontName="SansSerif"/>
+                </textElement>
+                <text><![CDATA[This document is an official authorization certificate generated by the HR-Nexus Human Resources Management System. It is valid without a handwritten signature. Any alteration to this document constitutes fraud. For inquiries, contact your HR department and quote the reference number above.]]></text>
+            </staticText>
+
+            <!-- Bottom page border -->
+            <line><reportElement x="0" y="118" width="535" height="1" forecolor="#0F172A"/></line>
+
+            <!-- Footer company name -->
+            <textField>
+                <reportElement x="0" y="120" width="267" height="10" forecolor="#64748B"/>
+                <textElement verticalAlignment="Middle">
+                    <font size="6" fontName="SansSerif"/>
+                </textElement>
+                <textFieldExpression><![CDATA[$P{companyName} + " · Human Resources Management System"]]></textFieldExpression>
+            </textField>
+
+            <!-- Footer ref + page -->
+            <textField>
+                <reportElement x="268" y="120" width="267" height="10" forecolor="#64748B"/>
+                <textElement textAlignment="Right" verticalAlignment="Middle">
+                    <font size="6" fontName="SansSerif"/>
+                </textElement>
+                <textFieldExpression><![CDATA["Ref: " + $P{referenceNumber} + "  ·  Page 1 of 1"]]></textFieldExpression>
+            </textField>
+
+        </band>
+
+    </detail>
+</jasperReport>

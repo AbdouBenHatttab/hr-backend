@@ -1,6 +1,7 @@
 package tn.isetbizerte.pfe.hrbackend.security;
 
-import org.springframework.beans.factory.annotation.Autowired;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.convert.converter.Converter;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -9,83 +10,61 @@ import org.springframework.stereotype.Component;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
 import tn.isetbizerte.pfe.hrbackend.modules.user.repository.UserRepository;
 
-import java.util.*;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Component
 public class KeycloakRoleConverter implements Converter<Jwt, Collection<GrantedAuthority>> {
 
-    private static UserRepository staticUserRepository;
+    private static final Logger logger = LoggerFactory.getLogger(KeycloakRoleConverter.class);
 
-    @Autowired
-    public void setUserRepository(UserRepository userRepository) {
-        KeycloakRoleConverter.staticUserRepository = userRepository;
+    private final UserRepository userRepository;
+
+    public KeycloakRoleConverter(UserRepository userRepository) {
+        this.userRepository = userRepository;
     }
 
     @Override
     public Collection<GrantedAuthority> convert(Jwt jwt) {
         Set<String> roles = new HashSet<>();
 
-        // Method 1: Try realm_access.roles (standard Keycloak)
         Map<String, Object> realmAccess = jwt.getClaim("realm_access");
         if (realmAccess != null && realmAccess.get("roles") != null) {
             @SuppressWarnings("unchecked")
             Collection<String> realmRoles = (Collection<String>) realmAccess.get("roles");
             roles.addAll(realmRoles);
         } else {
-            // Get all possible identifiers
             String keycloakUserId = jwt.getSubject();
             String username = jwt.getClaimAsString("preferred_username");
 
-            if (staticUserRepository != null) {
-                try {
-                    User foundUser = null;
+            try {
+                    Optional<User> byKeycloakId = keycloakUserId == null
+                            ? Optional.empty()
+                            : userRepository.findByKeycloakId(keycloakUserId);
+                    Optional<User> byUsername = username == null
+                            ? Optional.empty()
+                            : userRepository.findByUsername(username);
 
-                    // Try 1: Find by keycloakId
-                    if (keycloakUserId != null && foundUser == null) {
-                        Optional<User> userOpt = staticUserRepository.findByKeycloakId(keycloakUserId);
-                        if (userOpt.isPresent()) {
-                            foundUser = userOpt.get();
-                        }
-                    }
-
-                    // Try 2: Find by username
-                    if (username != null && foundUser == null) {
-                        Optional<User> userOpt = staticUserRepository.findByUsername(username);
-                        if (userOpt.isPresent()) {
-                            foundUser = userOpt.get();
-                        }
-                    }
-
-                    // If user found, get their role
+                    User foundUser = byKeycloakId.orElseGet(() -> byUsername.orElse(null));
                     if (foundUser != null && foundUser.getRole() != null) {
-                        String roleName = foundUser.getRole().name();
-                        roles.add(roleName);
+                        roles.add(foundUser.getRole().name());
                     }
-
                 } catch (Exception e) {
-                    // Silently handle error
+                    logger.warn("Failed DB fallback role lookup for jwt subject '{}'", keycloakUserId, e);
                 }
-            }
 
-            // Last resort: hardcoded fallback
             if (roles.isEmpty()) {
-                // Check if username contains patterns
-                if (username != null && username.toLowerCase().contains("hr")) {
-                    roles.add("HR_MANAGER");
-                } else {
-                    roles.add("NEW_USER");
-                }
+                logger.warn("No roles found in JWT or DB for username '{}', defaulting to NEW_USER", username);
+                roles.add("NEW_USER");
             }
         }
 
-        // Convert to Spring Security authorities
-        Collection<GrantedAuthority> grantedAuthorities = roles.stream()
+        return roles.stream()
                 .map(role -> new SimpleGrantedAuthority("ROLE_" + role))
                 .collect(Collectors.toList());
-
-
-        return grantedAuthorities;
     }
 }
-

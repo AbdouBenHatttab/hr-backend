@@ -5,6 +5,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import tn.isetbizerte.pfe.hrbackend.common.enums.TypeRole;
+import tn.isetbizerte.pfe.hrbackend.modules.team.entity.Team;
 
 @Entity
 @Table(name = "users")
@@ -35,6 +36,10 @@ public class User {
     @JoinColumn(name = "person_id", referencedColumnName = "id")
     private Person person;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "team_id")
+    private Team team;
+
     @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private List<LoginHistory> loginHistories = new ArrayList<>();
 
@@ -42,7 +47,7 @@ public class User {
     public User() {
         this.registrationDate = LocalDate.now();
         this.role = TypeRole.NEW_USER;  // Default role
-        this.active = true;
+        this.active = false;            // Inactive until HR assigns a real role
         this.emailVerified = false;
     }
 
@@ -124,6 +129,9 @@ public class User {
     public void setLoginHistories(List<LoginHistory> loginHistories) {
         this.loginHistories = loginHistories;
     }
+
+    public Team getTeam() { return team; }
+    public void setTeam(Team team) { this.team = team; }
 
     public void addLoginHistory(LoginHistory loginHistory) {
         this.loginHistories.add(loginHistory);

@@ -1,21 +1,35 @@
 package tn.isetbizerte.pfe.hrbackend.modules.auth.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.*;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.stereotype.Service;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
-import org.springframework.web.client.RestTemplate;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
+import org.springframework.web.client.RestTemplate;
 import tn.isetbizerte.pfe.hrbackend.common.constants.AppConstants;
 import tn.isetbizerte.pfe.hrbackend.common.dto.LoginRequest;
 import tn.isetbizerte.pfe.hrbackend.common.dto.LoginResponse;
 import tn.isetbizerte.pfe.hrbackend.common.dto.RegisterRequest;
-import tn.isetbizerte.pfe.hrbackend.modules.user.entity.Person;
-import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
 import tn.isetbizerte.pfe.hrbackend.modules.user.service.UserService;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * Service for authentication operations with Keycloak integration
@@ -23,16 +37,18 @@ import java.util.*;
 @Service
 public class AuthService {
 
+    private static final Logger logger = LoggerFactory.getLogger(AuthService.class);
+
     @Value("${keycloak.auth-server-url:http://localhost:8080}")
     private String keycloakServerUrl;
 
     @Value("${keycloak.realm:hr-realm}")
     private String realm;
 
-    @Value("${keycloak.admin.username:admin}")
+    @Value("${keycloak.admin.username}")
     private String adminUsername;
 
-    @Value("${keycloak.admin.password:admin}")
+    @Value("${keycloak.admin.password}")
     private String adminPassword;
 
     @Value("${keycloak.client-id:admin-cli}")
@@ -43,10 +59,14 @@ public class AuthService {
 
     private final RestTemplate restTemplate;
     private final UserService userService;
+    private final JwtDecoder jwtDecoder;
+    private final ObjectMapper objectMapper;
 
-    public AuthService(RestTemplate restTemplate, UserService userService) {
+    public AuthService(RestTemplate restTemplate, UserService userService, JwtDecoder jwtDecoder, ObjectMapper objectMapper) {
         this.restTemplate = restTemplate;
         this.userService = userService;
+        this.jwtDecoder = jwtDecoder;
+        this.objectMapper = objectMapper;
     }
 
     /**
@@ -110,6 +130,8 @@ public class AuthService {
                 String keycloakUserId = getUserIdFromKeycloak(adminToken, registerRequest.getUsername());
                 if (keycloakUserId != null) {
                     saveUserToDatabase(registerRequest, keycloakUserId);
+                } else {
+                    throw new IllegalStateException("Registered user was not found in Keycloak after creation");
                 }
 
                 Map<String, Object> result = new HashMap<>();
@@ -119,6 +141,7 @@ public class AuthService {
                 return result;
             }
         } catch (Exception e) {
+            logger.warn("Registration failed for username '{}': {}", registerRequest.getUsername(), e.getMessage());
             Map<String, Object> error = new HashMap<>();
             error.put("success", false);
             error.put("message", formatRegistrationError(e.getMessage()));
@@ -196,29 +219,7 @@ public class AuthService {
      * Save user and person data to local database
      */
     private void saveUserToDatabase(RegisterRequest registerRequest, String keycloakUserId) {
-        try {
-            Person person = new Person();
-            person.setFirstName(registerRequest.getFirstName());
-            person.setLastName(registerRequest.getLastName());
-            person.setEmail(registerRequest.getEmail());
-            person.setPhone(registerRequest.getPhone());
-            person.setBirthDate(registerRequest.getBirthDate());
-            person.setAddress(registerRequest.getAddress());
-            person.setMaritalStatus(registerRequest.getMaritalStatus());
-            person.setNumberOfChildren(registerRequest.getNumberOfChildren());
-
-            User user = new User(keycloakUserId, registerRequest.getUsername());
-            user.setEmailVerified(true);
-            user.setActive(true);
-
-            user.setPerson(person);
-            person.setUser(user);
-
-            userService.savePerson(person);
-            userService.saveUser(user);
-        } catch (Exception e) {
-            // Silently handle error
-        }
+        userService.saveRegisteredUser(registerRequest, keycloakUserId);
     }
 
     /**
@@ -250,19 +251,60 @@ public class AuthService {
                 userService.saveLoginHistory(username, ipAddress, userAgent, true);
                 return processTokenResponse(response.getBody(), username);
             }
-
+        } catch (RestClientResponseException e) {
+            userService.saveLoginHistory(username, ipAddress, userAgent, false);
+            logger.warn("Login rejected for '{}' with status {} and body {}", username, e.getStatusCode().value(), e.getResponseBodyAsString());
+            return new LoginResponse(mapKeycloakLoginError(e));
         } catch (RestClientException e) {
             userService.saveLoginHistory(username, ipAddress, userAgent, false);
-            if (e.getMessage().contains("401")) {
-                return new LoginResponse("Invalid username or password");
-            } else if (e.getMessage().contains("400")) {
-                return new LoginResponse("Bad request - Check Keycloak client configuration");
-            }
+            logger.warn("Login failed for '{}': {}", username, e.getMessage());
+            return new LoginResponse("Authentication service unreachable. Please try again.");
         } catch (Exception e) {
             userService.saveLoginHistory(username, ipAddress, userAgent, false);
+            logger.error("Unexpected error while logging in user '{}'", username, e);
         }
 
         return new LoginResponse("Login failed");
+    }
+
+    private String mapKeycloakLoginError(RestClientResponseException e) {
+        HttpStatus status = HttpStatus.resolve(e.getStatusCode().value());
+        String body = e.getResponseBodyAsString();
+        String error = extractJsonField(body, "error");
+
+        if ("invalid_grant".equals(error)) {
+            return "Invalid username or password";
+        }
+        if ("unauthorized_client".equals(error)) {
+            return "Keycloak client is not allowed to use password login (Direct Access Grants)";
+        }
+        if ("invalid_client".equals(error)) {
+            return "Invalid Keycloak client configuration";
+        }
+        if ("invalid_request".equals(error)) {
+            return "Invalid login request";
+        }
+
+        if (status != null && status.is5xxServerError()) {
+            return "Authentication server error. Please try again later.";
+        }
+        if (status != null && status.is4xxClientError()) {
+            return "Login request rejected by authentication server";
+        }
+        return "Login failed";
+    }
+
+    private String extractJsonField(String json, String key) {
+        if (json == null || json.isBlank()) {
+            return "";
+        }
+        try {
+            JsonNode rootNode = objectMapper.readTree(json);
+            return rootNode.path(key).asText("");
+        } catch (Exception e) {
+            logger.warn("Failed to parse Keycloak error response body for key '{}'", key, e);
+            return "";
+        }
     }
 
     /**
@@ -296,6 +338,7 @@ public class AuthService {
                 roles
             );
         } catch (Exception e) {
+            logger.error("Failed to process token response for user '{}'", username, e);
             return new LoginResponse("Error processing login response");
         }
     }
@@ -307,8 +350,7 @@ public class AuthService {
         try {
             userService.updateUserRoleByUsername(username, roleFromKeycloak);
         } catch (Exception e) {
-            // Log but don't fail - role sync is not critical for login
-            // The JWT token has the correct role anyway
+            logger.warn("Could not sync role '{}' for user '{}'", roleFromKeycloak, username, e);
         }
     }
 
@@ -316,105 +358,46 @@ public class AuthService {
      * Parse JWT token to extract user information
      */
     private Map<String, Object> parseJwtToken(String accessToken) {
+        Map<String, Object> userInfo = new HashMap<>();
         try {
-            String[] parts = accessToken.split("\\.");
-            if (parts.length >= 2) {
-                String payload = parts[1];
-                while (payload.length() % 4 != 0) {
-                    payload += "=";
-                }
+            Jwt jwt = jwtDecoder.decode(accessToken);
 
-                byte[] decodedBytes = Base64.getDecoder().decode(payload);
-                String decodedPayload = new String(decodedBytes);
-
-                Map<String, Object> userInfo = new HashMap<>();
-
-                String email = extractJsonField(decodedPayload, "email");
-                if (email == null || email.isEmpty()) {
-                    email = extractJsonField(decodedPayload, "preferred_username");
-                }
-                userInfo.put("email", email);
-
-                // Extract only the primary role (EMPLOYEE, TEAM_LEADER, HR_MANAGER, NEW_USER)
-                String primaryRole = extractPrimaryRole(decodedPayload);
-                List<String> roles = new ArrayList<>();
-                if (primaryRole != null) {
-                    roles.add(primaryRole);
-                }
-                userInfo.put("roles", roles);
-
-                return userInfo;
+            String email = jwt.getClaimAsString("email");
+            if (email == null || email.isEmpty()) {
+                email = jwt.getClaimAsString("preferred_username");
             }
-        } catch (Exception e) {
-            // Silently handle
-        }
-        return new HashMap<>();
-    }
+            userInfo.put("email", email);
 
-    /**
-     * Extract only the primary role from JWT (NEW_USER, EMPLOYEE, TEAM_LEADER, HR_MANAGER)
-     */
-    private String extractPrimaryRole(String json) {
-        List<String> primaryRoles = new ArrayList<>();
-
-        // Extract all roles from realm_access
-        if (json.contains("\"realm_access\"")) {
-            primaryRoles.addAll(extractRolesFromRealmAccess(json));
-        }
-
-        // Filter to only the primary roles we care about
-        String[] allowedRoles = {"HR_MANAGER", "TEAM_LEADER", "EMPLOYEE", "NEW_USER"};
-        for (String allowed : allowedRoles) {
-            if (primaryRoles.contains(allowed)) {
-                return allowed; // Return the first matching primary role in order of priority
-            }
-        }
-
-        return "NEW_USER"; // Default role if none found
-    }
-
-    private String extractJsonField(String json, String fieldName) {
-        try {
-            String searchPattern = "\"" + fieldName + "\":\"";
-            int fieldStart = json.indexOf(searchPattern);
-            if (fieldStart != -1) {
-                fieldStart += searchPattern.length();
-                int fieldEnd = json.indexOf("\"", fieldStart);
-                if (fieldEnd > fieldStart) {
-                    return json.substring(fieldStart, fieldEnd);
-                }
-            }
-        } catch (Exception e) {
-            // Silently handle
-        }
-        return null;
-    }
-
-    private List<String> extractRolesFromRealmAccess(String json) {
-        List<String> roles = new ArrayList<>();
-        try {
-            int realmStart = json.indexOf("\"realm_access\":");
-            if (realmStart != -1) {
-                int rolesStart = json.indexOf("\"roles\":[", realmStart);
-                if (rolesStart != -1) {
-                    rolesStart += 9;
-                    int rolesEnd = json.indexOf("]", rolesStart);
-                    if (rolesEnd > rolesStart) {
-                        String rolesArray = json.substring(rolesStart, rolesEnd);
-                        String[] roleParts = rolesArray.split(",");
-                        for (String role : roleParts) {
-                            role = role.trim().replace("\"", "");
-                            if (!role.isEmpty()) {
-                                roles.add(role);
-                            }
-                        }
+            Map<String, Object> realmAccess = jwt.getClaim("realm_access");
+            List<String> realmRoles = new ArrayList<>();
+            if (realmAccess != null && realmAccess.get("roles") instanceof List<?> rolesClaim) {
+                for (Object role : rolesClaim) {
+                    if (role != null) {
+                        realmRoles.add(role.toString());
                     }
                 }
             }
-        } catch (Exception e) {
 
+            String primaryRole = extractPrimaryRoleFromRoles(realmRoles);
+            userInfo.put("roles", Collections.singletonList(primaryRole));
+            return userInfo;
+        } catch (Exception e) {
+            logger.error("Failed to decode JWT access token", e);
+            userInfo.put("roles", Collections.singletonList("NEW_USER"));
+            return userInfo;
         }
-        return roles;
+    }
+
+    /**
+     * Extract only the primary role from a list of roles
+     */
+    private String extractPrimaryRoleFromRoles(List<String> roles) {
+        String[] allowedRoles = {"HR_MANAGER", "TEAM_LEADER", "EMPLOYEE", "NEW_USER"};
+        for (String allowed : allowedRoles) {
+            if (roles.contains(allowed)) {
+                return allowed;
+            }
+        }
+        return "NEW_USER";
     }
 }
-

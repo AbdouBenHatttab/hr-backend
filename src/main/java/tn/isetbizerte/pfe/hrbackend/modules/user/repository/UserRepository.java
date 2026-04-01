@@ -18,5 +18,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
     boolean existsByKeycloakId(String keycloakId);
     List<User> findByRole(TypeRole role);
     List<User> findByActive(Boolean active);
+    long countByRole(TypeRole role);
+    long countByTeamId(Long teamId);
 }
 

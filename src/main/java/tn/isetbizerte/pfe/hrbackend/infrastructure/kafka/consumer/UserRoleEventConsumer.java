@@ -19,11 +19,16 @@ public class UserRoleEventConsumer {
     private static final Logger logger = LoggerFactory.getLogger(UserRoleEventConsumer.class);
 
     private final EmailNotificationService emailNotificationService;
+    private final tn.isetbizerte.pfe.hrbackend.infrastructure.email.HREmailService hrEmailService;
     private final ObjectMapper objectMapper;
 
-    public UserRoleEventConsumer(EmailNotificationService emailNotificationService, ObjectMapper objectMapper) {
+    public UserRoleEventConsumer(
+            EmailNotificationService emailNotificationService,
+            tn.isetbizerte.pfe.hrbackend.infrastructure.email.HREmailService hrEmailService,
+            ObjectMapper objectMapper) {
         this.emailNotificationService = emailNotificationService;
-        this.objectMapper = objectMapper;
+        this.hrEmailService           = hrEmailService;
+        this.objectMapper             = objectMapper;
     }
 
     @PostConstruct
@@ -43,7 +48,10 @@ public class UserRoleEventConsumer {
                 return;
             }
 
-            emailNotificationService.sendRoleAssignmentNotification(event);
+            // Use new professional email service
+            hrEmailService.sendRoleAssigned(
+                    event.getEmail(), event.getFirstName(), event.getLastName(),
+                    event.getUsername(), event.getNewRole());
 
             logger.info("📧 Email notification triggered for user: {} with new role: {}",
                     event.getUsername(), event.getNewRole());

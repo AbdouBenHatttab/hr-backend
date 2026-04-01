@@ -25,6 +25,7 @@ public class RegisterRequest {
     private String address;
     private String maritalStatus;
     private int numberOfChildren;
+    private String department;
 
     public RegisterRequest() {}
 
@@ -108,5 +109,8 @@ public class RegisterRequest {
     public void setNumberOfChildren(int numberOfChildren) {
         this.numberOfChildren = numberOfChildren;
     }
+
+    public String getDepartment() { return department; }
+    public void setDepartment(String department) { this.department = department; }
 }
 

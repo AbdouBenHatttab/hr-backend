@@ -108,4 +108,32 @@ public class HRController {
 
         return ResponseEntity.ok(response);
     }
+
+    /**
+     * Deactivate a user account (HR Manager only)
+     * PATCH /api/hr/users/{userId}/deactivate
+     */
+    @PatchMapping("/users/{userId}/deactivate")
+    public ResponseEntity<Map<String, Object>> deactivateUser(
+            @PathVariable Long userId,
+            @AuthenticationPrincipal Jwt jwt) {
+
+        String deactivatedBy = jwt.getClaimAsString("preferred_username");
+        Map<String, Object> response = hrService.deactivateUser(userId, deactivatedBy);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Reactivate a user account (HR Manager only)
+     * PATCH /api/hr/users/{userId}/activate
+     */
+    @PatchMapping("/users/{userId}/activate")
+    public ResponseEntity<Map<String, Object>> activateUser(
+            @PathVariable Long userId,
+            @AuthenticationPrincipal Jwt jwt) {
+
+        String activatedBy = jwt.getClaimAsString("preferred_username");
+        Map<String, Object> response = hrService.activateUser(userId, activatedBy);
+        return ResponseEntity.ok(response);
+    }
 }

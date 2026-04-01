@@ -34,8 +34,7 @@ public class AuthController {
         } catch (Exception e) {
             Map<String, Object> errorResponse = new HashMap<>();
             errorResponse.put("success", false);
-            errorResponse.put("message", "Registration failed: " + e.getMessage());
-            errorResponse.put("error", e.getClass().getSimpleName());
+            errorResponse.put("message", "Registration failed due to a server error. Please try again later.");
             return ResponseEntity.status(500).body(errorResponse);
         }
     }
@@ -54,7 +53,7 @@ public class AuthController {
                 return ResponseEntity.badRequest().body(result);
             }
         } catch (Exception e) {
-            LoginResponse errorResponse = new LoginResponse("Login failed: " + e.getMessage());
+            LoginResponse errorResponse = new LoginResponse("Login failed due to a server error. Please try again later.");
             return ResponseEntity.status(500).body(errorResponse);
         }
     }

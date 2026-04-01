@@ -15,4 +15,3 @@ public interface LoginHistoryRepository extends JpaRepository<LoginHistory, Long
     List<LoginHistory> findByUserAndSuccessOrderByLoginDateDesc(User user, Boolean success);
     List<LoginHistory> findByLoginDateBetween(LocalDateTime start, LocalDateTime end);
 }
-

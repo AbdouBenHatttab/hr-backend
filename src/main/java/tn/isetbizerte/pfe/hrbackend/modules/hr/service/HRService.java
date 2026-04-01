@@ -179,10 +179,13 @@ public class HRService {
             throw new BadRequestException("Failed to update role in Keycloak. Please check Keycloak connection and logs.");
         }
 
-        // Update role in database
+        // Update role in database and activate the user
         user.setRole(newRole);
+        if (newRole != TypeRole.NEW_USER) {
+            user.setActive(true); // Activate user now that they have a real role
+        }
         userService.saveUser(user);
-        logger.info("Role updated in database for user: {}", user.getUsername());
+        logger.info("Role updated and user activated in database for user: {}", user.getUsername());
 
         // Publish Kafka event for email notification
         boolean eventPublished = publishRoleAssignedEvent(user, oldRole, newRole, assignedBy);
@@ -238,6 +241,63 @@ public class HRService {
         }
     }
 
+    /**
+     * Deactivate a user account.
+     * Business rules:
+     * - HR Manager cannot deactivate their own account.
+     * - An already deactivated account returns a clear message.
+     */
+    public Map<String, Object> deactivateUser(Long userId, String deactivatedBy) {
+        User user = userService.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + userId));
+
+        if (user.getUsername().equals(deactivatedBy)) {
+            throw new BadRequestException("You cannot deactivate your own account.");
+        }
+
+        if (Boolean.FALSE.equals(user.getActive())) {
+            throw new BadRequestException("User '" + user.getUsername() + "' is already deactivated.");
+        }
+
+        user.setActive(false);
+        userService.saveUser(user);
+        logger.info("User '{}' deactivated by '{}'", user.getUsername(), deactivatedBy);
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("success", true);
+        response.put("message", "User '" + user.getUsername() + "' has been deactivated.");
+        response.put("userId", userId);
+        response.put("username", user.getUsername());
+        response.put("active", false);
+        response.put("deactivatedBy", deactivatedBy);
+        return response;
+    }
+
+    /**
+     * Reactivate a previously deactivated user account.
+     */
+    public Map<String, Object> activateUser(Long userId, String activatedBy) {
+        User user = userService.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + userId));
+
+        if (Boolean.TRUE.equals(user.getActive())) {
+            throw new BadRequestException("User '" + user.getUsername() + "' is already active.");
+        }
+
+        user.setActive(true);
+        userService.saveUser(user);
+        logger.info("User '{}' reactivated by '{}'", user.getUsername(), activatedBy);
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("success", true);
+        response.put("message", "User '" + user.getUsername() + "' has been reactivated.");
+        response.put("userId", userId);
+        response.put("username", user.getUsername());
+        response.put("active", true);
+        response.put("activatedBy", activatedBy);
+        return response;
+    }
+
     private Map<String, Object> mapUserToDetails(User user) {
         Map<String, Object> userInfo = new HashMap<>();
         userInfo.put("id", user.getId());
@@ -250,16 +310,22 @@ public class HRService {
 
         if (user.getPerson() != null) {
             Person person = user.getPerson();
-            userInfo.put("personalInfo", Map.of(
-                "firstName", person.getFirstName(),
-                "lastName", person.getLastName(),
-                "email", person.getEmail(),
-                "phone", person.getPhone() != null ? person.getPhone() : "Not provided",
-                "address", person.getAddress() != null ? person.getAddress() : "Not provided",
-                "birthDate", person.getBirthDate() != null ? person.getBirthDate().toString() : "Not provided",
-                "maritalStatus", person.getMaritalStatus() != null ? person.getMaritalStatus() : "Not provided",
-                "numberOfChildren", person.getNumberOfChildren()
-            ));
+            // Use HashMap instead of Map.of() — Map.of() throws NullPointerException on null values
+            Map<String, Object> personalInfo = new HashMap<>();
+            personalInfo.put("firstName",       person.getFirstName()  != null ? person.getFirstName()  : "");
+            personalInfo.put("lastName",        person.getLastName()   != null ? person.getLastName()   : "");
+            personalInfo.put("email",           person.getEmail()      != null ? person.getEmail()      : "");
+            personalInfo.put("phone",           person.getPhone()      != null ? person.getPhone()      : "");
+            personalInfo.put("address",         person.getAddress()    != null ? person.getAddress()    : "");
+            personalInfo.put("birthDate",       person.getBirthDate()  != null ? person.getBirthDate().toString() : "");
+            personalInfo.put("maritalStatus",   person.getMaritalStatus()   != null ? person.getMaritalStatus()   : "");
+            personalInfo.put("numberOfChildren",person.getNumberOfChildren());
+            personalInfo.put("department",      person.getDepartment() != null ? person.getDepartment() : "");
+            personalInfo.put("salary",          person.getSalary());
+            personalInfo.put("hireDate",        person.getHireDate()   != null ? person.getHireDate().toString()  : "");
+            personalInfo.put("avatarPhoto",     person.getAvatarPhoto() != null ? person.getAvatarPhoto() : "");
+            personalInfo.put("avatarColor",     person.getAvatarColor() != null ? person.getAvatarColor() : "");
+            userInfo.put("personalInfo", personalInfo);
         }
 
         return userInfo;
