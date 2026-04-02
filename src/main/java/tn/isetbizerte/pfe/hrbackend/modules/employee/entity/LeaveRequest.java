@@ -11,7 +11,14 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(name = "leave_requests")
+@Table(
+        name = "leave_requests",
+        indexes = {
+                @Index(name = "idx_leave_start_date", columnList = "start_date"),
+                @Index(name = "idx_leave_end_date", columnList = "end_date"),
+                @Index(name = "idx_leave_status", columnList = "status")
+        }
+)
 public class LeaveRequest {
 
     @Id

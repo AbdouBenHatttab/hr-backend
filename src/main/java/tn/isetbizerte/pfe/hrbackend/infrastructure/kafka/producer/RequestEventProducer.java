@@ -29,7 +29,7 @@ public class RequestEventProducer {
         try {
             String payload = objectMapper.writeValueAsString(event);
             outboxEventService.enqueue(requestEventsTopic, String.valueOf(event.getRequestId()), payload);
-            log.info("Enqueued {} to outbox for requestId={}", event.getType(), event.getRequestId());
+            log.info("Enqueued {} to outbox for eventId={} requestId={}", event.getType(), event.getEventId(), event.getRequestId());
         } catch (Exception e) {
             log.error("Failed to enqueue request event for requestId={}", event.getRequestId(), e);
             throw new RuntimeException("Failed to enqueue request event", e);

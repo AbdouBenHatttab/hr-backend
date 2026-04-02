@@ -27,6 +27,12 @@ public class RequestHistory {
     @Column(length = 2000)
     private String comment;
 
+    @Column(length = 30)
+    private String fromState;
+
+    @Column(length = 30)
+    private String toState;
+
     @Column(nullable = false)
     private LocalDateTime timestamp = LocalDateTime.now();
 
@@ -38,6 +44,18 @@ public class RequestHistory {
         this.action = action;
         this.actorId = actorId;
         this.comment = comment;
+        this.timestamp = LocalDateTime.now();
+    }
+
+    public RequestHistory(Long requestId, String type, String action, String actorId, String comment,
+                          String fromState, String toState) {
+        this.requestId = requestId;
+        this.type = type;
+        this.action = action;
+        this.actorId = actorId;
+        this.comment = comment;
+        this.fromState = fromState;
+        this.toState = toState;
         this.timestamp = LocalDateTime.now();
     }
 
@@ -58,6 +76,12 @@ public class RequestHistory {
 
     public String getComment() { return comment; }
     public void setComment(String comment) { this.comment = comment; }
+
+    public String getFromState() { return fromState; }
+    public void setFromState(String fromState) { this.fromState = fromState; }
+
+    public String getToState() { return toState; }
+    public void setToState(String toState) { this.toState = toState; }
 
     public LocalDateTime getTimestamp() { return timestamp; }
     public void setTimestamp(LocalDateTime timestamp) { this.timestamp = timestamp; }

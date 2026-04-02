@@ -5,7 +5,13 @@ import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "outbox_events")
+@Table(
+        name = "outbox_events",
+        indexes = {
+                @Index(name = "idx_outbox_status_retry", columnList = "status,next_retry_at"),
+                @Index(name = "idx_outbox_created_at", columnList = "created_at")
+        }
+)
 public class OutboxEvent {
 
     @Id
@@ -35,6 +41,8 @@ public class OutboxEvent {
     private LocalDateTime createdAt = LocalDateTime.now();
 
     private LocalDateTime sentAt;
+
+    private LocalDateTime nextRetryAt;
 
     public OutboxEvent() {}
 
@@ -73,4 +81,7 @@ public class OutboxEvent {
 
     public LocalDateTime getSentAt() { return sentAt; }
     public void setSentAt(LocalDateTime sentAt) { this.sentAt = sentAt; }
+
+    public LocalDateTime getNextRetryAt() { return nextRetryAt; }
+    public void setNextRetryAt(LocalDateTime nextRetryAt) { this.nextRetryAt = nextRetryAt; }
 }

@@ -1,6 +1,7 @@
 package tn.isetbizerte.pfe.hrbackend.modules.employee.service;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -73,6 +74,7 @@ public class EmployeeLeaveService {
      * - EMPLOYEE: goes through full 2-step flow (TL → HR)
      * - TEAM_LEADER: TL step is auto-approved, goes directly to HR
      */
+    @CacheEvict(value = "calendarLeaves", allEntries = true)
     @Transactional
     public LeaveRequestResponseDto createLeaveRequest(String username, CreateLeaveRequestDto dto) {
         log.info("Creating leave request for user: {}", username);
@@ -185,11 +187,13 @@ public class EmployeeLeaveService {
      * Team Leader approves or rejects a leave request.
      * Security: Team Leader can ONLY act on requests from employees in their team.
      */
+    @CacheEvict(value = "calendarLeaves", allEntries = true)
     @Transactional
     public LeaveRequestResponseDto teamLeaderDecision(Long leaveId, boolean approve, String leaderKeycloakId) {
         return teamLeaderDecision(leaveId, approve, leaderKeycloakId, null);
     }
 
+    @CacheEvict(value = "calendarLeaves", allEntries = true)
     @Transactional
     public LeaveRequestResponseDto teamLeaderDecision(Long leaveId, boolean approve, String leaderKeycloakId, String decisionReason) {
         log.info("Team Leader {} leave request ID: {}", approve ? "approving" : "rejecting", leaveId);
@@ -208,14 +212,14 @@ public class EmployeeLeaveService {
             }
         }
 
-        // Validate status
-        if (leave.getStatus() != LeaveStatus.PENDING) {
-            throw new BadRequestException("Leave request is already " + leave.getStatus().name().toLowerCase());
-        }
-        if (leave.getTeamLeaderDecision() != ApprovalDecision.PENDING) {
-            throw new BadRequestException("Team Leader decision already recorded.");
+        // Idempotency: if already processed, return current state
+        if (leave.getStatus() != LeaveStatus.PENDING || leave.getTeamLeaderDecision() != ApprovalDecision.PENDING) {
+            return mapToResponseDto(leave);
         }
 
+        String fromStage = computeApprovalStage(leave);
+
+        // Validate status
         // Validate Team Leader has a team
         Team leaderTeam = teamRepository.findByTeamLeaderKeycloakId(leaderKeycloakId)
                 .orElseThrow(() -> new ResourceNotFoundException(
@@ -247,7 +251,9 @@ public class EmployeeLeaveService {
                     "TL_REJECTED",
                     leave.getId(),
                     leaderKeycloakId,
-                    decisionReason.trim()
+                    decisionReason.trim(),
+                    fromStage,
+                    computeApprovalStage(leave)
             );
             requestEventProducer.publish(
                     new RequestEvent("LEAVE_REJECTED", "LEAVE", leave.getId(), leave.getUser().getKeycloakId(), leaderKeycloakId, decisionReason.trim())
@@ -256,17 +262,19 @@ public class EmployeeLeaveService {
             sendLeaveDecisionEmail(leave, false);
         } else {
             leave.setApprovedBy(leaderKeycloakId);
+            requestEventProducer.publish(
+                    new RequestEvent("LEAVE_APPROVED", "LEAVE", leave.getId(), leave.getUser().getKeycloakId(), leaderKeycloakId, null)
+            );
+            recalculateStatus(leave);
             historyService.record(
                     "LEAVE",
                     "TL_APPROVED",
                     leave.getId(),
                     leaderKeycloakId,
-                    null
+                    null,
+                    fromStage,
+                    computeApprovalStage(leave)
             );
-            requestEventProducer.publish(
-                    new RequestEvent("LEAVE_APPROVED", "LEAVE", leave.getId(), leave.getUser().getKeycloakId(), leaderKeycloakId, null)
-            );
-            recalculateStatus(leave);
         }
 
         return mapToResponseDto(leaveRequestRepository.save(leave));
@@ -276,16 +284,19 @@ public class EmployeeLeaveService {
      * HR Manager approves or rejects a leave request.
      * Sets hrDecision and recalculates overall status.
      */
+    @CacheEvict(value = "calendarLeaves", allEntries = true)
     @Transactional
     public LeaveRequestResponseDto hrDecision(Long leaveId, boolean approve) {
         return hrDecision(leaveId, approve, null);
     }
 
+    @CacheEvict(value = "calendarLeaves", allEntries = true)
     @Transactional
     public LeaveRequestResponseDto hrDecision(Long leaveId, boolean approve, String decisionReason) {
         return hrDecision(leaveId, approve, decisionReason, null);
     }
 
+    @CacheEvict(value = "calendarLeaves", allEntries = true)
     @Transactional
     public LeaveRequestResponseDto hrDecision(Long leaveId, boolean approve, String decisionReason, String hrKeycloakId) {
         log.info("HR Manager {} leave request ID: {}", approve ? "approving" : "rejecting", leaveId);
@@ -298,6 +309,13 @@ public class EmployeeLeaveService {
                 && hrKeycloakId.equals(leave.getUser().getKeycloakId())) {
             throw new AccessDeniedException("You cannot approve or reject your own leave request.");
         }
+
+        // Idempotency: if already processed, return current state
+        if (leave.getStatus() != LeaveStatus.PENDING || leave.getHrDecision() != ApprovalDecision.PENDING) {
+            return mapToResponseDto(leave);
+        }
+
+        String fromStage = computeApprovalStage(leave);
 
         if (leave.getStatus() == LeaveStatus.REJECTED) {
             throw new BadRequestException("Leave request has already been rejected");
@@ -332,7 +350,9 @@ public class EmployeeLeaveService {
                     "HR_REJECTED",
                     leave.getId(),
                     hrKeycloakId,
-                    decisionReason.trim()
+                    decisionReason.trim(),
+                    fromStage,
+                    computeApprovalStage(leave)
             );
             requestEventProducer.publish(
                     new RequestEvent("LEAVE_REJECTED", "LEAVE", leave.getId(), leave.getUser().getKeycloakId(), hrKeycloakId, decisionReason.trim())
@@ -340,17 +360,19 @@ public class EmployeeLeaveService {
             sendLeaveDecisionEmail(leave, false);
         } else {
             leave.setApprovedBy(hrKeycloakId);
+            requestEventProducer.publish(
+                    new RequestEvent("LEAVE_APPROVED", "LEAVE", leave.getId(), leave.getUser().getKeycloakId(), hrKeycloakId, null)
+            );
+            recalculateStatus(leave);
             historyService.record(
                     "LEAVE",
                     "HR_APPROVED",
                     leave.getId(),
                     hrKeycloakId,
-                    null
+                    null,
+                    fromStage,
+                    computeApprovalStage(leave)
             );
-            requestEventProducer.publish(
-                    new RequestEvent("LEAVE_APPROVED", "LEAVE", leave.getId(), leave.getUser().getKeycloakId(), hrKeycloakId, null)
-            );
-            recalculateStatus(leave);
         }
 
         return mapToResponseDto(leaveRequestRepository.save(leave));

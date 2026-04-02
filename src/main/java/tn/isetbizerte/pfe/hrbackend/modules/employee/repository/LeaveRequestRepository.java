@@ -70,6 +70,108 @@ public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, Long
     Page<LeaveRequest> findAllByTeamId(@Param("teamId") Long teamId, Pageable pageable);
 
     /**
+     * Get all leave requests (any status) for employees in a specific team (list variant).
+     */
+    @Query("SELECT lr FROM LeaveRequest lr " +
+           "JOIN FETCH lr.user u " +
+           "JOIN FETCH u.person " +
+           "WHERE u.team.id = :teamId")
+    List<LeaveRequest> findAllByTeamId(@Param("teamId") Long teamId);
+
+    /**
+     * Calendar — overlap date range for a specific user.
+     * Includes leaves that cross the start/end boundaries.
+     */
+    @Query("SELECT lr FROM LeaveRequest lr " +
+           "JOIN FETCH lr.user u " +
+           "JOIN FETCH u.person " +
+           "WHERE u = :user " +
+           "AND lr.startDate <= :endDate " +
+           "AND lr.endDate >= :startDate " +
+           "AND lr.status IN :statuses")
+    List<LeaveRequest> findByUserAndDateRangeAndStatusIn(@Param("user") User user,
+                                                         @Param("startDate") java.time.LocalDate startDate,
+                                                         @Param("endDate") java.time.LocalDate endDate,
+                                                         @Param("statuses") List<LeaveStatus> statuses);
+
+    /**
+     * Calendar — overlap date range for a specific user id.
+     */
+    @Query("SELECT lr FROM LeaveRequest lr " +
+           "JOIN FETCH lr.user u " +
+           "JOIN FETCH u.person " +
+           "WHERE u.id = :userId " +
+           "AND lr.startDate <= :endDate " +
+           "AND lr.endDate >= :startDate " +
+           "AND lr.status IN :statuses")
+    List<LeaveRequest> findByUserIdAndDateRangeAndStatusIn(@Param("userId") Long userId,
+                                                           @Param("startDate") java.time.LocalDate startDate,
+                                                           @Param("endDate") java.time.LocalDate endDate,
+                                                           @Param("statuses") List<LeaveStatus> statuses);
+
+    /**
+     * Calendar — overlap date range for a team.
+     * Includes leaves that cross the start/end boundaries.
+     */
+    @Query("SELECT lr FROM LeaveRequest lr " +
+           "JOIN FETCH lr.user u " +
+           "JOIN FETCH u.person " +
+           "WHERE u.team.id = :teamId " +
+           "AND lr.startDate <= :endDate " +
+           "AND lr.endDate >= :startDate " +
+           "AND lr.status IN :statuses")
+    List<LeaveRequest> findByTeamIdAndDateRangeAndStatusIn(@Param("teamId") Long teamId,
+                                                           @Param("startDate") java.time.LocalDate startDate,
+                                                           @Param("endDate") java.time.LocalDate endDate,
+                                                           @Param("statuses") List<LeaveStatus> statuses);
+
+    /**
+     * Calendar — overlap date range for a team and specific user.
+     */
+    @Query("SELECT lr FROM LeaveRequest lr " +
+           "JOIN FETCH lr.user u " +
+           "JOIN FETCH u.person " +
+           "WHERE u.team.id = :teamId " +
+           "AND u.id = :userId " +
+           "AND lr.startDate <= :endDate " +
+           "AND lr.endDate >= :startDate " +
+           "AND lr.status IN :statuses")
+    List<LeaveRequest> findByTeamIdAndUserIdAndDateRangeAndStatusIn(@Param("teamId") Long teamId,
+                                                                    @Param("userId") Long userId,
+                                                                    @Param("startDate") java.time.LocalDate startDate,
+                                                                    @Param("endDate") java.time.LocalDate endDate,
+                                                                    @Param("statuses") List<LeaveStatus> statuses);
+
+    /**
+     * Calendar — overlap date range for all users (HR).
+     * Includes leaves that cross the start/end boundaries.
+     */
+    @Query("SELECT lr FROM LeaveRequest lr " +
+           "JOIN FETCH lr.user u " +
+           "JOIN FETCH u.person " +
+           "WHERE lr.startDate <= :endDate " +
+           "AND lr.endDate >= :startDate " +
+           "AND lr.status IN :statuses")
+    List<LeaveRequest> findByDateRangeAndStatusIn(@Param("startDate") java.time.LocalDate startDate,
+                                                  @Param("endDate") java.time.LocalDate endDate,
+                                                  @Param("statuses") List<LeaveStatus> statuses);
+
+    /**
+     * Calendar — overlap date range for a specific user (HR filter).
+     */
+    @Query("SELECT lr FROM LeaveRequest lr " +
+           "JOIN FETCH lr.user u " +
+           "JOIN FETCH u.person " +
+           "WHERE u.id = :userId " +
+           "AND lr.startDate <= :endDate " +
+           "AND lr.endDate >= :startDate " +
+           "AND lr.status IN :statuses")
+    List<LeaveRequest> findByDateRangeAndStatusInAndUserId(@Param("startDate") java.time.LocalDate startDate,
+                                                           @Param("endDate") java.time.LocalDate endDate,
+                                                           @Param("statuses") List<LeaveStatus> statuses,
+                                                           @Param("userId") Long userId);
+
+    /**
      * Get all leave requests for a team, excluding the team leader.
      */
     @Query("SELECT lr FROM LeaveRequest lr " +
