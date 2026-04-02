@@ -18,4 +18,9 @@ public class RequestHistoryService {
     public void record(String type, String action, Long requestId, String actorId, String comment) {
         repository.save(new RequestHistory(requestId, type, action, actorId, comment));
     }
+
+    @Transactional(readOnly = true)
+    public boolean exists(String type, String action, Long requestId, String actorId) {
+        return repository.existsByRequestIdAndTypeAndActionAndActorId(requestId, type, action, actorId);
+    }
 }

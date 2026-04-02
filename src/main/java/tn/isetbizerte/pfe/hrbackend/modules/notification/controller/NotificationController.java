@@ -7,7 +7,9 @@ import org.springframework.web.bind.annotation.*;
 import tn.isetbizerte.pfe.hrbackend.modules.notification.service.NotificationService;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/notifications")
@@ -48,6 +50,24 @@ public class NotificationController {
         Map<String, Object> res = new HashMap<>();
         res.put("success", true);
         res.put("message", "All notifications marked as read");
+        return res;
+    }
+
+    @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")
+    @PatchMapping("/read-batch")
+    public Map<String, Object> markBatchRead(@RequestBody Map<String, Object> body, @AuthenticationPrincipal Jwt jwt) {
+        String username = jwt.getClaimAsString("preferred_username");
+        Object idsObj = body.get("ids");
+        List<Long> ids = idsObj instanceof List
+                ? ((List<?>) idsObj).stream()
+                    .filter(Number.class::isInstance)
+                    .map(v -> ((Number) v).longValue())
+                    .collect(Collectors.toList())
+                : List.of();
+        notificationService.markBatchRead(username, ids);
+        Map<String, Object> res = new HashMap<>();
+        res.put("success", true);
+        res.put("message", "Notifications marked as read");
         return res;
     }
 }

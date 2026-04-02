@@ -46,6 +46,21 @@ public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, Long
     Page<LeaveRequest> findPendingByTeamId(@Param("teamId") Long teamId, Pageable pageable);
 
     /**
+     * Get all pending leave requests for a team, excluding the team leader.
+     * Prevents TL from seeing or acting on their own requests.
+     */
+    @Query("SELECT lr FROM LeaveRequest lr " +
+           "JOIN FETCH lr.user u " +
+           "JOIN FETCH u.person " +
+           "WHERE u.team.id = :teamId " +
+           "AND lr.status = 'PENDING' " +
+           "AND u.keycloakId <> :leaderKeycloakId " +
+           "AND u.role <> 'TEAM_LEADER'")
+    Page<LeaveRequest> findPendingByTeamIdExcludingLeader(@Param("teamId") Long teamId,
+                                                         @Param("leaderKeycloakId") String leaderKeycloakId,
+                                                         Pageable pageable);
+
+    /**
      * Get all leave requests (any status) for employees in a specific team.
      */
     @Query("SELECT lr FROM LeaveRequest lr " +
@@ -53,6 +68,19 @@ public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, Long
            "JOIN FETCH u.person " +
            "WHERE u.team.id = :teamId")
     Page<LeaveRequest> findAllByTeamId(@Param("teamId") Long teamId, Pageable pageable);
+
+    /**
+     * Get all leave requests for a team, excluding the team leader.
+     */
+    @Query("SELECT lr FROM LeaveRequest lr " +
+           "JOIN FETCH lr.user u " +
+           "JOIN FETCH u.person " +
+           "WHERE u.team.id = :teamId " +
+           "AND u.keycloakId <> :leaderKeycloakId " +
+           "AND u.role <> 'TEAM_LEADER'")
+    Page<LeaveRequest> findAllByTeamIdExcludingLeader(@Param("teamId") Long teamId,
+                                                     @Param("leaderKeycloakId") String leaderKeycloakId,
+                                                     Pageable pageable);
 
     /**
      * Count APPROVED/PENDING leaves for a team that overlap with [start, end].

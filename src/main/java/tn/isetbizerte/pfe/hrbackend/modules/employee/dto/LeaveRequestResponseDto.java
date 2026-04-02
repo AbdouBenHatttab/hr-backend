@@ -12,6 +12,7 @@ public class LeaveRequestResponseDto {
     private Long id;
     private String employeeFullName;
     private String employeeEmail;
+    private String employeeUsername;
     private LeaveType leaveType;
     private LocalDate startDate;
     private LocalDate endDate;
@@ -21,6 +22,7 @@ public class LeaveRequestResponseDto {
     private ApprovalDecision teamLeaderDecision;
     private ApprovalDecision hrDecision;
     private LeaveStatus status;
+    private String approvalStage;
     private LocalDate approvalDate;
     private LocalDateTime createdAt;
 
@@ -55,6 +57,9 @@ public class LeaveRequestResponseDto {
     public void setEmployeeEmail(String employeeEmail) {
         this.employeeEmail = employeeEmail;
     }
+
+    public String getEmployeeUsername() { return employeeUsername; }
+    public void setEmployeeUsername(String employeeUsername) { this.employeeUsername = employeeUsername; }
 
     public LeaveType getLeaveType() {
         return leaveType;
@@ -127,6 +132,9 @@ public class LeaveRequestResponseDto {
     public void setStatus(LeaveStatus status) {
         this.status = status;
     }
+
+    public String getApprovalStage() { return approvalStage; }
+    public void setApprovalStage(String approvalStage) { this.approvalStage = approvalStage; }
 
     public LocalDate getApprovalDate() {
         return approvalDate;

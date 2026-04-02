@@ -165,7 +165,7 @@ public class EmployeeLeaveService {
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "No team assigned to this Team Leader. Ask HR to create and assign you a team."));
 
-        return leaveRequestRepository.findPendingByTeamId(team.getId(), pageable)
+        return leaveRequestRepository.findPendingByTeamIdExcludingLeader(team.getId(), keycloakId, pageable)
                 .map(this::mapToResponseDto);
     }
 
@@ -177,7 +177,7 @@ public class EmployeeLeaveService {
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "No team assigned to this Team Leader."));
 
-        return leaveRequestRepository.findAllByTeamId(team.getId(), pageable)
+        return leaveRequestRepository.findAllByTeamIdExcludingLeader(team.getId(), keycloakId, pageable)
                 .map(this::mapToResponseDto);
     }
 
@@ -198,9 +198,22 @@ public class EmployeeLeaveService {
         LeaveRequest leave = leaveRequestRepository.findById(leaveId)
                 .orElseThrow(() -> new ResourceNotFoundException("Leave request not found with ID: " + leaveId));
 
+        // TL cannot approve/reject own leave or any TL-submitted leave
+        if (leave.getUser() != null) {
+            if (leaderKeycloakId != null && leaderKeycloakId.equals(leave.getUser().getKeycloakId())) {
+                throw new AccessDeniedException("You cannot approve or reject your own leave request.");
+            }
+            if (leave.getUser().getRole() == TypeRole.TEAM_LEADER) {
+                throw new AccessDeniedException("Team Leader leave requests bypass team approval and go directly to HR.");
+            }
+        }
+
         // Validate status
         if (leave.getStatus() != LeaveStatus.PENDING) {
             throw new BadRequestException("Leave request is already " + leave.getStatus().name().toLowerCase());
+        }
+        if (leave.getTeamLeaderDecision() != ApprovalDecision.PENDING) {
+            throw new BadRequestException("Team Leader decision already recorded.");
         }
 
         // Validate Team Leader has a team
@@ -213,6 +226,10 @@ public class EmployeeLeaveService {
         if (employee.getTeam() == null || !employee.getTeam().getId().equals(leaderTeam.getId())) {
             throw new UnauthorizedException(
                     "You can only approve leave requests from employees in your own team.");
+        }
+        String tlAction = approve ? "TL_APPROVED" : "TL_REJECTED";
+        if (historyService.exists("LEAVE", tlAction, leave.getId(), leaderKeycloakId)) {
+            throw new BadRequestException("This decision was already processed.");
         }
 
         leave.setTeamLeaderDecision(approve ? ApprovalDecision.APPROVED : ApprovalDecision.REJECTED);
@@ -276,15 +293,28 @@ public class EmployeeLeaveService {
         LeaveRequest leave = leaveRequestRepository.findById(leaveId)
                 .orElseThrow(() -> new ResourceNotFoundException("Leave request not found with ID: " + leaveId));
 
+        // HR cannot approve/reject own leave
+        if (leave.getUser() != null && hrKeycloakId != null
+                && hrKeycloakId.equals(leave.getUser().getKeycloakId())) {
+            throw new AccessDeniedException("You cannot approve or reject your own leave request.");
+        }
+
         if (leave.getStatus() == LeaveStatus.REJECTED) {
             throw new BadRequestException("Leave request has already been rejected");
         }
         if (leave.getStatus() == LeaveStatus.APPROVED) {
             throw new BadRequestException("Leave request has already been fully approved");
         }
+        if (leave.getHrDecision() != ApprovalDecision.PENDING) {
+            throw new BadRequestException("HR decision already recorded.");
+        }
         // HR can only act after Team Leader has approved
         if (leave.getTeamLeaderDecision() != ApprovalDecision.APPROVED) {
             throw new BadRequestException("Team Leader must approve this request before HR can act on it.");
+        }
+        String hrAction = approve ? "HR_APPROVED" : "HR_REJECTED";
+        if (historyService.exists("LEAVE", hrAction, leave.getId(), hrKeycloakId)) {
+            throw new BadRequestException("This decision was already processed.");
         }
 
         leave.setHrDecision(approve ? ApprovalDecision.APPROVED : ApprovalDecision.REJECTED);
@@ -438,6 +468,9 @@ public class EmployeeLeaveService {
         dto.setId(leaveRequest.getId());
         dto.setEmployeeFullName(leaveRequest.getEmployeeFullName());
         dto.setEmployeeEmail(leaveRequest.getEmployeeEmail());
+        if (leaveRequest.getUser() != null) {
+            dto.setEmployeeUsername(leaveRequest.getUser().getUsername());
+        }
         dto.setLeaveType(leaveRequest.getLeaveType());
         dto.setStartDate(leaveRequest.getStartDate());
         dto.setEndDate(leaveRequest.getEndDate());
@@ -447,6 +480,7 @@ public class EmployeeLeaveService {
         dto.setTeamLeaderDecision(leaveRequest.getTeamLeaderDecision());
         dto.setHrDecision(leaveRequest.getHrDecision());
         dto.setStatus(leaveRequest.getStatus());
+        dto.setApprovalStage(computeApprovalStage(leaveRequest));
         dto.setApprovalDate(leaveRequest.getApprovalDate());
         dto.setCreatedAt(leaveRequest.getCreatedAt());
         // Scoring fields
@@ -456,5 +490,18 @@ public class EmployeeLeaveService {
         dto.setApprovedBy(leaveRequest.getApprovedBy());
         dto.setRejectedBy(leaveRequest.getRejectedBy());
         return dto;
+    }
+
+    private String computeApprovalStage(LeaveRequest leave) {
+        if (leave.getStatus() == LeaveStatus.REJECTED) return "REJECTED";
+        if (leave.getStatus() == LeaveStatus.APPROVED) return "APPROVED";
+        if (leave.getTeamLeaderDecision() == ApprovalDecision.APPROVED
+                && leave.getHrDecision() == ApprovalDecision.PENDING) {
+            return "PENDING_HR";
+        }
+        if (leave.getTeamLeaderDecision() == ApprovalDecision.PENDING) {
+            return "PENDING_TL";
+        }
+        return "PENDING";
     }
 }

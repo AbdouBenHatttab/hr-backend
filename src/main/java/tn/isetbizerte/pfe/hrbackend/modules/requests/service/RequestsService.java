@@ -97,8 +97,16 @@ public class RequestsService {
     public Map<String, Object> decideDocument(Long id, boolean approve, String hrNote, String decidedByKeycloakId) {
         DocumentRequest req = documentRepo.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Document request not found: " + id));
+        if (req.getUser() != null && decidedByKeycloakId != null
+                && decidedByKeycloakId.equals(req.getUser().getKeycloakId())) {
+            throw new AccessDeniedException("You cannot approve or reject your own document request.");
+        }
         if (req.getStatus() != RequestStatus.PENDING)
             throw new BadRequestException("Request already " + req.getStatus().name().toLowerCase());
+        String action = approve ? "HR_APPROVED" : "HR_REJECTED";
+        if (historyService.exists("DOCUMENT", action, req.getId(), decidedByKeycloakId)) {
+            throw new BadRequestException("This decision was already processed.");
+        }
         req.setStatus(approve ? RequestStatus.APPROVED : RequestStatus.REJECTED);
         req.setHrNote(hrNote);
         if (approve) req.setApprovedBy(decidedByKeycloakId);
@@ -110,7 +118,7 @@ public class RequestsService {
                 approve ? "approved" : "rejected", req.getId(), decidedByKeycloakId);
         historyService.record(
                 "DOCUMENT",
-                approve ? "HR_APPROVED" : "HR_REJECTED",
+                action,
                 req.getId(),
                 decidedByKeycloakId,
                 hrNote
@@ -273,8 +281,16 @@ public class RequestsService {
     public Map<String, Object> decideLoan(Long id, boolean approve, String hrNote, String decidedByKeycloakId) {
         LoanRequest req = loanRepo.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Loan request not found: " + id));
+        if (req.getUser() != null && decidedByKeycloakId != null
+                && decidedByKeycloakId.equals(req.getUser().getKeycloakId())) {
+            throw new AccessDeniedException("You cannot approve or reject your own loan request.");
+        }
         if (req.getStatus() != RequestStatus.PENDING)
             throw new BadRequestException("Request already " + req.getStatus().name().toLowerCase());
+        String action = approve ? "HR_APPROVED" : "HR_REJECTED";
+        if (historyService.exists("LOAN", action, req.getId(), decidedByKeycloakId)) {
+            throw new BadRequestException("This decision was already processed.");
+        }
         req.setStatus(approve ? RequestStatus.APPROVED : RequestStatus.REJECTED);
         req.setHrNote(hrNote);
         if (approve) req.setApprovedBy(decidedByKeycloakId);
@@ -297,7 +313,7 @@ public class RequestsService {
                 approve ? "approved" : "rejected", req.getId(), decidedByKeycloakId);
         historyService.record(
                 "LOAN",
-                approve ? "HR_APPROVED" : "HR_REJECTED",
+                action,
                 req.getId(),
                 decidedByKeycloakId,
                 hrNote
@@ -382,8 +398,16 @@ public class RequestsService {
     public Map<String, Object> decideAuth(Long id, boolean approve, String hrNote, String decidedByKeycloakId) {
         AuthorizationRequest req = authRepo.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Authorization request not found: " + id));
+        if (req.getUser() != null && decidedByKeycloakId != null
+                && decidedByKeycloakId.equals(req.getUser().getKeycloakId())) {
+            throw new AccessDeniedException("You cannot approve or reject your own authorization request.");
+        }
         if (req.getStatus() != RequestStatus.PENDING)
             throw new BadRequestException("Request already " + req.getStatus().name().toLowerCase());
+        String action = approve ? "HR_APPROVED" : "HR_REJECTED";
+        if (historyService.exists("AUTH", action, req.getId(), decidedByKeycloakId)) {
+            throw new BadRequestException("This decision was already processed.");
+        }
         req.setStatus(approve ? RequestStatus.APPROVED : RequestStatus.REJECTED);
         req.setHrNote(hrNote);
         if (approve) req.setApprovedBy(decidedByKeycloakId);
@@ -395,7 +419,7 @@ public class RequestsService {
                 approve ? "approved" : "rejected", req.getId(), decidedByKeycloakId);
         historyService.record(
                 "AUTH",
-                approve ? "HR_APPROVED" : "HR_REJECTED",
+                action,
                 req.getId(),
                 decidedByKeycloakId,
                 hrNote
@@ -483,6 +507,9 @@ public class RequestsService {
         m.put("processedAt",  r.getProcessedAt());
         m.put("hasDocument",  r.getVerificationToken() != null);
         m.put("employeeName", r.getEmployeeFullName());
+        if (r.getUser() != null) {
+            m.put("employeeUsername", r.getUser().getUsername());
+        }
         return m;
     }
 
@@ -502,6 +529,9 @@ public class RequestsService {
         m.put("processedAt",     r.getProcessedAt());
         m.put("hasDocument",     r.getVerificationToken() != null);
         m.put("employeeName",    r.getEmployeeFullName());
+        if (r.getUser() != null) {
+            m.put("employeeUsername", r.getUser().getUsername());
+        }
         // Scoring fields
         m.put("monthlyInstallment",   r.getMonthlyInstallment());
         m.put("riskScore",            r.getRiskScore());
@@ -533,6 +563,9 @@ public class RequestsService {
         m.put("processedAt",       r.getProcessedAt());
         m.put("hasDocument",       r.getVerificationToken() != null);
         m.put("employeeName",      r.getEmployeeFullName());
+        if (r.getUser() != null) {
+            m.put("employeeUsername", r.getUser().getUsername());
+        }
         return m;
     }
 }

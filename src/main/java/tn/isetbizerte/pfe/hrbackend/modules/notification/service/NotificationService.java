@@ -88,6 +88,25 @@ public class NotificationService {
         notificationRepository.saveAll(list);
     }
 
+    @Transactional
+    public void markBatchRead(String username, List<Long> ids) {
+        if (ids == null || ids.isEmpty()) return;
+
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
+        long ownedCount = notificationRepository.countByIdInAndUser(ids, user);
+        if (ownedCount != ids.size()) {
+            throw new AccessDeniedException("Cannot modify another user's notification");
+        }
+
+        List<Notification> list = notificationRepository.findByIdInAndUser(ids, user);
+        for (Notification n : list) {
+            n.setRead(true);
+        }
+        notificationRepository.saveAll(list);
+    }
+
     private String humanizeType(String type) {
         if (type == null || type.isBlank()) return "Notification";
         String[] words = type.toLowerCase().split("_");
