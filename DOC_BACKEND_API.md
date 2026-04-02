@@ -13,6 +13,50 @@ This document describes all backend endpoints, payloads, roles, and business rul
   - `EMPLOYEE` for employee endpoints.
   - `NEW_USER` for pending waiting endpoint.
 
+## Scope Separation (Non‑Negotiable)
+Personal scope: `/api/employee/**`
+- Used by: `EMPLOYEE`, `TEAM_LEADER`, `HR_MANAGER` (optional)
+- Covers: leave requests, loans, documents, profile, personal tasks (if any)
+- Rule: **NEVER** performs actions on other users
+
+Management scope: `/api/leader/**`
+- Used ONLY by: `TEAM_LEADER`
+- Covers: team members, team leave approvals, task assignment, performance
+- Rule: **ALWAYS** targets team members
+
+## Workflow Routing Rules (Table)
+| Actor | Step 1 | Step 2 | Notes |
+| --- | --- | --- | --- |
+| EMPLOYEE | TEAM_LEADER | HR_MANAGER | Standard flow |
+| TEAM_LEADER | HR_MANAGER | HR_MANAGER | **Skip TL step** |
+
+**Explicit rule:** TEAM_LEADER requests bypass team‑level approval entirely.
+
+## Global Enforcement Rules (System Constraints)
+All approval endpoints **MUST** enforce:
+- `actor ≠ target user` (no self‑approval for leave/loan/task)
+- Idempotency guards (history-based) to prevent duplicate decisions.
+  - If a decision already exists for (requestId, action, actorId) → reject.
+  - Decisions are state-based: only `PENDING` can transition to `APPROVED` or `REJECTED`.
+
+All team actions **MUST** validate:
+- employee belongs to leader’s team
+
+Violations **MUST** throw:
+- `AccessDeniedException` or `ForbiddenException`
+
+## Service Layer Responsibilities (Mandatory)
+- Controller: routing only
+- Service: business rules + routing + validation
+- SecurityConfig: role access
+- Repository: data only
+- **Shared services** (LeaveService, LoanService, etc.) are reused by EMPLOYEE and TEAM_LEADER
+- **Transaction boundaries are required**:
+  - Example: approve leave → save decision → persist outbox event (atomic)
+- **Outbox pattern is enforced**:
+  - Events are persisted in `outbox_events` table inside the same DB transaction.
+  - A scheduled publisher reads outbox and publishes to Kafka.
+
 ## Authentication and Password Reset
 ### POST `/public/auth/login`
 - Body: `{ "username": "...", "password": "..." }`
@@ -39,6 +83,7 @@ This document describes all backend endpoints, payloads, roles, and business rul
 - Response: `{ success, message }`
 - Logic:
   - Generates and emails a reset token.
+  - Frontend resend uses the same endpoint and target email.
 
 ### POST `/public/auth/reset-password`
 - Body: `{ token, newPassword }`
@@ -73,6 +118,12 @@ This document describes all backend endpoints, payloads, roles, and business rul
 ## Leave Requests (Employee and Team Leader)
 Base path: `/api/employee/leave`
 
+### Role Routing Rules (Critical)
+- `TEAM_LEADER` uses the same employee endpoints for personal requests.
+- Do not create `/leader/leave`, `/leader/loans`, `/leader/requests` for personal actions.
+- TL cannot approve their own leave.
+- TL leave must route directly to HR approval.
+
 ### POST `/request`
 - Roles: `EMPLOYEE`, `TEAM_LEADER`
 - Body: `{ leaveType, startDate, endDate, numberOfDays, reason }`
@@ -96,11 +147,13 @@ Base path: `/api/employee/leave`
 - Role: `TEAM_LEADER`
 - Returns pending requests from leader’s team only.
 - Pagination: `?page=0&size=10`
+- Team leader own requests are excluded from team endpoints.
 
 ### GET `/my-team`
 - Role: `TEAM_LEADER`
 - Returns all requests from leader’s team (any status).
 - Pagination: `?page=0&size=10`
+- Team leader own requests are excluded from team endpoints.
 
 ### GET `/all`
 - Role: `HR_MANAGER`
@@ -112,6 +165,7 @@ Base path: `/api/employee/leave`
 - Rules:
   - Only team leader of the employee can approve.
   - Status remains `PENDING` until HR approves.
+  - Team leader cannot approve their own leave.
 
 ### POST `/{leaveId}/team-leader/reject`
 - Role: `TEAM_LEADER`
@@ -119,13 +173,15 @@ Base path: `/api/employee/leave`
 - Rules:
   - Rejection reason is mandatory.
   - Sets `rejectedBy` to TL keycloak ID.
+  - Team leader cannot reject their own leave.
 
 ### POST `/{leaveId}/hr/approve`
 - Role: `HR_MANAGER`
 - Rules:
-  - Only after TL approval.
+  - Only after TL approval (or TL skip for TL requests).
   - Sets `approvedBy` to HR keycloak ID.
   - Generates verification token for QR.
+  - HR cannot approve their own leave.
 
 ### POST `/{leaveId}/hr/reject`
 - Role: `HR_MANAGER`
@@ -133,11 +189,17 @@ Base path: `/api/employee/leave`
 - Rules:
   - Rejection reason is mandatory.
   - Sets `rejectedBy` to HR keycloak ID.
+  - HR cannot reject their own leave.
+
+### Leave Response Mapping
+- Includes `employeeUsername` for UI identity rules.
+- Includes computed `approvalStage` for consistent UI stage display.
 
 ## Document Requests
 ### POST `/api/employee/documents`
 - Roles: `EMPLOYEE`, `TEAM_LEADER`, `HR_MANAGER`
 - Body: `{ documentType, notes }`
+- Team Leader uses the same endpoints for personal document/certificate requests.
 
 ### GET `/api/employee/documents`
 - Roles: `EMPLOYEE`, `TEAM_LEADER`, `HR_MANAGER`
@@ -152,11 +214,13 @@ Base path: `/api/employee/leave`
 - Role: `HR_MANAGER`
 - Body: `{ hrNote }`
 - Sets `approvedBy`, generates verification token.
+- HR cannot approve their own request.
 
 ### POST `/api/hr/documents/{id}/reject`
 - Role: `HR_MANAGER`
 - Body: `{ hrNote }`
 - Sets `rejectedBy`.
+- HR cannot reject their own request.
 
 ## Loan Requests
 ### POST `/api/employee/loans`
@@ -190,11 +254,13 @@ Base path: `/api/employee/leave`
 - Role: `HR_MANAGER`
 - Body: `{ hrNote }`
 - Sets `approvedBy`, generates verification token, updates monthly deductions.
+- HR cannot approve their own request.
 
 ### POST `/api/hr/loans/{id}/reject`
 - Role: `HR_MANAGER`
 - Body: `{ hrNote }`
 - Sets `rejectedBy`.
+- HR cannot reject their own request.
 
 ## Authorization Requests
 ### POST `/api/employee/authorizations`
@@ -214,11 +280,13 @@ Base path: `/api/employee/leave`
 - Role: `HR_MANAGER`
 - Body: `{ hrNote }`
 - Sets `approvedBy`, generates verification token.
+- HR cannot approve their own request.
 
 ### POST `/api/hr/authorizations/{id}/reject`
 - Role: `HR_MANAGER`
 - Body: `{ hrNote }`
 - Sets `rejectedBy`.
+- HR cannot reject their own request.
 
 ## Reports and PDF Access
 ### GET `/api/reports/leave/{leaveId}`
@@ -326,9 +394,19 @@ Base path: `/api/employee/leave`
   - `GET /api/notifications`
   - `PATCH /api/notifications/{id}/read`
   - `PATCH /api/notifications/read-all`
+  - `PATCH /api/notifications/read-batch`
+- Rules:
+  - Ownership enforced when marking read.
+  - Batch read rejects any ID not owned by the user.
 - Task assignment notification:
   - `type = TASK_ASSIGNED`
   - `referenceType = TASK`, `referenceId = taskId`, `actionUrl = /employee/tasks?taskId={id}`
+
+## Event Reliability (Kafka Consumers)
+- Deduplication: events include `eventId`; consumers store processed IDs in `processed_events` to avoid duplicates.
+- Retry + DLQ:
+  - Consumer retry with backoff (3 retries, 1s).
+  - Failed messages go to `{topic}.DLQ`.
 
 ## Request History (Audit)
 - Table: `request_history`
@@ -338,3 +416,11 @@ Base path: `/api/employee/leave`
 ## Kafka Events
 - `request-events` published on request decisions.
 - `notification-events` consumed to persist notifications.
+
+## Outbox (Kafka + DB Atomicity)
+- Table: `outbox_events`
+- Fields: `topic`, `event_key`, `payload`, `status`, `attempts`, `last_error`, `created_at`, `sent_at`
+- Statuses: `PENDING`, `SENT`, `FAILED`
+- Publisher:
+  - Runs on a schedule (`app.outbox.publish-interval-ms`, default 2000ms)
+  - Retries up to `app.outbox.max-attempts` (default 5)
