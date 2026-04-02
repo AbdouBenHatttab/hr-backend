@@ -3,6 +3,7 @@ package tn.isetbizerte.pfe.hrbackend.common.event;
 import java.time.Instant;
 
 public class NotificationEvent {
+    private String eventId;
     private String userId;
     private String message;
     private String type;
@@ -14,6 +15,7 @@ public class NotificationEvent {
     public NotificationEvent() {}
 
     public NotificationEvent(String userId, String message, String type) {
+        this.eventId = java.util.UUID.randomUUID().toString();
         this.userId = userId;
         this.message = message;
         this.type = type;
@@ -22,6 +24,7 @@ public class NotificationEvent {
 
     public NotificationEvent(String userId, String message, String type,
                              String referenceType, Long referenceId, String actionUrl) {
+        this.eventId = java.util.UUID.randomUUID().toString();
         this.userId = userId;
         this.message = message;
         this.type = type;
@@ -30,6 +33,9 @@ public class NotificationEvent {
         this.actionUrl = actionUrl;
         this.timestamp = Instant.now().toString();
     }
+
+    public String getEventId() { return eventId; }
+    public void setEventId(String eventId) { this.eventId = eventId; }
 
     public String getUserId() { return userId; }
     public void setUserId(String userId) { this.userId = userId; }

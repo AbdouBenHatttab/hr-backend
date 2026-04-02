@@ -6,6 +6,7 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 import tn.isetbizerte.pfe.hrbackend.common.event.NotificationEvent;
 import tn.isetbizerte.pfe.hrbackend.common.event.RequestEvent;
+import tn.isetbizerte.pfe.hrbackend.infrastructure.inbox.ProcessedEventService;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.kafka.producer.NotificationEventProducer;
 
 @Service
@@ -14,16 +15,26 @@ public class RequestEventConsumer {
 
     private final ObjectMapper objectMapper;
     private final NotificationEventProducer notificationEventProducer;
+    private final ProcessedEventService processedEventService;
 
-    public RequestEventConsumer(ObjectMapper objectMapper, NotificationEventProducer notificationEventProducer) {
+    public RequestEventConsumer(ObjectMapper objectMapper,
+                                NotificationEventProducer notificationEventProducer,
+                                ProcessedEventService processedEventService) {
         this.objectMapper = objectMapper;
         this.notificationEventProducer = notificationEventProducer;
+        this.processedEventService = processedEventService;
     }
 
     @KafkaListener(topics = "${app.kafka.topic.request-events}")
     public void handleRequestEvent(String payload) {
         try {
             RequestEvent event = objectMapper.readValue(payload, RequestEvent.class);
+            boolean firstTime = processedEventService.tryMarkProcessed(
+                    event.getEventId(), "request-events");
+            if (!firstTime) {
+                log.warn("Skipping duplicate request event: {}", event.getEventId());
+                return;
+            }
             NotificationEvent notif = new NotificationEvent(
                     event.getEmployeeId(),
                     buildMessage(event),

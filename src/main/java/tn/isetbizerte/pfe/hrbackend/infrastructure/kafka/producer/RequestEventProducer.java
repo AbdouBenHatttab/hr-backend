@@ -3,41 +3,36 @@ package tn.isetbizerte.pfe.hrbackend.infrastructure.kafka.producer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.kafka.support.SendResult;
 import org.springframework.stereotype.Service;
 import tn.isetbizerte.pfe.hrbackend.common.event.RequestEvent;
-
-import java.util.concurrent.CompletableFuture;
+import tn.isetbizerte.pfe.hrbackend.infrastructure.outbox.OutboxEventService;
 
 @Service
 @Slf4j
 public class RequestEventProducer {
 
-    private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
     private final String requestEventsTopic;
+    private final OutboxEventService outboxEventService;
 
     public RequestEventProducer(
-            KafkaTemplate<String, String> kafkaTemplate,
             ObjectMapper objectMapper,
+            OutboxEventService outboxEventService,
             @Value("${app.kafka.topic.request-events}") String requestEventsTopic
     ) {
-        this.kafkaTemplate = kafkaTemplate;
         this.objectMapper = objectMapper;
+        this.outboxEventService = outboxEventService;
         this.requestEventsTopic = requestEventsTopic;
     }
 
     public void publish(RequestEvent event) {
         try {
             String payload = objectMapper.writeValueAsString(event);
-            CompletableFuture<SendResult<String, String>> future =
-                    kafkaTemplate.send(requestEventsTopic, String.valueOf(event.getRequestId()), payload);
-            future.get();
-            log.info("Published {} to {} for requestId={}", event.getType(), requestEventsTopic, event.getRequestId());
+            outboxEventService.enqueue(requestEventsTopic, String.valueOf(event.getRequestId()), payload);
+            log.info("Enqueued {} to outbox for requestId={}", event.getType(), event.getRequestId());
         } catch (Exception e) {
-            log.error("Failed to publish request event to topic {}", requestEventsTopic, e);
-            throw new RuntimeException("Failed to publish request event to Kafka", e);
+            log.error("Failed to enqueue request event for requestId={}", event.getRequestId(), e);
+            throw new RuntimeException("Failed to enqueue request event", e);
         }
     }
 }

@@ -3,6 +3,7 @@ package tn.isetbizerte.pfe.hrbackend.infrastructure.kafka.config;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.beans.factory.annotation.Value;
@@ -12,6 +13,9 @@ import org.springframework.kafka.annotation.EnableKafka;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.config.TopicBuilder;
 import org.springframework.kafka.core.*;
+import org.springframework.kafka.listener.DefaultErrorHandler;
+import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
+import org.springframework.util.backoff.FixedBackOff;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -36,18 +40,6 @@ public class KafkaConfig {
 
     @Value("${app.kafka.topic.password-reset}")
     private String passwordResetTopic;
-
-    @Value("${app.kafka.topic.leave-events}")
-    private String leaveEventsTopic;
-
-    @Value("${app.kafka.topic.loan-events}")
-    private String loanEventsTopic;
-
-    @Value("${app.kafka.topic.document-events}")
-    private String documentEventsTopic;
-
-    @Value("${app.kafka.topic.authorization-events}")
-    private String authorizationEventsTopic;
 
     @Value("${app.kafka.topic.request-events}")
     private String requestEventsTopic;
@@ -90,7 +82,17 @@ public class KafkaConfig {
         ConcurrentKafkaListenerContainerFactory<String, String> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory());
+        factory.setCommonErrorHandler(kafkaErrorHandler());
         return factory;
+    }
+
+    @Bean
+    public DefaultErrorHandler kafkaErrorHandler() {
+        DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(
+                kafkaTemplate(),
+                (record, ex) -> new TopicPartition(record.topic() + ".DLQ", record.partition())
+        );
+        return new DefaultErrorHandler(recoverer, new FixedBackOff(1000L, 3));
     }
 
     // ==================== TOPIC ====================
@@ -112,38 +114,6 @@ public class KafkaConfig {
     }
 
     @Bean
-    public NewTopic leaveEventsTopic() {
-        return TopicBuilder.name(leaveEventsTopic)
-                .partitions(3)
-                .replicas(1)
-                .build();
-    }
-
-    @Bean
-    public NewTopic loanEventsTopic() {
-        return TopicBuilder.name(loanEventsTopic)
-                .partitions(3)
-                .replicas(1)
-                .build();
-    }
-
-    @Bean
-    public NewTopic documentEventsTopic() {
-        return TopicBuilder.name(documentEventsTopic)
-                .partitions(3)
-                .replicas(1)
-                .build();
-    }
-
-    @Bean
-    public NewTopic authorizationEventsTopic() {
-        return TopicBuilder.name(authorizationEventsTopic)
-                .partitions(3)
-                .replicas(1)
-                .build();
-    }
-
-    @Bean
     public NewTopic requestEventsTopic() {
         return TopicBuilder.name(requestEventsTopic)
                 .partitions(3)
@@ -154,6 +124,22 @@ public class KafkaConfig {
     @Bean
     public NewTopic notificationEventsTopic() {
         return TopicBuilder.name(notificationEventsTopic)
+                .partitions(3)
+                .replicas(1)
+                .build();
+    }
+
+    @Bean
+    public NewTopic requestEventsDlqTopic() {
+        return TopicBuilder.name(requestEventsTopic + ".DLQ")
+                .partitions(3)
+                .replicas(1)
+                .build();
+    }
+
+    @Bean
+    public NewTopic notificationEventsDlqTopic() {
+        return TopicBuilder.name(notificationEventsTopic + ".DLQ")
                 .partitions(3)
                 .replicas(1)
                 .build();

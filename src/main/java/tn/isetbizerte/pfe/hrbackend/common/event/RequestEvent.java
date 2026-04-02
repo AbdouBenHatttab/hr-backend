@@ -3,6 +3,7 @@ package tn.isetbizerte.pfe.hrbackend.common.event;
 import java.time.Instant;
 
 public class RequestEvent {
+    private String eventId;
     private String type;
     private Long requestId;
     private String requestType;
@@ -14,6 +15,7 @@ public class RequestEvent {
     public RequestEvent() {}
 
     public RequestEvent(String type, String requestType, Long requestId, String employeeId, String actorId, String comment) {
+        this.eventId = java.util.UUID.randomUUID().toString();
         this.type = type;
         this.requestType = requestType;
         this.requestId = requestId;
@@ -22,6 +24,9 @@ public class RequestEvent {
         this.comment = comment;
         this.timestamp = Instant.now().toString();
     }
+
+    public String getEventId() { return eventId; }
+    public void setEventId(String eventId) { this.eventId = eventId; }
 
     public String getType() { return type; }
     public void setType(String type) { this.type = type; }
