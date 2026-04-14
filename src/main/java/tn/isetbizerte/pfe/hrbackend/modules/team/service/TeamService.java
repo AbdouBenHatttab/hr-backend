@@ -212,9 +212,20 @@ public class TeamService {
                     Map<String, Object> m = new HashMap<>();
                     m.put("id", u.getId());
                     m.put("username", u.getUsername());
+                    m.put("role", u.getRole().name());
                     if (u.getPerson() != null) {
                         m.put("fullName", u.getPerson().getFirstName() + " " + u.getPerson().getLastName());
                         m.put("email", u.getPerson().getEmail());
+
+                        Map<String, Object> personalInfo = new HashMap<>();
+                        personalInfo.put("firstName",  u.getPerson().getFirstName());
+                        personalInfo.put("lastName",   u.getPerson().getLastName());
+                        personalInfo.put("email",      u.getPerson().getEmail());
+                        personalInfo.put("phone",      u.getPerson().getPhone() != null ? u.getPerson().getPhone() : "");
+                        personalInfo.put("address",    u.getPerson().getAddress() != null ? u.getPerson().getAddress() : "");
+                        personalInfo.put("department", u.getPerson().getDepartment() != null ? u.getPerson().getDepartment() : "");
+                        personalInfo.put("avatarColor", u.getPerson().getAvatarColor() != null ? u.getPerson().getAvatarColor() : "");
+                        m.put("personalInfo", personalInfo);
                     }
                     return m;
                 })

@@ -129,6 +129,15 @@ public class HREmailService {
             buildPasswordResetBody(name, otpCode, expiresAt));
     }
 
+    @Async
+    public void sendPasswordChangeOtp(String email, String firstName, String lastName,
+                                      String otpCode, String expiresAt) {
+        String name = firstName + " " + lastName;
+        send(email,
+                "Password Change Code – " + COMPANY + " HRMS",
+                buildPasswordChangeBody(name, otpCode, expiresAt));
+    }
+
     // ═══════════════════════════════════════════════════════════════════
     // 7 — TASK ASSIGNED
     // ═══════════════════════════════════════════════════════════════════
@@ -350,6 +359,41 @@ public class HREmailService {
                 <p style="margin:0;font-size:14px;color:#92400E;">
                     ⚠️ If you did not request this password reset, please ignore this email.
                     Your account remains secure.
+                </p>
+            </div>
+            """.formatted(name, otpCode, expiresAt));
+    }
+
+    private String buildPasswordChangeBody(String name, String otpCode, String expiresAt) {
+        return wrap("Password Change Verification", "Keep this code private", """
+            <p style="font-size:15px;color:#374151;line-height:1.8;">
+                Dear <strong>%s</strong>,
+            </p>
+            <p style="font-size:15px;color:#374151;line-height:1.8;">
+                Use the following OTP code to confirm changing your account password.
+            </p>
+            <div style="background:#F0F9FF;border:2px dashed #0EA5E9;border-radius:12px;
+                        padding:28px;text-align:center;margin:28px 0;">
+                <p style="margin:0;font-size:12px;color:#0369A1;font-weight:600;
+                           text-transform:uppercase;letter-spacing:0.1em;">
+                    Your One-Time Password (OTP)
+                </p>
+                <p style="margin:12px 0 0;font-size:36px;font-weight:700;
+                           color:#0C4A6E;letter-spacing:8px;font-family:monospace;">
+                    %s
+                </p>
+                <p style="margin:12px 0 0;font-size:13px;color:#DC2626;font-weight:600;">
+                    ⏱ Expires at: %s
+                </p>
+            </div>
+            <p style="font-size:14px;color:#6B7280;line-height:1.8;">
+                Enter this code in your profile to set a new password.
+                The code is valid for a limited time only.
+            </p>
+            <div style="background:#FFFBEB;border-left:4px solid #F59E0B;border-radius:8px;
+                        padding:14px 18px;margin-top:20px;">
+                <p style="margin:0;font-size:14px;color:#92400E;">
+                    ⚠️ If you did not request this password change, please contact HR immediately.
                 </p>
             </div>
             """.formatted(name, otpCode, expiresAt));

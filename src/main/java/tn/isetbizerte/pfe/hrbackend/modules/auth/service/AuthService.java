@@ -29,6 +29,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -98,6 +99,11 @@ public class AuthService {
      * Register a new user in Keycloak and local database
      */
     public Map<String, Object> registerUser(RegisterRequest registerRequest) {
+        Map<String, Object> validationError = validateRegistration(registerRequest);
+        if (validationError != null) {
+            return validationError;
+        }
+
         String adminToken = getAdminToken();
         String usersUrl = keycloakServerUrl + "/admin/realms/" + realm + "/users";
 
@@ -140,6 +146,14 @@ public class AuthService {
                 result.put("username", registerRequest.getUsername());
                 return result;
             }
+        } catch (RestClientResponseException e) {
+            String keycloakMsg = extractKeycloakRegistrationError(e);
+            logger.warn("Registration rejected for username '{}' with status {} and body {}",
+                    registerRequest.getUsername(), e.getStatusCode().value(), e.getResponseBodyAsString());
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", formatRegistrationError(keycloakMsg));
+            return error;
         } catch (Exception e) {
             logger.warn("Registration failed for username '{}': {}", registerRequest.getUsername(), e.getMessage());
             Map<String, Object> error = new HashMap<>();
@@ -162,6 +176,14 @@ public class AuthService {
             return "Registration failed. Please try again.";
         }
 
+        String lowered = errorMessage.toLowerCase();
+        if (lowered.contains("username") && (lowered.contains("space") || lowered.contains("whitespace"))) {
+            return "Username cannot contain spaces. Please use letters/numbers and '.' or '_' only.";
+        }
+        if (lowered.contains("password")) {
+            return "Password does not meet the required policy. Please choose a stronger password.";
+        }
+
         // Check for common error patterns and provide friendly messages
         if (errorMessage.contains("User exists with same email")) {
             return "This email address is already registered. Please use a different email or try logging in.";
@@ -176,6 +198,12 @@ public class AuthService {
         }
 
         if (errorMessage.contains("400")) {
+            if (lowered.contains("email")) {
+                return "Invalid email address. Please check your input and try again.";
+            }
+            if (lowered.contains("username")) {
+                return "Invalid username. Please use letters/numbers and '.' or '_' only.";
+            }
             return "Invalid registration data. Please check your input and try again.";
         }
 
@@ -193,6 +221,56 @@ public class AuthService {
         }
 
         return "Registration failed: " + errorMessage;
+    }
+
+    private String extractKeycloakRegistrationError(RestClientResponseException e) {
+        String body = e.getResponseBodyAsString();
+        String errorMessage = extractJsonField(body, "errorMessage");
+        if (errorMessage != null && !errorMessage.isBlank()) {
+            return errorMessage;
+        }
+        String errorDescription = extractJsonField(body, "error_description");
+        if (errorDescription != null && !errorDescription.isBlank()) {
+            return errorDescription;
+        }
+        return (body != null && !body.isBlank()) ? body : e.getMessage();
+    }
+
+    private Map<String, Object> validateRegistration(RegisterRequest req) {
+        if (req == null) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", "Invalid registration data. Please check your input and try again.");
+            return error;
+        }
+
+        String username = req.getUsername() != null ? req.getUsername().trim() : "";
+        String email = req.getEmail() != null ? req.getEmail().trim() : "";
+
+        if (username.isBlank()) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", "Username is required.");
+            return error;
+        }
+        if (username.matches(".*\\s+.*")) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", "Username cannot contain spaces. Please use letters/numbers and '.' or '_' only.");
+            return error;
+        }
+        if (email.isBlank()) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("success", false);
+            error.put("message", "Email is required.");
+            return error;
+        }
+
+        req.setUsername(username);
+        req.setEmail(email);
+        if (req.getFirstName() != null) req.setFirstName(req.getFirstName().trim());
+        if (req.getLastName() != null) req.setLastName(req.getLastName().trim());
+        return null;
     }
 
     /**
@@ -422,7 +500,7 @@ public class AuthService {
             if (realmAccess != null && realmAccess.get("roles") instanceof List<?> rolesClaim) {
                 for (Object role : rolesClaim) {
                     if (role != null) {
-                        realmRoles.add(role.toString());
+                        realmRoles.add(role.toString().toUpperCase(Locale.ROOT));
                     }
                 }
             }

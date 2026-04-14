@@ -12,8 +12,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Service for managing Keycloak roles via Admin API
@@ -54,7 +56,12 @@ public class KeycloakAdminService {
             RealmResource realmResource = keycloak.realm(realm);
             UsersResource usersResource = realmResource.users();
             UserResource userResource = usersResource.get(keycloakUserId);
-            RoleRepresentation role = realmResource.roles().get(roleName).toRepresentation();
+
+            RoleRepresentation role = resolveRealmRoleIgnoreCase(realmResource, roleName);
+            if (role == null) {
+                logger.error("Role '{}' not found in Keycloak realm '{}' (case-insensitive)", roleName, realm);
+                return false;
+            }
 
             logger.debug("Role '{}' found in Keycloak", role.getName());
 
@@ -63,7 +70,7 @@ public class KeycloakAdminService {
 
             for (RoleRepresentation currentRole : currentRoles) {
                 String currentRoleName = currentRole.getName();
-                if (APPLICATION_ROLES.contains(currentRoleName)) {
+                if (isApplicationRole(currentRoleName)) {
                     logger.debug("Removing old role: {}", currentRoleName);
                     userResource.roles().realmLevel().remove(Collections.singletonList(currentRole));
                 }
@@ -73,14 +80,49 @@ public class KeycloakAdminService {
             logger.info("Role '{}' successfully assigned to Keycloak user '{}'", roleName, keycloakUserId);
             return true;
 
-        } catch (NullPointerException e) {
-            logger.error("Role '{}' not found in Keycloak realm '{}'", roleName, realm, e);
-            return false;
         } catch (Exception e) {
             logger.error("Failed to assign role '{}' to Keycloak user '{}' on server '{}' with admin '{}'",
                     roleName, keycloakUserId, keycloakServerUrl, adminUsername, e);
             return false;
         }
+    }
+
+    private boolean isApplicationRole(String roleName) {
+        if (roleName == null) return false;
+        for (String r : APPLICATION_ROLES) {
+            if (r.equalsIgnoreCase(roleName)) return true;
+        }
+        return false;
+    }
+
+    private RoleRepresentation resolveRealmRoleIgnoreCase(RealmResource realmResource, String requestedRoleName) {
+        if (requestedRoleName == null || requestedRoleName.isBlank()) return null;
+
+        List<String> candidates = new ArrayList<>();
+        candidates.add(requestedRoleName);
+        candidates.add(requestedRoleName.toUpperCase(Locale.ROOT));
+        candidates.add(requestedRoleName.toLowerCase(Locale.ROOT));
+
+        for (String name : candidates) {
+            try {
+                RoleRepresentation rep = realmResource.roles().get(name).toRepresentation();
+                if (rep != null && rep.getName() != null) return rep;
+            } catch (Exception ignored) {
+                // fall through
+            }
+        }
+
+        try {
+            for (RoleRepresentation rep : realmResource.roles().list()) {
+                if (rep != null && rep.getName() != null && rep.getName().equalsIgnoreCase(requestedRoleName)) {
+                    return rep;
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("Failed to list realm roles for case-insensitive match: {}", e.getMessage());
+        }
+
+        return null;
     }
 
     /**

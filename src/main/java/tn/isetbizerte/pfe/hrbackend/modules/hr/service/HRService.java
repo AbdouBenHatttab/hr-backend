@@ -15,6 +15,8 @@ import tn.isetbizerte.pfe.hrbackend.modules.user.service.UserService;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -221,6 +223,19 @@ public class HRService {
         userService.saveUser(user);
         logger.info("Role updated and user activated in database for user: {}", user.getUsername());
 
+        // Auto-fill employment defaults when the user receives a real role.
+        // Do not overwrite HR-entered values.
+        if (newRole != TypeRole.NEW_USER && user.getPerson() != null) {
+            Person p = user.getPerson();
+            if (p.getHireDate() == null) {
+                p.setHireDate(LocalDate.now());
+            }
+            if (p.getSalary() == null) {
+                p.setSalary(defaultSalaryForRole(newRole));
+            }
+            userService.savePerson(p);
+        }
+
         // Publish Kafka event for email notification
         boolean eventPublished = publishRoleAssignedEvent(user, oldRole, newRole, assignedBy);
 
@@ -273,6 +288,16 @@ public class HRService {
                     user.getUsername(), e.getMessage());
             return false;
         }
+    }
+
+    private BigDecimal defaultSalaryForRole(TypeRole role) {
+        if (role == null) return BigDecimal.ZERO;
+        return switch (role) {
+            case EMPLOYEE -> new BigDecimal("2000");
+            case TEAM_LEADER -> new BigDecimal("4000");
+            case HR_MANAGER -> new BigDecimal("3500");
+            case NEW_USER -> BigDecimal.ZERO;
+        };
     }
 
     /**

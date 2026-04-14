@@ -92,15 +92,19 @@ public class NotificationService {
     public void markBatchRead(String username, List<Long> ids) {
         if (ids == null || ids.isEmpty()) return;
 
+        // Avoid false 403s when the client accidentally sends duplicate IDs.
+        List<Long> uniqueIds = ids.stream().distinct().toList();
+        if (uniqueIds.isEmpty()) return;
+
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
 
-        long ownedCount = notificationRepository.countByIdInAndUser(ids, user);
-        if (ownedCount != ids.size()) {
+        long ownedCount = notificationRepository.countByIdInAndUser(uniqueIds, user);
+        if (ownedCount != uniqueIds.size()) {
             throw new AccessDeniedException("Cannot modify another user's notification");
         }
 
-        List<Notification> list = notificationRepository.findByIdInAndUser(ids, user);
+        List<Notification> list = notificationRepository.findByIdInAndUser(uniqueIds, user);
         for (Notification n : list) {
             n.setRead(true);
         }

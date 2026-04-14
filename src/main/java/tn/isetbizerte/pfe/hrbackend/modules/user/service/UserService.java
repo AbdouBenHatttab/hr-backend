@@ -15,6 +15,8 @@ import tn.isetbizerte.pfe.hrbackend.modules.user.repository.LoginHistoryReposito
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 
@@ -95,7 +97,22 @@ public class UserService {
             // Convert Keycloak role string to TypeRole enum
             TypeRole typeRole = TypeRole.valueOf(roleFromKeycloak);
             user.setRole(typeRole);
-            return userRepository.save(user);
+            User saved = userRepository.save(user);
+
+            // Auto-fill employment defaults when the user gets a real role.
+            // Do not overwrite HR-entered values.
+            if (typeRole != TypeRole.NEW_USER && saved.getPerson() != null) {
+                Person p = saved.getPerson();
+                if (p.getHireDate() == null) {
+                    p.setHireDate(LocalDate.now());
+                }
+                if (p.getSalary() == null) {
+                    p.setSalary(defaultSalaryForRole(typeRole));
+                }
+                personRepository.save(p);
+            }
+
+            return saved;
         } catch (IllegalArgumentException e) {
             // Invalid role name - silently ignore, this is non-critical
             // The JWT token has the correct role anyway
@@ -104,6 +121,16 @@ public class UserService {
             // User not found - this shouldn't happen for valid users
             return null;
         }
+    }
+
+    private BigDecimal defaultSalaryForRole(TypeRole role) {
+        if (role == null) return BigDecimal.ZERO;
+        return switch (role) {
+            case EMPLOYEE -> new BigDecimal("2000");
+            case TEAM_LEADER -> new BigDecimal("4000");
+            case HR_MANAGER -> new BigDecimal("3500");
+            case NEW_USER -> BigDecimal.ZERO;
+        };
     }
 
     public long countUsers() {

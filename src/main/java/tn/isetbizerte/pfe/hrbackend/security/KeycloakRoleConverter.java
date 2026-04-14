@@ -12,6 +12,7 @@ import tn.isetbizerte.pfe.hrbackend.modules.user.repository.UserRepository;
 
 import java.util.Collection;
 import java.util.HashSet;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -36,7 +37,11 @@ public class KeycloakRoleConverter implements Converter<Jwt, Collection<GrantedA
         if (realmAccess != null && realmAccess.get("roles") != null) {
             @SuppressWarnings("unchecked")
             Collection<String> realmRoles = (Collection<String>) realmAccess.get("roles");
-            roles.addAll(realmRoles);
+            for (String r : realmRoles) {
+                if (r != null && !r.isBlank()) {
+                    roles.add(r.toUpperCase(Locale.ROOT));
+                }
+            }
         } else {
             String keycloakUserId = jwt.getSubject();
             String username = jwt.getClaimAsString("preferred_username");
