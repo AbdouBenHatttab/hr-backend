@@ -7,6 +7,7 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.cors.CorsConfigurationSource;
 
@@ -16,10 +17,14 @@ public class SecurityConfig {
 
     private final KeycloakRoleConverter keycloakRoleConverter;
     private final CorsConfigurationSource corsConfigurationSource;
+    private final ActiveUserFilter activeUserFilter;
 
-    public SecurityConfig(KeycloakRoleConverter keycloakRoleConverter, CorsConfigurationSource corsConfigurationSource) {
+    public SecurityConfig(KeycloakRoleConverter keycloakRoleConverter,
+                          CorsConfigurationSource corsConfigurationSource,
+                          ActiveUserFilter activeUserFilter) {
         this.keycloakRoleConverter = keycloakRoleConverter;
         this.corsConfigurationSource = corsConfigurationSource;
+        this.activeUserFilter = activeUserFilter;
     }
 
     @Bean
@@ -43,7 +48,8 @@ public class SecurityConfig {
                         oauth.jwt(jwt ->
                                 jwt.jwtAuthenticationConverter(jwtAuthenticationConverter())
                         )
-                );
+                )
+                .addFilterAfter(activeUserFilter, BearerTokenAuthenticationFilter.class);
 
         return http.build();
     }

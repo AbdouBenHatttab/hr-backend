@@ -11,7 +11,6 @@ import net.sf.jasperreports.engine.data.JRBeanCollectionDataSource;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
-import tn.isetbizerte.pfe.hrbackend.modules.requests.entity.AuthorizationRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.entity.DocumentRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.entity.LoanRequest;
 
@@ -37,18 +36,15 @@ public class RequestReportService {
     @Value("${app.base-url:http://localhost:5173}")
     private String baseUrl;
 
-    @Value("${app.company.name:ArabSoft HR-Nexus}")
+    @Value("${app.company.name:ArabSoft}")
     private String companyName;
 
     private JasperReport documentReport;
     private JasperReport loanReport;
-    private JasperReport authReport;
-
     @PostConstruct
     public void init() {
-        documentReport = compile("reports/leave/document_request.jrxml");
-        loanReport     = compile("reports/leave/loan_request.jrxml");
-        authReport     = compile("reports/leave/authorization_request.jrxml");
+        documentReport          = compile("reports/leave/document_request.jrxml");
+        loanReport              = compile("reports/leave/loan_request.jrxml");
     }
 
     // ─── DOCUMENT PDF ──────────────────────────────────────────────────────────
@@ -99,31 +95,6 @@ public class RequestReportService {
         } catch (Exception e) { throw new IllegalStateException("Failed to generate loan PDF", e); }
     }
 
-    // ─── AUTHORIZATION PDF ─────────────────────────────────────────────────────
-    public byte[] generateAuthPdf(AuthorizationRequest req) {
-        try (InputStream logo = new ClassPathResource(LOGO_PATH).getInputStream()) {
-            Map<String, Object> p = new HashMap<>();
-            p.put("companyName",        companyName);
-            p.put("referenceNumber",    "AUTH-" + String.format("%06d", req.getId()));
-            p.put("employeeFullName",   req.getEmployeeFullName());
-            p.put("employeeEmail",      req.getEmployeeEmail());
-            p.put("employeeDepartment", req.getEmployeeDepartment());
-            p.put("authorizationType",  fmt(req.getAuthorizationType().name()));
-            p.put("startDate",          req.getStartDate() != null ? req.getStartDate().format(DATE_FMT) : "—");
-            p.put("endDate",            req.getEndDate()   != null ? req.getEndDate().format(DATE_FMT)   : "—");
-            p.put("reason",             req.getReason() != null ? req.getReason() : "");
-            p.put("requestedAt",        req.getRequestedAt() != null ? req.getRequestedAt().format(DATETIME_FMT) : "");
-            p.put("processedAt",        req.getProcessedAt() != null ? req.getProcessedAt().format(DATETIME_FMT) : "");
-            p.put("hrNote",             req.getHrNote() != null ? req.getHrNote() : "");
-            p.put("logoStream",         logo);
-            if (req.getVerificationToken() != null) {
-                String url = baseUrl + "/verify/" + req.getVerificationToken();
-                p.put("qrCodeStream", qr(url));
-            }
-            return fill(authReport, p);
-        } catch (Exception e) { throw new IllegalStateException("Failed to generate auth PDF", e); }
-    }
-
     // ─── HELPERS ───────────────────────────────────────────────────────────────
     private JasperReport compile(String path) {
         try (InputStream is = new ClassPathResource(path).getInputStream()) {
@@ -155,5 +126,9 @@ public class RequestReportService {
         return Arrays.stream(enumName.split("_"))
                 .map(w -> w.charAt(0) + w.substring(1).toLowerCase())
                 .collect(Collectors.joining(" "));
+    }
+
+    public static String documentReference(Long requestId) {
+        return "DOC-" + String.format("%06d", requestId);
     }
 }

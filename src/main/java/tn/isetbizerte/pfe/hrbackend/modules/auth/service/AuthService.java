@@ -23,7 +23,9 @@ import tn.isetbizerte.pfe.hrbackend.common.constants.AppConstants;
 import tn.isetbizerte.pfe.hrbackend.common.dto.LoginRequest;
 import tn.isetbizerte.pfe.hrbackend.common.dto.LoginResponse;
 import tn.isetbizerte.pfe.hrbackend.common.dto.RegisterRequest;
+import tn.isetbizerte.pfe.hrbackend.common.enums.TypeRole;
 import tn.isetbizerte.pfe.hrbackend.modules.user.service.UserService;
+import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -31,6 +33,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Service for authentication operations with Keycloak integration
@@ -439,14 +442,20 @@ public class AuthService {
             Integer expiresIn = (Integer) tokenData.get("expires_in");
 
             Map<String, Object> userInfo = parseJwtToken(accessToken);
+            String tokenUsername = (String) userInfo.getOrDefault("username", username);
+            LoginResponse inactiveResponse = rejectIfInactiveApplicationUser(tokenUsername);
+            if (inactiveResponse != null) {
+                return inactiveResponse;
+            }
+
             String email = (String) userInfo.get("email");
             @SuppressWarnings("unchecked")
             List<String> roles = (List<String>) userInfo.get("roles");
 
-            // ✅ NEW: Sync role from Keycloak to database
+            // Sync role from Keycloak to database without changing active status.
             if (roles != null && !roles.isEmpty()) {
                 String primaryRole = roles.get(0);
-                syncUserRoleToDatabase(username, primaryRole);
+                syncUserRoleToDatabase(tokenUsername, primaryRole);
             }
 
             return new LoginResponse(
@@ -454,7 +463,7 @@ public class AuthService {
                 refreshToken,
                 tokenType,
                 expiresIn != null ? expiresIn : AppConstants.DEFAULT_TOKEN_EXPIRY_SECONDS,
-                username,
+                tokenUsername,
                 email,
                 roles
             );
@@ -473,6 +482,24 @@ public class AuthService {
         } catch (Exception e) {
             logger.warn("Could not sync role '{}' for user '{}'", roleFromKeycloak, username, e);
         }
+    }
+
+    private LoginResponse rejectIfInactiveApplicationUser(String username) {
+        if (username == null || username.isBlank()) {
+            return new LoginResponse("Invalid token: username is missing");
+        }
+
+        Optional<User> localUser = userService.findByUsername(username);
+        if (localUser.isEmpty()) {
+            return new LoginResponse("Local account not found");
+        }
+
+        User user = localUser.get();
+        if (!Boolean.TRUE.equals(user.getActive()) && user.getRole() != TypeRole.NEW_USER) {
+            return new LoginResponse("Account is deactivated");
+        }
+
+        return null;
     }
 
     /**

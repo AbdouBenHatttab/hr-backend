@@ -14,6 +14,8 @@ import tn.isetbizerte.pfe.hrbackend.modules.requests.repository.LoanRequestRepos
 import tn.isetbizerte.pfe.hrbackend.modules.employee.entity.LeaveRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.employee.repository.LeaveRequestRepository;
 
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -60,9 +62,9 @@ public class VerifyController {
             return ResponseEntity.ok(buildLoanResponse(loanResult.get()));
         }
 
-        Optional<AuthorizationRequest> authResult = authorizationRequestRepository.findByVerificationToken(token);
-        if (authResult.isPresent()) {
-            return ResponseEntity.ok(buildAuthorizationResponse(authResult.get()));
+        Optional<AuthorizationRequest> authorizationResult = authorizationRequestRepository.findByVerificationToken(token);
+        if (authorizationResult.isPresent()) {
+            return ResponseEntity.ok(buildAuthorizationResponse(authorizationResult.get()));
         }
 
         Map<String, Object> error = new LinkedHashMap<>();
@@ -72,61 +74,54 @@ public class VerifyController {
     }
 
     private Map<String, Object> buildLeaveResponse(LeaveRequest leave) {
-        Map<String, Object> response = new LinkedHashMap<>();
-        response.put("valid", true);
-        response.put("documentType", "LEAVE");
-        response.put("employee",     leave.getEmployeeFullName());
-        response.put("email",        leave.getEmployeeEmail());
-        response.put("leaveType",    leave.getLeaveType().name());
-        response.put("startDate",    leave.getStartDate().toString());
-        response.put("endDate",      leave.getEndDate().toString());
-        response.put("numberOfDays", leave.getNumberOfDays());
-        response.put("status",       leave.getStatus().name());
-        response.put("approvalDate", leave.getApprovalDate() != null ? leave.getApprovalDate().toString() : "N/A");
-        response.put("message",      "This document is authentic and was issued by HR Nexus.");
-        return response;
+        return buildSafeResponse(
+                "LEAVE",
+                leave.getStatus() != null ? leave.getStatus().name() : null,
+                leave.getApprovalDate()
+        );
     }
 
     private Map<String, Object> buildDocumentResponse(DocumentRequest documentRequest) {
-        Map<String, Object> response = new LinkedHashMap<>();
-        response.put("valid", true);
-        response.put("documentType", "DOCUMENT");
-        response.put("employee", documentRequest.getEmployeeFullName());
-        response.put("email", documentRequest.getEmployeeEmail());
-        response.put("requestType", documentRequest.getDocumentType().name());
-        response.put("status", documentRequest.getStatus().name());
-        response.put("processedAt", documentRequest.getProcessedAt() != null ? documentRequest.getProcessedAt().toString() : "N/A");
-        response.put("message", "This document is authentic and was issued by HR Nexus.");
-        return response;
+        return buildSafeResponse(
+                "DOCUMENT",
+                documentRequest.getStatus() != null ? documentRequest.getStatus().name() : null,
+                documentRequest.getProcessedAt()
+        );
     }
 
     private Map<String, Object> buildLoanResponse(LoanRequest loanRequest) {
-        Map<String, Object> response = new LinkedHashMap<>();
-        response.put("valid", true);
-        response.put("documentType", "LOAN");
-        response.put("employee", loanRequest.getEmployeeFullName());
-        response.put("email", loanRequest.getEmployeeEmail());
-        response.put("loanType", loanRequest.getLoanType().name());
-        response.put("amount", loanRequest.getAmount());
-        response.put("repaymentMonths", loanRequest.getRepaymentMonths());
-        response.put("status", loanRequest.getStatus().name());
-        response.put("processedAt", loanRequest.getProcessedAt() != null ? loanRequest.getProcessedAt().toString() : "N/A");
-        response.put("message", "This document is authentic and was issued by HR Nexus.");
-        return response;
+        return buildSafeResponse(
+                "LOAN",
+                loanRequest.getStatus() != null ? loanRequest.getStatus().name() : null,
+                loanRequest.getProcessedAt()
+        );
     }
 
     private Map<String, Object> buildAuthorizationResponse(AuthorizationRequest authorizationRequest) {
+        return buildSafeResponse(
+                "AUTHORIZATION",
+                authorizationRequest.getStatus() != null ? authorizationRequest.getStatus().name() : null,
+                authorizationRequest.getProcessedAt()
+        );
+    }
+
+    private Map<String, Object> buildSafeResponse(String documentType, String status, LocalDate issuedOn) {
+        return buildSafeResponse(documentType, status, issuedOn != null ? issuedOn.toString() : null);
+    }
+
+    private Map<String, Object> buildSafeResponse(String documentType, String status, LocalDateTime issuedAt) {
+        return buildSafeResponse(documentType, status, issuedAt != null ? issuedAt.toLocalDate().toString() : null);
+    }
+
+    private Map<String, Object> buildSafeResponse(String documentType, String status, String issuedOn) {
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("valid", true);
-        response.put("documentType", "AUTHORIZATION");
-        response.put("employee", authorizationRequest.getEmployeeFullName());
-        response.put("email", authorizationRequest.getEmployeeEmail());
-        response.put("authorizationType", authorizationRequest.getAuthorizationType().name());
-        response.put("startDate", authorizationRequest.getStartDate() != null ? authorizationRequest.getStartDate().toString() : "N/A");
-        response.put("endDate", authorizationRequest.getEndDate() != null ? authorizationRequest.getEndDate().toString() : "N/A");
-        response.put("status", authorizationRequest.getStatus().name());
-        response.put("processedAt", authorizationRequest.getProcessedAt() != null ? authorizationRequest.getProcessedAt().toString() : "N/A");
-        response.put("message", "This document is authentic and was issued by HR Nexus.");
+        response.put("documentType", documentType);
+        response.put("status", status != null ? status : "ISSUED");
+        response.put("issuedOn", issuedOn != null ? issuedOn : "N/A");
+        response.put("issuer", "ArabSoft Human Resources Management System");
+        response.put("message", "This document is authentic and was issued by ArabSoft.");
         return response;
     }
+
 }

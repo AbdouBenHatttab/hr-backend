@@ -39,14 +39,6 @@ public class RequestReportController {
         return pdfResponse(pdf, "loan_" + id + ".pdf");
     }
 
-    @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")
-    @GetMapping("/authorizations/{id}")
-    public ResponseEntity<byte[]> getAuthPdf(@PathVariable Long id, @AuthenticationPrincipal Jwt jwt) {
-        var req = service.getAuthRequestForPdf(id, jwt.getSubject());
-        var pdf = reportService.generateAuthPdf(req);
-        return pdfResponse(pdf, "authorization_" + id + ".pdf");
-    }
-
     private ResponseEntity<byte[]> pdfResponse(byte[] pdf, String filename) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_PDF);

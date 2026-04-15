@@ -7,6 +7,8 @@ import org.springframework.stereotype.Repository;
 import tn.isetbizerte.pfe.hrbackend.modules.task.entity.Task;
 
 import java.util.List;
+import java.time.LocalDate;
+import tn.isetbizerte.pfe.hrbackend.common.enums.TaskStatus;
 
 @Repository
 public interface TaskRepository extends JpaRepository<Task, Long> {
@@ -36,4 +38,32 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
     List<Task> findActiveTasksOverlapping(@Param("userId")    Long userId,
                                           @Param("startDate") java.time.LocalDate startDate,
                                           @Param("endDate")   java.time.LocalDate endDate);
+
+    // Tasks due soon with no progress (TODO) — includes team + leader for notification routing.
+    @Query("""
+        SELECT t FROM Task t
+        JOIN FETCH t.project p
+        JOIN FETCH p.team tm
+        JOIN FETCH tm.teamLeader tl
+        WHERE t.status = :status
+          AND t.dueDate IS NOT NULL
+          AND t.dueDate BETWEEN :from AND :to
+    """)
+    List<Task> findDueBetweenWithLeader(@Param("status") TaskStatus status,
+                                        @Param("from") LocalDate from,
+                                        @Param("to") LocalDate to);
+
+    // Tasks due soon and not finished (TODO/IN_PROGRESS) — includes team + leader for notification routing.
+    @Query("""
+        SELECT t FROM Task t
+        JOIN FETCH t.project p
+        JOIN FETCH p.team tm
+        JOIN FETCH tm.teamLeader tl
+        WHERE t.status IN :statuses
+          AND t.dueDate IS NOT NULL
+          AND t.dueDate BETWEEN :from AND :to
+    """)
+    List<Task> findDueBetweenWithLeaderStatuses(@Param("statuses") List<TaskStatus> statuses,
+                                                @Param("from") LocalDate from,
+                                                @Param("to") LocalDate to);
 }

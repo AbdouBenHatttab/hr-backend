@@ -22,10 +22,10 @@ public class EmailNotificationService {
 
     private final JavaMailSender mailSender;
 
-    @Value("${spring.mail.username:noreply@hrnexus.com}")
+    @Value("${spring.mail.username:noreply@arabsoft.com}")
     private String fromEmail;
 
-    @Value("${app.company.name:HR Nexus}")
+    @Value("${app.company.name:ArabSoft}")
     private String companyName;
 
     @Value("${app.frontend.url:http://localhost:5173}")
@@ -52,7 +52,7 @@ public class EmailNotificationService {
 
             helper.setFrom(fromEmail);
             helper.setTo(event.getEmail());
-            helper.setSubject("Welcome to HR Nexus – Your account is ready");
+            helper.setSubject("Welcome to ArabSoft - Your account is ready");
 
             helper.setText(
                     buildWelcomeEmailBody(
@@ -89,7 +89,7 @@ public class EmailNotificationService {
 
         String logoTag = logoExists
                 ? "<img src='cid:companyLogo' width='140' style='display:block;margin:0 auto;'>"
-                : "<span style='color:white;font-size:22px;font-weight:700;'>HR Nexus</span>";
+                : "<span style='color:white;font-size:22px;font-weight:700;'>ArabSoft</span>";
 
         return """
                 <div style="background:#f3f5f9;padding:40px 0;font-family:'Segoe UI',Arial,sans-serif;">
@@ -101,7 +101,7 @@ public class EmailNotificationService {
                     <div style="background:#1E3A5F;padding:40px 20px;text-align:center;">
                         %s
                         <h1 style="color:white;margin:20px 0 0;font-size:24px;font-weight:600;">
-                            Welcome to HR Nexus
+                            Welcome to ArabSoft
                         </h1>
                         <p style="color:rgba(255,255,255,0.7);margin-top:8px;font-size:14px;">
                             Your account has been successfully activated
@@ -117,11 +117,11 @@ public class EmailNotificationService {
 
                         <p style="font-size:15px;color:#475569;line-height:1.7;">
                             We are pleased to inform you that your account is now active on the
-                            <strong style="color:#1E3A5F;">HR Nexus platform</strong>.
+                            <strong style="color:#1E3A5F;">ArabSoft platform</strong>.
                         </p>
 
                         <p style="font-size:15px;color:#475569;line-height:1.7;margin-top:10px;">
-                            HR Nexus allows you to manage administrative requests, track tasks,
+                            ArabSoft allows you to manage administrative requests, track tasks,
                             collaborate with your team leader, and stay connected with the HR department.
                         </p>
 
@@ -148,7 +148,7 @@ public class EmailNotificationService {
                                       padding:14px 28px;border-radius:8px;
                                       font-size:15px;font-weight:600;
                                       display:inline-block;">
-                                Access HR Nexus
+                                Access ArabSoft
                             </a>
 
                         </div>

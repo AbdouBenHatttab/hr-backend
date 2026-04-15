@@ -12,7 +12,9 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 import tn.isetbizerte.pfe.hrbackend.modules.employee.dto.CreateLeaveRequestDto;
 import tn.isetbizerte.pfe.hrbackend.modules.employee.dto.LeaveDecisionRequestDto;
+import tn.isetbizerte.pfe.hrbackend.modules.employee.dto.LeaveBalanceDto;
 import tn.isetbizerte.pfe.hrbackend.modules.employee.dto.LeaveRequestResponseDto;
+import tn.isetbizerte.pfe.hrbackend.modules.employee.service.LeaveBalanceService;
 import tn.isetbizerte.pfe.hrbackend.modules.employee.service.EmployeeLeaveService;
 
 import java.util.HashMap;
@@ -24,9 +26,12 @@ import java.util.Map;
 public class EmployeeLeaveController {
 
     private final EmployeeLeaveService employeeLeaveService;
+    private final LeaveBalanceService leaveBalanceService;
 
-    public EmployeeLeaveController(EmployeeLeaveService employeeLeaveService) {
+    public EmployeeLeaveController(EmployeeLeaveService employeeLeaveService,
+                                   LeaveBalanceService leaveBalanceService) {
         this.employeeLeaveService = employeeLeaveService;
+        this.leaveBalanceService = leaveBalanceService;
     }
 
     /**
@@ -50,6 +55,27 @@ public class EmployeeLeaveController {
         response.put("data", leaveResponse);
 
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    /**
+     * Get current user's yearly leave balances.
+     * GET /api/employee/leave/balances?year=2026
+     */
+    @PreAuthorize("hasAnyRole('EMPLOYEE', 'TEAM_LEADER')")
+    @GetMapping("/balances")
+    public ResponseEntity<Map<String, Object>> getMyLeaveBalances(
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestParam(required = false) Integer year
+    ) {
+        String username = jwt.getClaimAsString("preferred_username");
+        List<LeaveBalanceDto> balances = leaveBalanceService.getMyBalances(username, year);
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("success", true);
+        response.put("message", "Leave balances retrieved successfully");
+        response.put("data", balances);
+
+        return ResponseEntity.ok(response);
     }
 
     /**
@@ -77,6 +103,25 @@ public class EmployeeLeaveController {
         response.put("page", page);
         response.put("size", size);
         response.put("data", leaves.getContent());
+
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Employee cancels their own pending leave request before final processing.
+     * POST /api/employee/leave/{leaveId}/cancel
+     */
+    @PreAuthorize("hasAnyRole('EMPLOYEE', 'TEAM_LEADER')")
+    @PostMapping("/{leaveId}/cancel")
+    public ResponseEntity<Map<String, Object>> cancelMyLeaveRequest(
+            @PathVariable Long leaveId,
+            @AuthenticationPrincipal Jwt jwt) {
+        LeaveRequestResponseDto leave = employeeLeaveService.cancelMyLeaveRequest(leaveId, jwt.getSubject());
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("success", true);
+        response.put("message", "Leave request canceled by employee");
+        response.put("data", leave);
 
         return ResponseEntity.ok(response);
     }

@@ -66,6 +66,7 @@ public class UserRoleInfoController {
             personalInfo.put("avatarPhoto",      p.getAvatarPhoto()    != null ? p.getAvatarPhoto()     : "");
             personalInfo.put("avatarColor",      p.getAvatarColor()    != null ? p.getAvatarColor()     : "");
             personalInfo.put("department",       p.getDepartment()     != null ? p.getDepartment()      : "");
+            personalInfo.put("jobTitle",         p.getJobTitle()       != null ? p.getJobTitle()        : "");
             personalInfo.put("salary",          p.getSalary()         != null ? p.getSalary()           : null);
             personalInfo.put("hireDate",         p.getHireDate()       != null ? p.getHireDate().toString() : "");
             response.put("personalInfo", personalInfo);
@@ -141,6 +142,7 @@ public class UserRoleInfoController {
             p.setHireDate(java.time.LocalDate.parse(body.get("hireDate").toString()));
         }
         if (body.containsKey("department")) p.setDepartment((String) body.get("department"));
+        if (body.containsKey("jobTitle")) p.setJobTitle((String) body.get("jobTitle"));
         personRepository.save(p);
         response.put("success", true);
         response.put("message", "Employment details updated.");

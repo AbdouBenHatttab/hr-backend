@@ -215,13 +215,19 @@ public class HRService {
             throw new BadRequestException("Failed to update role in Keycloak. Please check Keycloak connection and logs.");
         }
 
-        // Update role in database and activate the user
+        // Update role in database. Only first approval should activate a pending user;
+        // role edits must not silently reactivate a manually deactivated account.
+        boolean pendingApproval = oldRole == TypeRole.NEW_USER && Boolean.FALSE.equals(user.getActive());
         user.setRole(newRole);
-        if (newRole != TypeRole.NEW_USER) {
-            user.setActive(true); // Activate user now that they have a real role
+        if (pendingApproval && newRole != TypeRole.NEW_USER) {
+            boolean keycloakEnabled = keycloakAdminService.setUserEnabled(keycloakUserId, true);
+            if (!keycloakEnabled) {
+                throw new BadRequestException("Failed to enable user in Keycloak. Local role was not changed.");
+            }
+            user.setActive(true);
         }
         userService.saveUser(user);
-        logger.info("Role updated and user activated in database for user: {}", user.getUsername());
+        logger.info("Role updated in database for user: {}", user.getUsername());
 
         // Auto-fill employment defaults when the user receives a real role.
         // Do not overwrite HR-entered values.
@@ -318,6 +324,16 @@ public class HRService {
             throw new BadRequestException("User '" + user.getUsername() + "' is already deactivated.");
         }
 
+        String keycloakUserId = user.getKeycloakId();
+        if (keycloakUserId == null || keycloakUserId.isBlank()) {
+            throw new BadRequestException("User has no Keycloak ID. Cannot deactivate safely.");
+        }
+
+        boolean keycloakDisabled = keycloakAdminService.setUserEnabled(keycloakUserId, false);
+        if (!keycloakDisabled) {
+            throw new BadRequestException("Failed to disable user in Keycloak. Local account was not changed.");
+        }
+
         user.setActive(false);
         userService.saveUser(user);
         logger.info("User '{}' deactivated by '{}'", user.getUsername(), deactivatedBy);
@@ -341,6 +357,16 @@ public class HRService {
 
         if (Boolean.TRUE.equals(user.getActive())) {
             throw new BadRequestException("User '" + user.getUsername() + "' is already active.");
+        }
+
+        String keycloakUserId = user.getKeycloakId();
+        if (keycloakUserId == null || keycloakUserId.isBlank()) {
+            throw new BadRequestException("User has no Keycloak ID. Cannot reactivate safely.");
+        }
+
+        boolean keycloakEnabled = keycloakAdminService.setUserEnabled(keycloakUserId, true);
+        if (!keycloakEnabled) {
+            throw new BadRequestException("Failed to enable user in Keycloak. Local account was not changed.");
         }
 
         user.setActive(true);
@@ -380,6 +406,7 @@ public class HRService {
             personalInfo.put("maritalStatus",   person.getMaritalStatus()   != null ? person.getMaritalStatus()   : "");
             personalInfo.put("numberOfChildren",person.getNumberOfChildren());
             personalInfo.put("department",      person.getDepartment() != null ? person.getDepartment() : "");
+            personalInfo.put("jobTitle",        person.getJobTitle()   != null ? person.getJobTitle()   : "");
             personalInfo.put("salary",          person.getSalary());
             personalInfo.put("hireDate",        person.getHireDate()   != null ? person.getHireDate().toString()  : "");
             personalInfo.put("avatarPhoto",     person.getAvatarPhoto() != null ? person.getAvatarPhoto() : "");

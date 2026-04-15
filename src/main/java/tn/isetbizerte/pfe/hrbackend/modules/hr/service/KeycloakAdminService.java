@@ -87,6 +87,26 @@ public class KeycloakAdminService {
         }
     }
 
+    public boolean setUserEnabled(String keycloakUserId, boolean enabled) {
+        try {
+            logger.info("Setting Keycloak user '{}' enabled={} in realm '{}'", keycloakUserId, enabled, realm);
+
+            RealmResource realmResource = keycloak.realm(realm);
+            UserResource userResource = realmResource.users().get(keycloakUserId);
+
+            UserRepresentation userRepresentation = userResource.toRepresentation();
+            userRepresentation.setEnabled(enabled);
+            userResource.update(userRepresentation);
+
+            logger.info("Keycloak user '{}' enabled={}", keycloakUserId, enabled);
+            return true;
+        } catch (Exception e) {
+            logger.error("Failed to set Keycloak user '{}' enabled={} on server '{}' with admin '{}'",
+                    keycloakUserId, enabled, keycloakServerUrl, adminUsername, e);
+            return false;
+        }
+    }
+
     private boolean isApplicationRole(String roleName) {
         if (roleName == null) return false;
         for (String r : APPLICATION_ROLES) {

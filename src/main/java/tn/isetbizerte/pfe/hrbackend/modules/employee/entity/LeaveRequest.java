@@ -77,6 +77,8 @@ public class LeaveRequest {
 
     private String approvedBy;
     private String rejectedBy;
+    private String canceledBy;
+    private LocalDateTime canceledAt;
 
     // Running total of leave days taken in last 12 months (updated on approval)
     // nullable=true so Hibernate can add this column to existing tables without failing
@@ -240,6 +242,22 @@ public class LeaveRequest {
 
     public void setRejectedBy(String rejectedBy) {
         this.rejectedBy = rejectedBy;
+    }
+
+    public String getCanceledBy() {
+        return canceledBy;
+    }
+
+    public void setCanceledBy(String canceledBy) {
+        this.canceledBy = canceledBy;
+    }
+
+    public LocalDateTime getCanceledAt() {
+        return canceledAt;
+    }
+
+    public void setCanceledAt(LocalDateTime canceledAt) {
+        this.canceledAt = canceledAt;
     }
 
     public Integer getTotalLeaveTakenLast12Months() {

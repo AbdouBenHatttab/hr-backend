@@ -6,6 +6,7 @@ import tn.isetbizerte.pfe.hrbackend.modules.notification.entity.Notification;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
 
 import java.util.List;
+import java.time.LocalDateTime;
 
 @Repository
 public interface NotificationRepository extends JpaRepository<Notification, Long> {
@@ -14,4 +15,19 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
     List<Notification> findByIdInAndUser(List<Long> ids, User user);
 
     long countByIdInAndUser(List<Long> ids, User user);
+
+    boolean existsByUserAndTypeAndReferenceTypeAndReferenceIdAndCreatedAtAfter(
+            User user,
+            String type,
+            String referenceType,
+            Long referenceId,
+            LocalDateTime createdAt
+    );
+
+    boolean existsByUserAndTypeAndReferenceTypeAndReferenceId(
+            User user,
+            String type,
+            String referenceType,
+            Long referenceId
+    );
 }

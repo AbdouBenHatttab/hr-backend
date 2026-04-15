@@ -15,6 +15,11 @@ public class ProcessedEventService {
         this.repository = repository;
     }
 
+    @Transactional(readOnly = true)
+    public boolean isProcessed(String eventId) {
+        return eventId != null && !eventId.isBlank() && repository.existsByEventId(eventId);
+    }
+
     @Transactional
     public boolean tryMarkProcessed(String eventId, String source) {
         if (eventId == null || eventId.isBlank()) return true;

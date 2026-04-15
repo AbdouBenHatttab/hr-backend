@@ -187,6 +187,62 @@ public class TaskService {
         task.setStatus(newStatus);
         task.setUpdatedAt(LocalDateTime.now());
         taskRepository.save(task);
+
+        // Notify Team Leader when a team member completes a task.
+        if (newStatus == TaskStatus.DONE) {
+            try {
+                Team team = task.getProject() != null ? task.getProject().getTeam() : null;
+                User leader = team != null ? team.getTeamLeader() : null;
+                if (leader != null && leader.getKeycloakId() != null && !leader.getKeycloakId().isBlank()) {
+                    String msg = String.format(
+                            "Task completed: %s (%s) by %s",
+                            task.getTitle(),
+                            task.getProject() != null ? task.getProject().getName() : "No project",
+                            task.getAssigneeFullName()
+                    );
+                    try {
+                        notificationEventProducer.publish(new NotificationEvent(
+                                leader.getKeycloakId(),
+                                msg,
+                                "TASK_DONE",
+                                "TASK",
+                                task.getId(),
+                                "/team/tasks"
+                        ));
+                    } catch (Exception e) {
+                        logger.warn("Failed to publish TASK_DONE notification event, falling back to direct persistence. taskId={}", taskId, e);
+                        notificationService.createNotification(
+                                leader.getKeycloakId(),
+                                msg,
+                                "TASK_DONE",
+                                "TASK",
+                                task.getId(),
+                                "/team/tasks"
+                        );
+                    }
+
+                    try {
+                        if (leader.getPerson() != null
+                                && leader.getPerson().getEmail() != null
+                                && !leader.getPerson().getEmail().isBlank()) {
+                            hrEmailService.sendTaskCompletedToLeader(
+                                    leader.getPerson().getEmail(),
+                                    leader.getPerson().getFirstName(),
+                                    leader.getPerson().getLastName(),
+                                    task.getTitle(),
+                                    task.getProject() != null ? task.getProject().getName() : null,
+                                    task.getAssigneeFullName()
+                            );
+                        }
+                    } catch (Exception e) {
+                        logger.warn("Failed to email leader on task completion taskId={}", taskId, e);
+                    }
+                }
+            } catch (Exception e) {
+                logger.warn("Failed to notify leader on task completion taskId={}", taskId, e);
+            }
+        }
+
         return mapTask(task);
     }
 

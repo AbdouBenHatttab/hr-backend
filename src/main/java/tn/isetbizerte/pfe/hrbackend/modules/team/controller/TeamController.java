@@ -123,6 +123,22 @@ public class TeamController {
     }
 
     /**
+     * Team Leader views an employee profile (read-only) to decide whether to add them.
+     * Only allowed when the employee is either unassigned OR already in the leader's team.
+     * GET /api/leader/employees/{employeeId}
+     */
+    @PreAuthorize("hasRole('TEAM_LEADER')")
+    @GetMapping("/api/leader/employees/{employeeId}")
+    public ResponseEntity<Map<String, Object>> getEmployeeProfileForLeader(
+            @PathVariable Long employeeId,
+            @AuthenticationPrincipal Jwt jwt) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("success", true);
+        response.put("data", teamService.getEmployeeProfileForLeader(jwt.getSubject(), employeeId));
+        return ResponseEntity.ok(response);
+    }
+
+    /**
      * Team Leader adds an employee to their team.
      * POST /api/leader/team/members
      * Body: { "employeeId": 3 }

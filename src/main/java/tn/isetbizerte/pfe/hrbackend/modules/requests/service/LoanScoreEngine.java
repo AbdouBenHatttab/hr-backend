@@ -47,7 +47,9 @@ public class LoanScoreEngine {
         BigDecimal salary      = person.getSalary();
         BigDecimal amount      = loan.getAmount();
         int        months      = loan.getRepaymentMonths();
-        BigDecimal existingDed = person.getCurrentMonthlyDeductions();
+        BigDecimal existingDed = person.getCurrentMonthlyDeductions() != null
+                ? person.getCurrentMonthlyDeductions()
+                : BigDecimal.ZERO;
 
         // Monthly installment for this loan
         BigDecimal installment = amount.divide(

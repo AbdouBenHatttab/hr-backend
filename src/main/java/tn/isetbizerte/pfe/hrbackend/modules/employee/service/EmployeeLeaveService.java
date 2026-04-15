@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tn.isetbizerte.pfe.hrbackend.common.enums.ApprovalDecision;
 import tn.isetbizerte.pfe.hrbackend.common.enums.LeaveStatus;
+import tn.isetbizerte.pfe.hrbackend.common.enums.LeaveType;
 import tn.isetbizerte.pfe.hrbackend.common.exception.BadRequestException;
 import tn.isetbizerte.pfe.hrbackend.common.exception.ResourceNotFoundException;
 import tn.isetbizerte.pfe.hrbackend.modules.employee.dto.CreateLeaveRequestDto;
@@ -38,6 +39,10 @@ import java.util.stream.Collectors;
 @Slf4j
 public class EmployeeLeaveService {
     private static final int MAX_LEAVE_DAYS_PER_REQUEST = 30;
+    private static final List<LeaveStatus> OVERLAP_BLOCKING_STATUSES = List.of(
+            LeaveStatus.PENDING,
+            LeaveStatus.APPROVED
+    );
 
     private final LeaveRequestRepository leaveRequestRepository;
     private final UserRepository          userRepository;
@@ -47,6 +52,7 @@ public class EmployeeLeaveService {
     private final HREmailService          emailService;
     private final RequestEventProducer    requestEventProducer;
     private final RequestHistoryService   historyService;
+    private final LeaveBalanceService      leaveBalanceService;
 
     public EmployeeLeaveService(
             LeaveRequestRepository leaveRequestRepository,
@@ -56,7 +62,8 @@ public class EmployeeLeaveService {
             LeaveScoreEngine leaveScoreEngine,
             HREmailService emailService,
             RequestEventProducer requestEventProducer,
-            RequestHistoryService historyService
+            RequestHistoryService historyService,
+            LeaveBalanceService leaveBalanceService
     ) {
         this.leaveRequestRepository = leaveRequestRepository;
         this.userRepository         = userRepository;
@@ -66,6 +73,7 @@ public class EmployeeLeaveService {
         this.emailService           = emailService;
         this.requestEventProducer   = requestEventProducer;
         this.historyService         = historyService;
+        this.leaveBalanceService    = leaveBalanceService;
     }
 
     /**
@@ -83,6 +91,9 @@ public class EmployeeLeaveService {
                 .orElseThrow(() -> new ResourceNotFoundException("User not found: " + username));
 
         validateLeaveRequestDates(dto.getStartDate(), dto.getEndDate(), dto.getNumberOfDays());
+        validateNoOverlappingLeave(user, dto.getStartDate(), dto.getEndDate());
+        validateAnnualLeaveCreationRules(user, dto);
+        leaveBalanceService.reserveForRequest(user, dto.getLeaveType(), dto.getStartDate(), dto.getNumberOfDays());
 
         LeaveRequest leaveRequest = new LeaveRequest();
         leaveRequest.setUser(user);
@@ -114,6 +125,22 @@ public class EmployeeLeaveService {
         );
         log.info("Leave request created with ID: {} for user: {}", saved.getId(), username);
 
+        // Notify requester (EMPLOYEE or TEAM_LEADER) that the request was submitted.
+        try {
+            requestEventProducer.publish(
+                    new tn.isetbizerte.pfe.hrbackend.common.event.RequestEvent(
+                            "LEAVE_SUBMITTED",
+                            "LEAVE",
+                            saved.getId(),
+                            user.getKeycloakId(),
+                            user.getKeycloakId(),
+                            null
+                    )
+            );
+        } catch (Exception e) {
+            log.warn("Failed to enqueue LEAVE_SUBMITTED request event for leaveId={}", saved.getId(), e);
+        }
+
         return mapToResponseDto(saved);
     }
 
@@ -128,6 +155,45 @@ public class EmployeeLeaveService {
 
         return leaveRequestRepository.findByUser(user, pageable)
                 .map(this::mapToResponseDto);
+    }
+
+    @CacheEvict(value = "calendarLeaves", allEntries = true)
+    @Transactional
+    public LeaveRequestResponseDto cancelMyLeaveRequest(Long leaveId, String requesterKeycloakId) {
+        LeaveRequest leave = leaveRequestRepository.findById(leaveId)
+                .orElseThrow(() -> new ResourceNotFoundException("Leave request not found with ID: " + leaveId));
+
+        if (leave.getUser() == null || !requesterKeycloakId.equals(leave.getUser().getKeycloakId())) {
+            throw new AccessDeniedException("Only the owner can cancel this leave request.");
+        }
+        if (leave.getStatus() == LeaveStatus.CANCELLED_BY_EMPLOYEE) {
+            return mapToResponseDto(leave);
+        }
+        String fromStage = computeApprovalStage(leave);
+        if (!isEmployeeCancellationAllowed(fromStage)) {
+            throw new BadRequestException("Only leave requests pending Team Leader or HR review can be canceled by the employee.");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        leaveBalanceService.releaseReserved(leave);
+        leave.setStatus(LeaveStatus.CANCELLED_BY_EMPLOYEE);
+        leave.setCanceledBy(requesterKeycloakId);
+        leave.setCanceledAt(now);
+        leave.setUpdatedAt(now);
+
+        historyService.record(
+                "LEAVE",
+                "EMPLOYEE_CANCELLED",
+                leave.getId(),
+                requesterKeycloakId,
+                "Employee cancelled the request.",
+                fromStage,
+                computeApprovalStage(leave)
+        );
+        requestEventProducer.publish(
+                new RequestEvent("LEAVE_CANCELLED_BY_EMPLOYEE", "LEAVE", leave.getId(),
+                        leave.getUser().getKeycloakId(), requesterKeycloakId, null)
+        );
+        return mapToResponseDto(leaveRequestRepository.save(leave));
     }
 
     /**
@@ -246,6 +312,7 @@ public class EmployeeLeaveService {
             leave.setDecisionReason(decisionReason.trim());
             leave.setRejectedBy(leaderKeycloakId);
             leave.setStatus(LeaveStatus.REJECTED);
+            leaveBalanceService.releaseReserved(leave);
             historyService.record(
                     "LEAVE",
                     "TL_REJECTED",
@@ -345,6 +412,7 @@ public class EmployeeLeaveService {
             leave.setDecisionReason(decisionReason.trim());
             leave.setRejectedBy(hrKeycloakId);
             leave.setStatus(LeaveStatus.REJECTED);
+            leaveBalanceService.releaseReserved(leave);
             historyService.record(
                     "LEAVE",
                     "HR_REJECTED",
@@ -395,6 +463,7 @@ public class EmployeeLeaveService {
         boolean hrApproved = leave.getHrDecision() == ApprovalDecision.APPROVED;
 
         if (tlApproved && hrApproved) {
+            leaveBalanceService.consumeReserved(leave);
             leave.setStatus(LeaveStatus.APPROVED);
             leave.setApprovalDate(LocalDate.now());
             // Generate unique QR verification token on full approval
@@ -482,6 +551,42 @@ public class EmployeeLeaveService {
         }
     }
 
+    private void validateNoOverlappingLeave(User user, LocalDate startDate, LocalDate endDate) {
+        List<LeaveRequest> overlaps = leaveRequestRepository.findByUserAndDateRangeAndStatusIn(
+                user,
+                startDate,
+                endDate,
+                OVERLAP_BLOCKING_STATUSES
+        );
+        if (overlaps.isEmpty()) return;
+
+        LeaveRequest overlap = overlaps.get(0);
+        throw new BadRequestException(String.format(
+                "This leave request overlaps with an existing %s leave request from %s to %s.",
+                overlap.getStatus().name().toLowerCase(),
+                overlap.getStartDate(),
+                overlap.getEndDate()
+        ));
+    }
+
+    private void validateAnnualLeaveCreationRules(User user, CreateLeaveRequestDto dto) {
+        if (dto.getLeaveType() != LeaveType.ANNUAL) return;
+
+        if (dto.getStartDate().isAfter(LocalDate.now().plusMonths(6))) {
+            throw new BadRequestException("Annual leave cannot be requested more than 6 months in advance.");
+        }
+
+        int requestedDays = dto.getNumberOfDays() != null ? dto.getNumberOfDays() : 0;
+        int availableDays = leaveBalanceService.getAvailableDays(user, LeaveType.ANNUAL, dto.getStartDate());
+        if (requestedDays > availableDays) {
+            throw new BadRequestException(String.format(
+                    "Insufficient annual leave balance. Requested %d days, but only %d days are available.",
+                    requestedDays,
+                    availableDays
+            ));
+        }
+    }
+
     /**
      * Convert entity to response DTO
      */
@@ -511,10 +616,13 @@ public class EmployeeLeaveService {
         dto.setDecisionReason(leaveRequest.getDecisionReason());
         dto.setApprovedBy(leaveRequest.getApprovedBy());
         dto.setRejectedBy(leaveRequest.getRejectedBy());
+        dto.setCanceledBy(leaveRequest.getCanceledBy());
+        dto.setCanceledAt(leaveRequest.getCanceledAt());
         return dto;
     }
 
     private String computeApprovalStage(LeaveRequest leave) {
+        if (leave.getStatus() == LeaveStatus.CANCELLED_BY_EMPLOYEE) return "CANCELLED_BY_EMPLOYEE";
         if (leave.getStatus() == LeaveStatus.REJECTED) return "REJECTED";
         if (leave.getStatus() == LeaveStatus.APPROVED) return "APPROVED";
         if (leave.getTeamLeaderDecision() == ApprovalDecision.APPROVED
@@ -525,5 +633,9 @@ public class EmployeeLeaveService {
             return "PENDING_TL";
         }
         return "PENDING";
+    }
+
+    private boolean isEmployeeCancellationAllowed(String approvalStage) {
+        return "PENDING_TL".equals(approvalStage) || "PENDING_HR".equals(approvalStage);
     }
 }

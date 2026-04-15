@@ -32,6 +32,16 @@ public class NotificationController {
     }
 
     @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")
+    @GetMapping("/{id}/details")
+    public Map<String, Object> getNotificationDetails(@PathVariable Long id, @AuthenticationPrincipal Jwt jwt) {
+        String username = jwt.getClaimAsString("preferred_username");
+        Map<String, Object> res = new HashMap<>();
+        res.put("success", true);
+        res.put("data", notificationService.getNotificationDetails(username, id));
+        return res;
+    }
+
+    @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")
     @PatchMapping("/{id}/read")
     public Map<String, Object> markRead(@PathVariable Long id, @AuthenticationPrincipal Jwt jwt) {
         String username = jwt.getClaimAsString("preferred_username");

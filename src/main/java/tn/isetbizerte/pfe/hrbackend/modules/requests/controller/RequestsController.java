@@ -9,10 +9,16 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.CancelLoanAfterMeetingDto;
+import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.CreateAuthorizationRequestDto;
+import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.CreateDocumentRequestDto;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.CreateLoanRequestDto;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.service.RequestsService;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -32,12 +38,10 @@ public class RequestsController {
     @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")
     @PostMapping("/api/employee/documents")
     public ResponseEntity<Map<String, Object>> createDocumentRequest(
-            @RequestBody Map<String, Object> body,
+            @Valid @RequestBody CreateDocumentRequestDto body,
             @AuthenticationPrincipal Jwt jwt) {
         String username = jwt.getClaimAsString("preferred_username");
-        var data = service.createDocumentRequest(username,
-                (String) body.get("documentType"),
-                (String) body.get("notes"));
+        var data = service.createDocumentRequest(username, body);
         return ok("Document request submitted.", data);
     }
 
@@ -50,6 +54,14 @@ public class RequestsController {
         Pageable pageable = PageRequest.of(page, size);
         Page<Map<String, Object>> list = service.getMyDocumentRequests(jwt.getClaimAsString("preferred_username"), pageable);
         return okPage("My document requests.", list, page, size);
+    }
+
+    @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")
+    @PostMapping("/api/employee/documents/{id}/cancel")
+    public ResponseEntity<Map<String, Object>> cancelMyDocument(@PathVariable Long id,
+                                                                 @AuthenticationPrincipal Jwt jwt) {
+        return ok("Document request canceled by employee.",
+                service.cancelMyDocumentRequest(id, jwt.getSubject()));
     }
 
     @PreAuthorize("hasRole('HR_MANAGER')")
@@ -79,6 +91,93 @@ public class RequestsController {
         return ok("Document request rejected.", service.decideDocument(id, false, note, jwt.getSubject()));
     }
 
+    @PreAuthorize("hasRole('HR_MANAGER')")
+    @PostMapping(value = "/api/hr/documents/{id}/attachment", consumes = "multipart/form-data")
+    public ResponseEntity<Map<String, Object>> uploadDocumentAttachment(@PathVariable Long id,
+                                                                        @RequestParam("file") MultipartFile file,
+                                                                        @AuthenticationPrincipal Jwt jwt) throws Exception {
+        return ok("Attachment uploaded.",
+                service.uploadDocumentAttachment(
+                        id,
+                        jwt.getSubject(),
+                        file != null ? file.getOriginalFilename() : null,
+                        file != null ? file.getContentType() : null,
+                        file != null ? file.getBytes() : null
+                ));
+    }
+
+    @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")
+    @GetMapping("/api/employee/documents/{id}/attachment")
+    public ResponseEntity<byte[]> downloadDocumentAttachment(@PathVariable Long id,
+                                                             @AuthenticationPrincipal Jwt jwt) {
+        var req = service.getDocumentRequestForAttachment(id, jwt.getSubject());
+        byte[] bytes = service.readDocumentAttachment(req);
+
+        org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+        String ct = req.getAttachmentContentType() != null ? req.getAttachmentContentType() : "application/octet-stream";
+        try {
+            headers.setContentType(org.springframework.http.MediaType.parseMediaType(ct));
+        } catch (Exception e) {
+            headers.setContentType(org.springframework.http.MediaType.APPLICATION_OCTET_STREAM);
+        }
+        headers.setContentDisposition(org.springframework.http.ContentDisposition.attachment()
+                .filename(req.getAttachmentFileName() != null ? req.getAttachmentFileName() : ("document_attachment_" + id))
+                .build());
+        return ResponseEntity.ok().headers(headers).body(bytes);
+    }
+
+    @PreAuthorize("hasRole('HR_MANAGER')")
+    @PostMapping(value = "/api/hr/users/{userId}/documents", consumes = "multipart/form-data")
+    public ResponseEntity<Map<String, Object>> uploadStoredEmployeeDocument(@PathVariable Long userId,
+                                                                            @RequestParam(value = "documentType", defaultValue = "CONTRACT_COPY") String documentType,
+                                                                            @RequestParam(value = "note", required = false) String note,
+                                                                            @RequestParam("file") MultipartFile file,
+                                                                            @AuthenticationPrincipal Jwt jwt) throws Exception {
+        return ok("Employee document stored.",
+                service.uploadStoredEmployeeDocument(
+                        userId,
+                        documentType,
+                        note,
+                        jwt.getSubject(),
+                        file != null ? file.getOriginalFilename() : null,
+                        file != null ? file.getContentType() : null,
+                        file != null ? file.getBytes() : null
+                ));
+    }
+
+    @PreAuthorize("hasRole('HR_MANAGER')")
+    @GetMapping("/api/hr/users/{userId}/documents")
+    public ResponseEntity<Map<String, Object>> getStoredEmployeeDocumentsForHr(@PathVariable Long userId) {
+        return ok("Stored employee documents.", service.getStoredEmployeeDocumentsForHr(userId));
+    }
+
+    @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")
+    @GetMapping("/api/employee/documents/managed")
+    public ResponseEntity<Map<String, Object>> getMyStoredEmployeeDocuments(@AuthenticationPrincipal Jwt jwt) {
+        return ok("My stored employee documents.",
+                service.getMyStoredEmployeeDocuments(jwt.getClaimAsString("preferred_username")));
+    }
+
+    @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")
+    @GetMapping("/api/employee/documents/managed/{id}/download")
+    public ResponseEntity<byte[]> downloadStoredEmployeeDocument(@PathVariable Long id,
+                                                                 @AuthenticationPrincipal Jwt jwt) {
+        var doc = service.getStoredEmployeeDocumentForDownload(id, jwt.getSubject());
+        byte[] bytes = service.readStoredEmployeeDocument(doc);
+
+        org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+        String ct = doc.getContentType() != null ? doc.getContentType() : "application/octet-stream";
+        try {
+            headers.setContentType(org.springframework.http.MediaType.parseMediaType(ct));
+        } catch (Exception e) {
+            headers.setContentType(org.springframework.http.MediaType.APPLICATION_OCTET_STREAM);
+        }
+        headers.setContentDisposition(org.springframework.http.ContentDisposition.attachment()
+                .filename(doc.getFileName() != null ? doc.getFileName() : ("employee_document_" + id))
+                .build());
+        return ResponseEntity.ok().headers(headers).body(bytes);
+    }
+
     // ══════════════════════════════════════════════════════════════
     // LOAN REQUESTS
     // ══════════════════════════════════════════════════════════════
@@ -103,6 +202,14 @@ public class RequestsController {
         Pageable pageable = PageRequest.of(page, size);
         Page<Map<String, Object>> list = service.getMyLoanRequests(jwt.getClaimAsString("preferred_username"), pageable);
         return okPage("My loan requests.", list, page, size);
+    }
+
+    @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")
+    @PostMapping("/api/employee/loans/{id}/cancel")
+    public ResponseEntity<Map<String, Object>> cancelMyLoan(@PathVariable Long id,
+                                                             @AuthenticationPrincipal Jwt jwt) {
+        return ok("Loan request canceled by employee.",
+                service.cancelMyLoanRequest(id, jwt.getSubject()));
     }
 
     @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")
@@ -135,8 +242,75 @@ public class RequestsController {
     public ResponseEntity<Map<String, Object>> rejectLoan(@PathVariable Long id,
                                                            @RequestBody(required = false) Map<String, Object> body,
                                                            @AuthenticationPrincipal Jwt jwt) {
-        String note = body != null ? (String) body.getOrDefault("hrNote", "") : "";
+        String note = "";
+        if (body != null) {
+            Object value = body.getOrDefault("hrDecisionReason",
+                    body.getOrDefault("reason", body.getOrDefault("hrNote", "")));
+            note = value != null ? value.toString() : "";
+        }
         return ok("Loan rejected.", service.decideLoan(id, false, note, jwt.getSubject()));
+    }
+
+    @PreAuthorize("hasRole('HR_MANAGER')")
+    @PostMapping("/api/hr/loans/{id}/schedule-meeting")
+    public ResponseEntity<Map<String, Object>> scheduleLoanMeeting(@PathVariable Long id,
+                                                                    @RequestBody Map<String, Object> body,
+                                                                    @AuthenticationPrincipal Jwt jwt) {
+        LocalDateTime meetingAt;
+        Object meetingAtValue = body.get("meetingAt");
+        if (meetingAtValue != null && !meetingAtValue.toString().isBlank()) {
+            meetingAt = LocalDateTime.parse(meetingAtValue.toString());
+        } else {
+            LocalDate date = LocalDate.parse((String) body.get("meetingDate"));
+            LocalTime time = LocalTime.parse((String) body.get("meetingTime"));
+            meetingAt = LocalDateTime.of(date, time);
+        }
+        String note = body.get("meetingNote") != null ? body.get("meetingNote").toString() : "";
+        return ok("Loan meeting scheduled.", service.scheduleLoanMeeting(id, meetingAt, note, jwt.getSubject()));
+    }
+
+    @PreAuthorize("hasRole('HR_MANAGER')")
+    @PostMapping("/api/hr/loans/{id}/cancel-after-meeting")
+    public ResponseEntity<Map<String, Object>> cancelLoanAfterMeeting(@PathVariable Long id,
+                                                                      @Valid @RequestBody CancelLoanAfterMeetingDto body,
+                                                                      @AuthenticationPrincipal Jwt jwt) {
+        return ok("Loan canceled after meeting.",
+                service.cancelLoanAfterMeeting(id, body.getReason(), jwt.getSubject()));
+    }
+
+    @PreAuthorize("hasRole('HR_MANAGER')")
+    @PostMapping(value = "/api/hr/loans/{id}/attachment", consumes = "multipart/form-data")
+    public ResponseEntity<Map<String, Object>> uploadLoanAttachment(@PathVariable Long id,
+                                                                    @RequestParam("file") MultipartFile file,
+                                                                    @AuthenticationPrincipal Jwt jwt) throws Exception {
+        return ok("Loan final file uploaded.",
+                service.uploadLoanAttachment(
+                        id,
+                        jwt.getSubject(),
+                        file != null ? file.getOriginalFilename() : null,
+                        file != null ? file.getContentType() : null,
+                        file != null ? file.getBytes() : null
+                ));
+    }
+
+    @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")
+    @GetMapping("/api/employee/loans/{id}/attachment")
+    public ResponseEntity<byte[]> downloadLoanAttachment(@PathVariable Long id,
+                                                         @AuthenticationPrincipal Jwt jwt) {
+        var req = service.getLoanRequestForAttachment(id, jwt.getSubject());
+        byte[] bytes = service.readLoanAttachment(req);
+
+        org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+        String ct = req.getAttachmentContentType() != null ? req.getAttachmentContentType() : "application/octet-stream";
+        try {
+            headers.setContentType(org.springframework.http.MediaType.parseMediaType(ct));
+        } catch (Exception e) {
+            headers.setContentType(org.springframework.http.MediaType.APPLICATION_OCTET_STREAM);
+        }
+        headers.setContentDisposition(org.springframework.http.ContentDisposition.attachment()
+                .filename(req.getAttachmentFileName() != null ? req.getAttachmentFileName() : ("loan_attachment_" + id))
+                .build());
+        return ResponseEntity.ok().headers(headers).body(bytes);
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -146,13 +320,10 @@ public class RequestsController {
     @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")
     @PostMapping("/api/employee/authorizations")
     public ResponseEntity<Map<String, Object>> createAuthRequest(
-            @RequestBody Map<String, Object> body,
+            @Valid @RequestBody CreateAuthorizationRequestDto body,
             @AuthenticationPrincipal Jwt jwt) {
         String username = jwt.getClaimAsString("preferred_username");
-        LocalDate start = body.get("startDate") != null ? LocalDate.parse((String) body.get("startDate")) : null;
-        LocalDate end   = body.get("endDate")   != null ? LocalDate.parse((String) body.get("endDate"))   : null;
-        var data = service.createAuthRequest(username,
-                (String) body.get("authorizationType"), start, end, (String) body.get("reason"));
+        var data = service.createAuthRequest(username, body);
         return ok("Authorization request submitted.", data);
     }
 
@@ -165,6 +336,14 @@ public class RequestsController {
         Pageable pageable = PageRequest.of(page, size);
         Page<Map<String, Object>> list = service.getMyAuthRequests(jwt.getClaimAsString("preferred_username"), pageable);
         return okPage("My authorization requests.", list, page, size);
+    }
+
+    @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")
+    @PostMapping("/api/employee/authorizations/{id}/cancel")
+    public ResponseEntity<Map<String, Object>> cancelMyAuth(@PathVariable Long id,
+                                                             @AuthenticationPrincipal Jwt jwt) {
+        return ok("Authorization request canceled by employee.",
+                service.cancelMyAuthRequest(id, jwt.getSubject()));
     }
 
     @PreAuthorize("hasRole('HR_MANAGER')")

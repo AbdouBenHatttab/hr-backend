@@ -11,6 +11,7 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 
 /**
@@ -31,6 +32,7 @@ public class HREmailService {
 
     private static final Logger log = LoggerFactory.getLogger(HREmailService.class);
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("dd/MM/yyyy");
+    private static final DateTimeFormatter DATETIME_FMT = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
     private static final String SYSTEM_NAME = "ArabSoft Human Resources Management System";
     private static final String DEPARTMENT  = "Human Resources Department";
     private static final String COMPANY     = "ArabSoft";
@@ -93,12 +95,11 @@ public class HREmailService {
     // 4 — LOAN APPROVED
     // ═══════════════════════════════════════════════════════════════════
 
-    @Async
-    public void sendLoanApproved(String email, String firstName, String lastName,
-                                  double amount, int months, double monthlyInstallment,
-                                  String referenceId) {
+    public boolean sendLoanApproved(String email, String firstName, String lastName,
+                                    double amount, int months, double monthlyInstallment,
+                                    String referenceId) {
         String name = firstName + " " + lastName;
-        send(email,
+        return send(email,
             "Loan Request Approved – " + referenceId,
             buildLoanApprovedBody(name, amount, months, monthlyInstallment, referenceId));
     }
@@ -107,11 +108,10 @@ public class HREmailService {
     // 5 — LOAN REJECTED
     // ═══════════════════════════════════════════════════════════════════
 
-    @Async
-    public void sendLoanRejected(String email, String firstName, String lastName,
-                                  double amount, String reason, String referenceId) {
+    public boolean sendLoanRejected(String email, String firstName, String lastName,
+                                    double amount, String reason, String referenceId) {
         String name = firstName + " " + lastName;
-        send(email,
+        return send(email,
             "Loan Request Not Approved – " + referenceId,
             buildLoanRejectedBody(name, amount, reason, referenceId));
     }
@@ -153,10 +153,54 @@ public class HREmailService {
     }
 
     // ═══════════════════════════════════════════════════════════════════
+    // 8 — TASK COMPLETED (TEAM LEADER)
+    // ═══════════════════════════════════════════════════════════════════
+
+    @Async
+    public void sendTaskCompletedToLeader(String email, String firstName, String lastName,
+                                          String taskTitle, String projectName, String completedBy) {
+        String name = firstName + " " + lastName;
+        send(email,
+                "Task Completed – " + COMPANY + " HRMS",
+                buildTaskCompletedBody(name, taskTitle, projectName, completedBy));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 9 — DOCUMENT READY
+    // ═══════════════════════════════════════════════════════════════════
+
+    public boolean sendDocumentReady(String email, String firstName, String lastName,
+                                     String referenceId) {
+        String name = firstName + " " + lastName;
+        return send(email,
+                "Document Ready – " + referenceId,
+                buildDocumentReadyBody(name, referenceId));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 10 — AUTHORIZATION DECISION
+    // ═══════════════════════════════════════════════════════════════════
+
+    public boolean sendAuthorizationDecision(String email, String firstName, String lastName,
+                                             String authorizationType, LocalDate startDate,
+                                             LocalDate endDate, LocalDateTime processedAt,
+                                             boolean approved, String decisionNote,
+                                             String referenceId) {
+        String name = firstName + " " + lastName;
+        String subject = approved
+                ? "Authorization Request Approved"
+                : "Authorization Request Rejected";
+        return send(email,
+                subject,
+                buildAuthorizationDecisionBody(name, authorizationType, startDate, endDate,
+                        processedAt, approved, decisionNote, referenceId));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
     // INTERNAL SEND
     // ═══════════════════════════════════════════════════════════════════
 
-    private void send(String to, String subject, String html) {
+    private boolean send(String to, String subject, String html) {
         try {
             MimeMessage msg = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(msg, true, "UTF-8");
@@ -170,8 +214,10 @@ public class HREmailService {
 
             mailSender.send(msg);
             log.info("✅ Email sent to {} — {}", to, subject);
+            return true;
         } catch (Exception e) {
             log.error("❌ Failed to send email to {}: {}", to, e.getMessage());
+            return false;
         }
     }
 
@@ -433,6 +479,104 @@ public class HREmailService {
                 actionButton("Open My Tasks", frontendUrl + "/employee/tasks", "#2563EB")));
     }
 
+    private String buildTaskCompletedBody(String leaderName, String taskTitle, String projectName, String completedBy) {
+        String projectValue = (projectName != null && !projectName.isBlank()) ? projectName : "No project";
+        String completedByValue = (completedBy != null && !completedBy.isBlank()) ? completedBy : "Team member";
+        return wrap("Task Completed", "A team task was marked done", """
+            <p style="font-size:15px;color:#374151;line-height:1.8;">
+                Dear <strong>%s</strong>,
+            </p>
+            <p style="font-size:15px;color:#374151;line-height:1.8;">
+                A task has been marked as <strong style="color:#16A34A;">DONE</strong>.
+            </p>
+            %s
+            %s
+            """.formatted(
+                leaderName,
+                infoGrid(new String[][]{
+                    {"Task Title", taskTitle},
+                    {"Project", projectValue},
+                    {"Completed By", completedByValue}
+                }),
+                actionButton("Open Team Tasks", frontendUrl + "/team/tasks", "#16A34A")
+            ));
+    }
+
+    private String buildDocumentReadyBody(String name, String refId) {
+        return wrap("Document Ready", "Reference: " + refId, """
+            <p style="font-size:15px;color:#374151;line-height:1.8;">
+                Dear <strong>%s</strong>,
+            </p>
+            <p style="font-size:15px;color:#374151;line-height:1.8;">
+                Your document request has been completed by the Human Resources Department.
+                The final official file is now ready for access from the ArabSoft platform.
+            </p>
+            %s
+            <p style="font-size:15px;color:#374151;line-height:1.8;margin-top:20px;">
+                You can download or consult the file from your documents area.
+                Please quote the reference number below for any HR follow-up.
+            </p>
+            %s
+            """.formatted(name,
+                infoGrid(new String[][]{
+                    {"Reference ID", refId},
+                    {"Document", "HR document"},
+                    {"Status", "Ready for download"},
+                }),
+                actionButton("Open My Documents", frontendUrl + "/employee/documents", "#2563EB")));
+    }
+
+    private String buildAuthorizationDecisionBody(String name, String authorizationType,
+                                                  LocalDate startDate, LocalDate endDate,
+                                                  LocalDateTime processedAt,
+                                                  boolean approved, String decisionNote,
+                                                  String refId) {
+        String statusText = approved ? "approved" : "not approved";
+        String statusColor = approved ? "#16A34A" : "#DC2626";
+        String note = decisionNote != null && !decisionNote.isBlank()
+                ? decisionNote
+                : approved
+                    ? "Approved according to the current HR workflow."
+                    : "Does not meet current approval requirements.";
+        String noteTitle = approved ? "HR Note" : "Decision Reason";
+
+        return wrap(approved ? "Authorization Approved" : "Authorization Not Approved",
+                "Reference: " + refId, """
+            <p style="font-size:15px;color:#374151;line-height:1.8;">
+                Dear <strong>%s</strong>,
+            </p>
+            <p style="font-size:15px;color:#374151;line-height:1.8;">
+                Your authorization request has been
+                <strong style="color:%s;">%s</strong>.
+            </p>
+            %s
+            <div style="background:%s;border-left:4px solid %s;border-radius:8px;
+                        padding:16px 20px;margin:20px 0;">
+                <p style="margin:0;font-size:13px;color:#6B7280;font-weight:600;
+                           text-transform:uppercase;letter-spacing:0.05em;">%s</p>
+                <p style="margin:6px 0 0;font-size:15px;color:#374151;line-height:1.7;">%s</p>
+            </div>
+            <p style="font-size:15px;color:#374151;line-height:1.8;">
+                You can review the request status and details in your authorizations area.
+            </p>
+            %s
+            """.formatted(name, statusColor, statusText,
+                infoGrid(new String[][]{
+                    {"Reference ID", refId},
+                    {"Authorization Type", formatEnum(authorizationType)},
+                    {"Start Date", formatDateOrDash(startDate)},
+                    {"End Date", formatDateOrDash(endDate)},
+                    {"Status", approved ? "Approved" : "Rejected"},
+                    {"Processed Date", formatDateTimeOrDash(processedAt)},
+                }),
+                approved ? "#F0FDF4" : "#FEF2F2",
+                approved ? "#22C55E" : "#EF4444",
+                noteTitle,
+                note,
+                actionButton("Open My Authorizations", frontendUrl + "/employee/authorizations",
+                        approved ? "#16A34A" : "#DC2626")));
+    }
+
     // ═══════════════════════════════════════════════════════════════════
     // SHARED LAYOUT COMPONENTS
     // ═══════════════════════════════════════════════════════════════════
@@ -542,5 +686,25 @@ public class HREmailService {
             case "HR_MANAGER"  -> "HR Manager";
             default -> role;
         };
+    }
+
+    private String formatEnum(String value) {
+        if (value == null || value.isBlank()) return "—";
+        String[] words = value.split("_");
+        StringBuilder label = new StringBuilder();
+        for (String word : words) {
+            if (word.isBlank()) continue;
+            if (!label.isEmpty()) label.append(' ');
+            label.append(word.charAt(0)).append(word.substring(1).toLowerCase());
+        }
+        return label.toString();
+    }
+
+    private String formatDateOrDash(LocalDate date) {
+        return date != null ? date.format(DATE_FMT) : "—";
+    }
+
+    private String formatDateTimeOrDash(LocalDateTime dateTime) {
+        return dateTime != null ? dateTime.format(DATETIME_FMT) : "—";
     }
 }

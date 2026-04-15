@@ -17,6 +17,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import java.util.Objects;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.PageImpl;
@@ -213,6 +214,8 @@ public class TeamService {
                     m.put("id", u.getId());
                     m.put("username", u.getUsername());
                     m.put("role", u.getRole().name());
+                    m.put("active", u.getActive());
+                    m.put("registrationDate", u.getRegistrationDate());
                     if (u.getPerson() != null) {
                         m.put("fullName", u.getPerson().getFirstName() + " " + u.getPerson().getLastName());
                         m.put("email", u.getPerson().getEmail());
@@ -223,13 +226,71 @@ public class TeamService {
                         personalInfo.put("email",      u.getPerson().getEmail());
                         personalInfo.put("phone",      u.getPerson().getPhone() != null ? u.getPerson().getPhone() : "");
                         personalInfo.put("address",    u.getPerson().getAddress() != null ? u.getPerson().getAddress() : "");
+                        personalInfo.put("birthDate",  u.getPerson().getBirthDate() != null ? u.getPerson().getBirthDate().toString() : "");
+                        personalInfo.put("maritalStatus", u.getPerson().getMaritalStatus() != null ? u.getPerson().getMaritalStatus() : "");
+                        personalInfo.put("numberOfChildren", u.getPerson().getNumberOfChildren());
                         personalInfo.put("department", u.getPerson().getDepartment() != null ? u.getPerson().getDepartment() : "");
+                        personalInfo.put("hireDate",   u.getPerson().getHireDate() != null ? u.getPerson().getHireDate().toString() : "");
+                        personalInfo.put("avatarPhoto", u.getPerson().getAvatarPhoto() != null ? u.getPerson().getAvatarPhoto() : "");
                         personalInfo.put("avatarColor", u.getPerson().getAvatarColor() != null ? u.getPerson().getAvatarColor() : "");
                         m.put("personalInfo", personalInfo);
                     }
                     return m;
                 })
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * Read-only employee profile for Team Leader.
+     * Allowed when employee is unassigned OR belongs to the Team Leader's team.
+     */
+    public Map<String, Object> getEmployeeProfileForLeader(String leaderKeycloakId, Long employeeId) {
+        Team team = getTeamByLeaderKeycloakId(leaderKeycloakId);
+
+        User employee = userRepository.findById(employeeId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + employeeId));
+
+        if (employee.getRole() != TypeRole.EMPLOYEE) {
+            throw new BadRequestException("This user is not an EMPLOYEE.");
+        }
+
+        if (employee.getTeam() != null && !Objects.equals(employee.getTeam().getId(), team.getId())) {
+            throw new BadRequestException("You are not allowed to view this employee profile.");
+        }
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("id", employee.getId());
+        response.put("username", employee.getUsername());
+        response.put("role", employee.getRole().name());
+        response.put("active", employee.getActive());
+        response.put("registrationDate", employee.getRegistrationDate());
+
+        if (employee.getTeam() != null) {
+            response.put("teamId", employee.getTeam().getId());
+            response.put("teamName", employee.getTeam().getName());
+        } else {
+            response.put("teamId", null);
+            response.put("teamName", null);
+        }
+
+        if (employee.getPerson() != null) {
+            Map<String, Object> personalInfo = new HashMap<>();
+            personalInfo.put("firstName",        employee.getPerson().getFirstName());
+            personalInfo.put("lastName",         employee.getPerson().getLastName());
+            personalInfo.put("email",            employee.getPerson().getEmail());
+            personalInfo.put("phone",            employee.getPerson().getPhone() != null ? employee.getPerson().getPhone() : "");
+            personalInfo.put("address",          employee.getPerson().getAddress() != null ? employee.getPerson().getAddress() : "");
+            personalInfo.put("birthDate",        employee.getPerson().getBirthDate() != null ? employee.getPerson().getBirthDate().toString() : "");
+            personalInfo.put("maritalStatus",    employee.getPerson().getMaritalStatus() != null ? employee.getPerson().getMaritalStatus() : "");
+            personalInfo.put("numberOfChildren", employee.getPerson().getNumberOfChildren());
+            personalInfo.put("avatarPhoto",      employee.getPerson().getAvatarPhoto() != null ? employee.getPerson().getAvatarPhoto() : "");
+            personalInfo.put("avatarColor",      employee.getPerson().getAvatarColor() != null ? employee.getPerson().getAvatarColor() : "");
+            personalInfo.put("department",       employee.getPerson().getDepartment() != null ? employee.getPerson().getDepartment() : "");
+            personalInfo.put("hireDate",         employee.getPerson().getHireDate() != null ? employee.getPerson().getHireDate().toString() : "");
+            response.put("personalInfo", personalInfo);
+        }
+
+        return response;
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -265,6 +326,8 @@ public class TeamService {
                 leaderInfo.put("fullName",
                     leader.getPerson().getFirstName() + " " + leader.getPerson().getLastName());
                 leaderInfo.put("email", leader.getPerson().getEmail());
+                leaderInfo.put("avatarPhoto", leader.getPerson().getAvatarPhoto() != null ? leader.getPerson().getAvatarPhoto() : "");
+                leaderInfo.put("avatarColor", leader.getPerson().getAvatarColor() != null ? leader.getPerson().getAvatarColor() : "");
             }
             response.put("teamLeader", leaderInfo);
         }
@@ -278,6 +341,15 @@ public class TeamService {
                         m.put("fullName",
                             member.getPerson().getFirstName() + " " + member.getPerson().getLastName());
                         m.put("email", member.getPerson().getEmail());
+
+                        Map<String, Object> personalInfo = new HashMap<>();
+                        personalInfo.put("firstName",   member.getPerson().getFirstName());
+                        personalInfo.put("lastName",    member.getPerson().getLastName());
+                        personalInfo.put("email",       member.getPerson().getEmail());
+                        personalInfo.put("department",  member.getPerson().getDepartment() != null ? member.getPerson().getDepartment() : "");
+                        personalInfo.put("avatarPhoto", member.getPerson().getAvatarPhoto() != null ? member.getPerson().getAvatarPhoto() : "");
+                        personalInfo.put("avatarColor", member.getPerson().getAvatarColor() != null ? member.getPerson().getAvatarColor() : "");
+                        m.put("personalInfo", personalInfo);
                     }
                     return m;
                 })

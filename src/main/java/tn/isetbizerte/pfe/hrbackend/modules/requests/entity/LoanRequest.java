@@ -50,8 +50,34 @@ public class LoanRequest {
     private String  decisionReason;
     private Boolean meetingRequired;  // nullable — set by scoring engine
 
+    private LocalDateTime meetingAt;
+    @Column(length = 1000)
+    private String meetingNote;
+
+    private String attachmentFileName;
+    private String attachmentContentType;
+    private String attachmentStoragePath;
+    private Long attachmentSizeBytes;
+    @Column(length = 64)
+    private String attachmentSha256;
+    private LocalDateTime attachmentUploadedAt;
+    private String attachmentUploadedBy;
+
     private String approvedBy;
+    private LocalDateTime approvedAt;
     private String rejectedBy;
+    private LocalDateTime rejectedAt;
+    @Column(length = 1000)
+    private String hrDecisionReason;
+    private String hrDecisionStage;
+
+    @Column(length = 1000)
+    private String cancellationReason;
+    private String canceledBy;
+    private LocalDateTime canceledAt;
+
+    private String meetingScheduledBy;
+    private LocalDateTime meetingScheduledAt;
 
     @Column(unique = true)
     private String verificationToken;
@@ -103,11 +129,65 @@ public class LoanRequest {
     public Boolean getMeetingRequired() { return meetingRequired; }
     public void setMeetingRequired(Boolean m) { this.meetingRequired = m; }
 
+    public LocalDateTime getMeetingAt() { return meetingAt; }
+    public void setMeetingAt(LocalDateTime meetingAt) { this.meetingAt = meetingAt; }
+
+    public String getMeetingNote() { return meetingNote; }
+    public void setMeetingNote(String meetingNote) { this.meetingNote = meetingNote; }
+
+    public String getAttachmentFileName() { return attachmentFileName; }
+    public void setAttachmentFileName(String attachmentFileName) { this.attachmentFileName = attachmentFileName; }
+
+    public String getAttachmentContentType() { return attachmentContentType; }
+    public void setAttachmentContentType(String attachmentContentType) { this.attachmentContentType = attachmentContentType; }
+
+    public String getAttachmentStoragePath() { return attachmentStoragePath; }
+    public void setAttachmentStoragePath(String attachmentStoragePath) { this.attachmentStoragePath = attachmentStoragePath; }
+
+    public Long getAttachmentSizeBytes() { return attachmentSizeBytes; }
+    public void setAttachmentSizeBytes(Long attachmentSizeBytes) { this.attachmentSizeBytes = attachmentSizeBytes; }
+
+    public String getAttachmentSha256() { return attachmentSha256; }
+    public void setAttachmentSha256(String attachmentSha256) { this.attachmentSha256 = attachmentSha256; }
+
+    public LocalDateTime getAttachmentUploadedAt() { return attachmentUploadedAt; }
+    public void setAttachmentUploadedAt(LocalDateTime attachmentUploadedAt) { this.attachmentUploadedAt = attachmentUploadedAt; }
+
+    public String getAttachmentUploadedBy() { return attachmentUploadedBy; }
+    public void setAttachmentUploadedBy(String attachmentUploadedBy) { this.attachmentUploadedBy = attachmentUploadedBy; }
+
     public String getApprovedBy() { return approvedBy; }
     public void setApprovedBy(String approvedBy) { this.approvedBy = approvedBy; }
 
+    public LocalDateTime getApprovedAt() { return approvedAt; }
+    public void setApprovedAt(LocalDateTime approvedAt) { this.approvedAt = approvedAt; }
+
     public String getRejectedBy() { return rejectedBy; }
     public void setRejectedBy(String rejectedBy) { this.rejectedBy = rejectedBy; }
+
+    public LocalDateTime getRejectedAt() { return rejectedAt; }
+    public void setRejectedAt(LocalDateTime rejectedAt) { this.rejectedAt = rejectedAt; }
+
+    public String getHrDecisionReason() { return hrDecisionReason; }
+    public void setHrDecisionReason(String hrDecisionReason) { this.hrDecisionReason = hrDecisionReason; }
+
+    public String getHrDecisionStage() { return hrDecisionStage; }
+    public void setHrDecisionStage(String hrDecisionStage) { this.hrDecisionStage = hrDecisionStage; }
+
+    public String getCancellationReason() { return cancellationReason; }
+    public void setCancellationReason(String cancellationReason) { this.cancellationReason = cancellationReason; }
+
+    public String getCanceledBy() { return canceledBy; }
+    public void setCanceledBy(String canceledBy) { this.canceledBy = canceledBy; }
+
+    public LocalDateTime getCanceledAt() { return canceledAt; }
+    public void setCanceledAt(LocalDateTime canceledAt) { this.canceledAt = canceledAt; }
+
+    public String getMeetingScheduledBy() { return meetingScheduledBy; }
+    public void setMeetingScheduledBy(String meetingScheduledBy) { this.meetingScheduledBy = meetingScheduledBy; }
+
+    public LocalDateTime getMeetingScheduledAt() { return meetingScheduledAt; }
+    public void setMeetingScheduledAt(LocalDateTime meetingScheduledAt) { this.meetingScheduledAt = meetingScheduledAt; }
 
     public String getVerificationToken() { return verificationToken; }
     public void setVerificationToken(String verificationToken) { this.verificationToken = verificationToken; }

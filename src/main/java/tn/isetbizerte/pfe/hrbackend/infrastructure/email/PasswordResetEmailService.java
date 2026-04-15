@@ -25,7 +25,7 @@ public class PasswordResetEmailService {
     public PasswordResetEmailService(
             JavaMailSender mailSender,
             @Value("${spring.mail.username}") String fromEmail,
-            @Value("${app.company.name:HR Nexus}") String companyName
+            @Value("${app.company.name:ArabSoft}") String companyName
     ) {
         this.mailSender = mailSender;
         this.fromEmail = fromEmail;
