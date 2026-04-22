@@ -95,6 +95,7 @@ public class EmployeeLeaveService {
 
         int requestedWorkingDays = validateLeaveRequestDates(dto.getStartDate(), dto.getEndDate());
         validateNoOverlappingLeave(user, dto.getStartDate(), dto.getEndDate());
+        validateSickLeaveCreationRules(dto);
         validateAnnualLeaveCreationRules(user, dto, requestedWorkingDays);
         leaveBalanceService.reserveForRequest(user, dto.getLeaveType(), dto.getStartDate(), requestedWorkingDays);
 
@@ -147,6 +148,53 @@ public class EmployeeLeaveService {
         return mapToResponseDto(saved);
     }
 
+    @CacheEvict(value = "calendarLeaves", allEntries = true)
+    @Transactional
+    public LeaveRequestResponseDto updateMyLeaveRequest(Long leaveId, String requesterKeycloakId, CreateLeaveRequestDto dto) {
+        LeaveRequest leave = leaveRequestRepository.findById(leaveId)
+                .orElseThrow(() -> new ResourceNotFoundException("Leave request not found with ID: " + leaveId));
+
+        if (leave.getUser() == null || !requesterKeycloakId.equals(leave.getUser().getKeycloakId())) {
+            throw new AccessDeniedException("Only the owner can edit this leave request.");
+        }
+
+        String fromStage = computeApprovalStage(leave);
+        if (!"PENDING_TL".equals(fromStage)) {
+            throw new BadRequestException("Only leave requests still pending Team Leader review can be edited by the employee.");
+        }
+
+        User user = leave.getUser();
+        leaveBalanceService.releaseReserved(leave);
+
+        int requestedWorkingDays = validateLeaveRequestDates(dto.getStartDate(), dto.getEndDate());
+        validateNoOverlappingLeave(user, dto.getStartDate(), dto.getEndDate(), leave.getId());
+        validateSickLeaveCreationRules(dto);
+        validateAnnualLeaveCreationRules(user, dto, requestedWorkingDays);
+        leaveBalanceService.reserveForRequest(user, dto.getLeaveType(), dto.getStartDate(), requestedWorkingDays);
+
+        leave.setLeaveType(dto.getLeaveType());
+        leave.setStartDate(dto.getStartDate());
+        leave.setEndDate(dto.getEndDate());
+        leave.setNumberOfDays(requestedWorkingDays);
+        leave.setReason(dto.getReason());
+        leave.setUpdatedAt(LocalDateTime.now());
+
+        leaveScoreEngine.evaluate(leave);
+
+        historyService.record(
+                "LEAVE",
+                "EMPLOYEE_EDITED",
+                leave.getId(),
+                requesterKeycloakId,
+                "Employee edited the request.",
+                fromStage,
+                computeApprovalStage(leave)
+        );
+
+        LeaveRequest saved = leaveRequestRepository.save(leave);
+        return mapToResponseDto(saved);
+    }
+
     /**
      * Get all leave requests for an employee
      */
@@ -182,7 +230,7 @@ public class EmployeeLeaveService {
         }
         String fromStage = computeApprovalStage(leave);
         if (!isEmployeeCancellationAllowed(fromStage)) {
-            throw new BadRequestException("Only leave requests still pending Team Leader review can be canceled by the employee.");
+            throw new BadRequestException("Only leave requests still pending approval can be canceled by the employee.");
         }
         LocalDateTime now = LocalDateTime.now();
         leaveBalanceService.releaseReserved(leave);
@@ -549,6 +597,14 @@ public class EmployeeLeaveService {
             throw new BadRequestException("Start date must be before or equal to end date");
         }
 
+        if (!workingDayService.isWorkingDay(startDate)) {
+            throw new BadRequestException("Leave cannot start on a weekend or holiday.");
+        }
+
+        if (!workingDayService.isWorkingDay(endDate)) {
+            throw new BadRequestException("Leave cannot end on a weekend or holiday.");
+        }
+
         int workingDays = workingDayService.countWorkingDays(startDate, endDate);
         if (workingDays <= 0) {
             throw new BadRequestException("Leave request must include at least one working day.");
@@ -563,12 +619,21 @@ public class EmployeeLeaveService {
     }
 
     private void validateNoOverlappingLeave(User user, LocalDate startDate, LocalDate endDate) {
+        validateNoOverlappingLeave(user, startDate, endDate, null);
+    }
+
+    private void validateNoOverlappingLeave(User user, LocalDate startDate, LocalDate endDate, Long excludedLeaveId) {
         List<LeaveRequest> overlaps = leaveRequestRepository.findByUserAndDateRangeAndStatusIn(
                 user,
                 startDate,
                 endDate,
                 OVERLAP_BLOCKING_STATUSES
         );
+        if (excludedLeaveId != null) {
+            overlaps = overlaps.stream()
+                    .filter(leave -> leave.getId() == null || !leave.getId().equals(excludedLeaveId))
+                    .collect(Collectors.toList());
+        }
         if (overlaps.isEmpty()) return;
 
         LeaveRequest overlap = overlaps.get(0);
@@ -583,6 +648,10 @@ public class EmployeeLeaveService {
     private void validateAnnualLeaveCreationRules(User user, CreateLeaveRequestDto dto, int requestedWorkingDays) {
         if (dto.getLeaveType() != LeaveType.ANNUAL) return;
 
+        if (!dto.getStartDate().isAfter(LocalDate.now())) {
+            throw new BadRequestException("Annual leave must be requested at least 1 day in advance.");
+        }
+
         if (dto.getStartDate().isAfter(LocalDate.now().plusMonths(6))) {
             throw new BadRequestException("Annual leave cannot be requested more than 6 months in advance.");
         }
@@ -594,6 +663,14 @@ public class EmployeeLeaveService {
                     requestedWorkingDays,
                     availableDays.stripTrailingZeros().toPlainString()
             ));
+        }
+    }
+
+    private void validateSickLeaveCreationRules(CreateLeaveRequestDto dto) {
+        if (dto.getLeaveType() != LeaveType.SICK) return;
+
+        if (dto.getStartDate().isAfter(LocalDate.now().plusDays(7))) {
+            throw new BadRequestException("Sick leave cannot be requested more than 7 days in advance.");
         }
     }
 
@@ -648,6 +725,6 @@ public class EmployeeLeaveService {
     }
 
     private boolean isEmployeeCancellationAllowed(String approvalStage) {
-        return "PENDING_TL".equals(approvalStage);
+        return "PENDING_TL".equals(approvalStage) || "PENDING_HR".equals(approvalStage);
     }
 }
