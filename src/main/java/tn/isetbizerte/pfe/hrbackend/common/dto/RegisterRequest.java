@@ -25,7 +25,7 @@ public class RegisterRequest {
     private String address;
     private String maritalStatus;
     private int numberOfChildren;
-    private String department;
+    private Long departmentId;
 
     public RegisterRequest() {}
 
@@ -110,7 +110,11 @@ public class RegisterRequest {
         this.numberOfChildren = numberOfChildren;
     }
 
-    public String getDepartment() { return department; }
-    public void setDepartment(String department) { this.department = department; }
-}
+    public Long getDepartmentId() {
+        return departmentId;
+    }
 
+    public void setDepartmentId(Long departmentId) {
+        this.departmentId = departmentId;
+    }
+}

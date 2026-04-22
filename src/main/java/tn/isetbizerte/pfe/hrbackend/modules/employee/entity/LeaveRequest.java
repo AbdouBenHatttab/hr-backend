@@ -64,6 +64,7 @@ public class LeaveRequest {
     private LeaveStatus status;
 
     private LocalDate approvalDate;
+    private LocalDateTime approvedAt;
 
     private LocalDateTime createdAt;
 
@@ -77,6 +78,7 @@ public class LeaveRequest {
 
     private String approvedBy;
     private String rejectedBy;
+    private LocalDateTime rejectedAt;
     private String canceledBy;
     private LocalDateTime canceledAt;
 
@@ -203,6 +205,14 @@ public class LeaveRequest {
         this.approvalDate = approvalDate;
     }
 
+    public LocalDateTime getApprovedAt() {
+        return approvedAt;
+    }
+
+    public void setApprovedAt(LocalDateTime approvedAt) {
+        this.approvedAt = approvedAt;
+    }
+
     public LocalDateTime getCreatedAt() {
         return createdAt;
     }
@@ -242,6 +252,14 @@ public class LeaveRequest {
 
     public void setRejectedBy(String rejectedBy) {
         this.rejectedBy = rejectedBy;
+    }
+
+    public LocalDateTime getRejectedAt() {
+        return rejectedAt;
+    }
+
+    public void setRejectedAt(LocalDateTime rejectedAt) {
+        this.rejectedAt = rejectedAt;
     }
 
     public String getCanceledBy() {

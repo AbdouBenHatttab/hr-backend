@@ -16,6 +16,7 @@ import tn.isetbizerte.pfe.hrbackend.modules.requests.repository.*;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
 import tn.isetbizerte.pfe.hrbackend.modules.user.repository.UserRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.user.repository.PersonRepository;
+import tn.isetbizerte.pfe.hrbackend.modules.user.service.AuthenticatedUserResolver;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.storage.DocumentAttachmentStorageService;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.storage.StoredAttachment;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.storage.UploadFileValidator;
@@ -30,6 +31,7 @@ import java.util.*;
 import java.util.stream.Collectors;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.oauth2.jwt.Jwt;
 
 @Service
 @Slf4j
@@ -41,6 +43,7 @@ public class RequestsService {
     private final AuthorizationRequestRepository authRepo;
     private final UserRepository                 userRepository;
     private final PersonRepository               personRepository;
+    private final AuthenticatedUserResolver      authenticatedUserResolver;
     private final LoanScoreEngine                loanScoreEngine;
     private final RequestEventProducer           requestEventProducer;
     private final RequestHistoryService          historyService;
@@ -52,6 +55,7 @@ public class RequestsService {
                            AuthorizationRequestRepository authRepo,
                            UserRepository userRepository,
                            PersonRepository personRepository,
+                           AuthenticatedUserResolver authenticatedUserResolver,
                            LoanScoreEngine loanScoreEngine,
                            RequestEventProducer requestEventProducer,
                            RequestHistoryService historyService,
@@ -62,6 +66,7 @@ public class RequestsService {
         this.authRepo         = authRepo;
         this.userRepository   = userRepository;
         this.personRepository = personRepository;
+        this.authenticatedUserResolver = authenticatedUserResolver;
         this.loanScoreEngine  = loanScoreEngine;
         this.requestEventProducer  = requestEventProducer;
         this.historyService   = historyService;
@@ -73,8 +78,8 @@ public class RequestsService {
     // ─────────────────────────────────────────────────────────────
 
     @Transactional
-    public Map<String, Object> createDocumentRequest(String username, CreateDocumentRequestDto body) {
-        User user = getUser(username);
+    public Map<String, Object> createDocumentRequest(Jwt jwt, CreateDocumentRequestDto body) {
+        User user = authenticatedUserResolver.require(jwt);
         DocumentRequest req = new DocumentRequest();
         req.setUser(user);
         DocumentType type = body.getDocumentType();
@@ -106,8 +111,8 @@ public class RequestsService {
         return mapDocument(req);
     }
 
-    public Page<Map<String, Object>> getMyDocumentRequests(String username, Pageable pageable) {
-        User user = getUser(username);
+    public Page<Map<String, Object>> getMyDocumentRequests(Jwt jwt, Pageable pageable) {
+        User user = authenticatedUserResolver.require(jwt);
         return documentRepo.findByUserOrderByRequestedAtDesc(user, pageable)
                 .map(this::mapDocument);
     }
@@ -347,8 +352,8 @@ public class RequestsService {
         }
     }
 
-    public List<Map<String, Object>> getMyStoredEmployeeDocuments(String username) {
-        User employee = getUser(username);
+    public List<Map<String, Object>> getMyStoredEmployeeDocuments(Jwt jwt) {
+        User employee = authenticatedUserResolver.require(jwt);
         return storedDocumentRepo.findByEmployeeAndActiveTrueOrderByUploadedAtDesc(employee).stream()
                 .map(this::mapStoredDocument)
                 .collect(Collectors.toList());
@@ -385,9 +390,9 @@ public class RequestsService {
     // ─────────────────────────────────────────────────────────────
 
     @Transactional
-    public Map<String, Object> createLoanRequest(String username, LoanType loanType,
+    public Map<String, Object> createLoanRequest(Jwt jwt, LoanType loanType,
                                                   BigDecimal amount, int repaymentMonths, String reason) {
-        User user = getUser(username);
+        User user = authenticatedUserResolver.require(jwt);
         String hardFailReason = getLoanHardFailReason(user, amount);
 
         LoanRequest req = new LoanRequest();
@@ -492,8 +497,8 @@ public class RequestsService {
      * Returns the employee's loan eligibility details without submitting anything.
      * Frontend uses this to show the eligibility panel before the form.
      */
-    public Map<String, Object> getLoanEligibility(String username) {
-        User user = getUser(username);
+    public Map<String, Object> getLoanEligibility(Jwt jwt) {
+        User user = authenticatedUserResolver.require(jwt);
         Map<String, Object> result = new HashMap<>();
 
         if (user.getPerson() == null || user.getPerson().getSalary() == null) {
@@ -535,8 +540,8 @@ public class RequestsService {
         return result;
     }
 
-    public Page<Map<String, Object>> getMyLoanRequests(String username, Pageable pageable) {
-        User user = getUser(username);
+    public Page<Map<String, Object>> getMyLoanRequests(Jwt jwt, Pageable pageable) {
+        User user = authenticatedUserResolver.require(jwt);
         return loanRepo.findByUserOrderByRequestedAtDesc(user, pageable)
                 .map(this::mapLoan);
     }
@@ -788,8 +793,8 @@ public class RequestsService {
     // ─────────────────────────────────────────────────────────────
 
     @Transactional
-    public Map<String, Object> createAuthRequest(String username, CreateAuthorizationRequestDto body) {
-        User user = getUser(username);
+    public Map<String, Object> createAuthRequest(Jwt jwt, CreateAuthorizationRequestDto body) {
+        User user = authenticatedUserResolver.require(jwt);
         AuthorizationRequest req = new AuthorizationRequest();
         req.setUser(user);
         req.setAuthorizationType(body.getAuthorizationType());
@@ -821,8 +826,8 @@ public class RequestsService {
         return mapAuth(req);
     }
 
-    public Page<Map<String, Object>> getMyAuthRequests(String username, Pageable pageable) {
-        User user = getUser(username);
+    public Page<Map<String, Object>> getMyAuthRequests(Jwt jwt, Pageable pageable) {
+        User user = authenticatedUserResolver.require(jwt);
         return authRepo.findByUserOrderByRequestedAtDesc(user, pageable)
                 .map(this::mapAuth);
     }
@@ -947,11 +952,6 @@ public class RequestsService {
         if (ownerKeycloakId == null || !ownerKeycloakId.equals(requesterKeycloakId)) {
             throw new AccessDeniedException("Only the owner can cancel this request.");
         }
-    }
-
-    private User getUser(String username) {
-        return userRepository.findByUsername(username)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found: " + username));
     }
 
     private String fmt(String enumName) {

@@ -146,16 +146,14 @@ public class TaskService {
     // EMPLOYEE — view and update own tasks
     // ─────────────────────────────────────────────────────────────
 
-    public List<Map<String, Object>> getMyTasks(String username) {
-        User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found: " + username));
+    public List<Map<String, Object>> getMyTasks(String userIdentifier) {
+        User user = resolveUser(userIdentifier);
         return taskRepository.findByAssigneeId(user.getId())
                 .stream().map(this::mapTask).collect(Collectors.toList());
     }
 
-    public Map<String, Object> getMyTaskById(String username, Long taskId) {
-        User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found: " + username));
+    public Map<String, Object> getMyTaskById(String userIdentifier, Long taskId) {
+        User user = resolveUser(userIdentifier);
         Task task = taskRepository.findById(taskId)
                 .orElseThrow(() -> new ResourceNotFoundException("Task not found: " + taskId));
 
@@ -167,9 +165,8 @@ public class TaskService {
     }
 
     @Transactional
-    public Map<String, Object> updateTaskStatus(String username, Long taskId, TaskStatus newStatus) {
-        User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found: " + username));
+    public Map<String, Object> updateTaskStatus(String userIdentifier, Long taskId, TaskStatus newStatus) {
+        User user = resolveUser(userIdentifier);
         Task task = taskRepository.findById(taskId)
                 .orElseThrow(() -> new ResourceNotFoundException("Task not found: " + taskId));
         if (task.getAssignee() == null || !task.getAssignee().getId().equals(user.getId()))
@@ -253,6 +250,15 @@ public class TaskService {
     private Team getTeamByLeader(String keycloakId) {
         return teamRepository.findByTeamLeaderKeycloakId(keycloakId)
                 .orElseThrow(() -> new ResourceNotFoundException("No team assigned to this Team Leader."));
+    }
+
+    private User resolveUser(String identifier) {
+        if (identifier == null || identifier.isBlank()) {
+            throw new ResourceNotFoundException("User not found");
+        }
+        return userRepository.findByKeycloakId(identifier)
+                .or(() -> userRepository.findByUsername(identifier))
+                .orElseThrow(() -> new ResourceNotFoundException("User not found: " + identifier));
     }
 
     private void notifyAssigneeOfTaskAssignment(Task task, User assignee, String leaderKeycloakId) {

@@ -46,16 +46,18 @@ public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, Long
     Page<LeaveRequest> findPendingByTeamId(@Param("teamId") Long teamId, Pageable pageable);
 
     /**
-     * Get all pending leave requests for a team, excluding the team leader.
-     * Prevents TL from seeing or acting on their own requests.
+     * Get all Team Leader-pending leave requests for a team, excluding the team leader.
+     * This keeps Pending HR requests out of TL dashboards and widgets.
      */
     @Query("SELECT lr FROM LeaveRequest lr " +
            "JOIN FETCH lr.user u " +
            "JOIN FETCH u.person " +
            "WHERE u.team.id = :teamId " +
            "AND lr.status = 'PENDING' " +
+           "AND lr.teamLeaderDecision = 'PENDING' " +
            "AND u.keycloakId <> :leaderKeycloakId " +
-           "AND u.role <> 'TEAM_LEADER'")
+           "AND u.role <> 'TEAM_LEADER' " +
+           "ORDER BY lr.requestDate DESC")
     Page<LeaveRequest> findPendingByTeamIdExcludingLeader(@Param("teamId") Long teamId,
                                                          @Param("leaderKeycloakId") String leaderKeycloakId,
                                                          Pageable pageable);
@@ -77,6 +79,24 @@ public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, Long
            "JOIN FETCH u.person " +
            "WHERE u.team.id = :teamId")
     List<LeaveRequest> findAllByTeamId(@Param("teamId") Long teamId);
+
+    /**
+     * HR overview query.
+     * Keeps rows action-ready by surfacing exact HR-pending requests first, then most recent requests.
+     */
+    @Query(
+            value = "SELECT lr FROM LeaveRequest lr " +
+                    "JOIN FETCH lr.user u " +
+                    "JOIN FETCH u.person " +
+                    "ORDER BY CASE " +
+                    "WHEN lr.status = 'PENDING' " +
+                    " AND lr.teamLeaderDecision = 'APPROVED' " +
+                    " AND lr.hrDecision = 'PENDING' THEN 0 " +
+                    "ELSE 1 END, " +
+                    "lr.requestDate DESC",
+            countQuery = "SELECT COUNT(lr) FROM LeaveRequest lr"
+    )
+    Page<LeaveRequest> findAllForHrOverview(Pageable pageable);
 
     /**
      * Calendar — overlap date range for a specific user.
@@ -179,7 +199,8 @@ public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, Long
            "JOIN FETCH u.person " +
            "WHERE u.team.id = :teamId " +
            "AND u.keycloakId <> :leaderKeycloakId " +
-           "AND u.role <> 'TEAM_LEADER'")
+           "AND u.role <> 'TEAM_LEADER' " +
+           "ORDER BY lr.requestDate DESC")
     Page<LeaveRequest> findAllByTeamIdExcludingLeader(@Param("teamId") Long teamId,
                                                      @Param("leaderKeycloakId") String leaderKeycloakId,
                                                      Pageable pageable);

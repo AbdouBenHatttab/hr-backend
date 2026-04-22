@@ -51,6 +51,8 @@ public class RequestEventConsumer {
     public void handleRequestEvent(String payload) {
         try {
             RequestEvent event = objectMapper.readValue(payload, RequestEvent.class);
+            log.info("Request event received: eventId={} eventType={} requestType={} requestId={} employeeId={}",
+                    event.getEventId(), event.getType(), event.getRequestType(), event.getRequestId(), event.getEmployeeId());
             String requestDedupKey = resolveRequestDedupKey(event);
             if (processedEventService.isProcessed(requestDedupKey)) {
                 log.warn("Skipping duplicate request event: {}", requestDedupKey);
@@ -68,13 +70,24 @@ public class RequestEventConsumer {
             );
             employeeNotification.setEventId(requestDedupKey + ":employee-notification");
             notificationEventProducer.publish(employeeNotification);
+            log.info("Notification event published for request event: notificationEventId={} eventType={} requestType={} requestId={} employeeId={}",
+                    employeeNotification.getEventId(), event.getType(), event.getRequestType(), event.getRequestId(), event.getEmployeeId());
 
-            // Notify the Team Leader for team-scoped visibility (currently: document requests)
+            // Notify the Team Leader for team-scoped visibility.
             maybeNotifyLeader(event, requestDedupKey);
+
+            log.info("Checking non-leave document email branch: requestId={} eventType={}",
+                    event.getRequestId(), event.getType());
             maybeSendDocumentReadyEmail(event);
+
+            log.info("Checking non-leave loan email branch: requestId={} eventType={}",
+                    event.getRequestId(), event.getType());
             if (!maybeSendLoanDecisionEmail(event)) {
                 throw new IllegalStateException("Loan decision email was not sent for requestId=" + event.getRequestId());
             }
+
+            log.info("Checking non-leave authorization email branch: requestId={} eventType={}",
+                    event.getRequestId(), event.getType());
             if (!maybeSendAuthorizationDecisionEmail(event)) {
                 throw new IllegalStateException("Authorization decision email was not sent for requestId=" + event.getRequestId());
             }
@@ -86,42 +99,91 @@ public class RequestEventConsumer {
     }
 
     private void maybeNotifyLeader(RequestEvent event, String requestDedupKey) {
-        if (event.getRequestType() == null || !"DOCUMENT".equalsIgnoreCase(event.getRequestType())) return;
-        if (event.getEmployeeId() == null || event.getEmployeeId().isBlank()) return;
+        try {
+            doMaybeNotifyLeader(event, requestDedupKey);
+        } catch (Exception e) {
+            log.error("Failed to publish team leader notification for document request event; continuing request event processing. eventType={} requestId={} employeeId={} message={}",
+                    event.getType(), event.getRequestId(), event.getEmployeeId(), e.getMessage(), e);
+        }
+    }
 
-        User employee = userRepository.findByKeycloakId(event.getEmployeeId()).orElse(null);
-        if (employee == null || employee.getTeam() == null || employee.getTeam().getTeamLeader() == null) return;
+    private void doMaybeNotifyLeader(RequestEvent event, String requestDedupKey) {
+        if (event.getRequestType() == null) return;
+        if (event.getEmployeeId() == null || event.getEmployeeId().isBlank()) {
+            log.warn("Skipping team leader notification: missing employeeId eventType={} requestId={} requestType={}",
+                    event.getType(), event.getRequestId());
+            return;
+        }
+
+        User employee = userRepository.findByKeycloakIdWithPersonAndTeamLeader(event.getEmployeeId()).orElse(null);
+        if (employee == null) {
+            log.warn("Skipping team leader notification: employee not found eventType={} requestId={} employeeId={} requestType={}",
+                    event.getType(), event.getRequestId(), event.getEmployeeId(), event.getRequestType());
+            return;
+        }
+        if (employee.getTeam() == null) {
+            log.warn("Skipping team leader notification: employee has no team eventType={} requestId={} employeeId={} requestType={}",
+                    event.getType(), event.getRequestId(), event.getEmployeeId(), event.getRequestType());
+            return;
+        }
+        if (employee.getTeam().getTeamLeader() == null) {
+            log.warn("Skipping team leader notification: team has no leader eventType={} requestId={} employeeId={} requestType={}",
+                    event.getType(), event.getRequestId(), event.getEmployeeId(), event.getRequestType());
+            return;
+        }
 
         User leader = employee.getTeam().getTeamLeader();
-        if (leader.getKeycloakId() == null || leader.getKeycloakId().isBlank()) return;
-        if (leader.getKeycloakId().equals(employee.getKeycloakId())) return;
+        if (leader.getKeycloakId() == null || leader.getKeycloakId().isBlank()) {
+            log.warn("Skipping team leader notification: leader has no keycloakId eventType={} requestId={} employeeId={} requestType={}",
+                    event.getType(), event.getRequestId(), event.getEmployeeId(), event.getRequestType());
+            return;
+        }
+        if (leader.getKeycloakId().equals(employee.getKeycloakId())) {
+            log.warn("Skipping team leader notification: employee is own team leader eventType={} requestId={} employeeId={} requestType={}",
+                    event.getType(), event.getRequestId(), event.getEmployeeId(), event.getRequestType());
+            return;
+        }
 
         String type = event.getType() == null ? "" : event.getType();
-        if (!type.startsWith("DOCUMENT_")) return;
-
         String employeeName = employee.getPerson() != null && employee.getPerson().getFirstName() != null
                 ? (employee.getPerson().getFirstName() + " " + (employee.getPerson().getLastName() == null ? "" : employee.getPerson().getLastName())).trim()
                 : employee.getUsername();
 
-        String message = switch (type) {
-            case "DOCUMENT_SUBMITTED" -> employeeName + " submitted a document request.";
-            case "DOCUMENT_APPROVED" -> "Document request approved for " + employeeName + ".";
-            case "DOCUMENT_READY", "DOCUMENT_FINAL_FILE_READY" -> "Document file ready for " + employeeName + ".";
-            case "DOCUMENT_REJECTED" -> "Document request rejected for " + employeeName + ".";
-            default -> null;
-        };
+        String normalizedRequestType = event.getRequestType().toUpperCase();
+        String message;
+        String notificationType;
+        String actionUrl;
+        if ("LEAVE".equals(normalizedRequestType) && "LEAVE_SUBMITTED".equals(type)) {
+            message = employeeName + " submitted a leave request awaiting your review.";
+            notificationType = "TEAM_LEAVE_SUBMITTED";
+            actionUrl = "/team/requests";
+        } else if ("DOCUMENT".equals(normalizedRequestType) && type.startsWith("DOCUMENT_")) {
+            message = switch (type) {
+                case "DOCUMENT_SUBMITTED" -> employeeName + " submitted a document request.";
+                case "DOCUMENT_APPROVED" -> "Document request approved for " + employeeName + ".";
+                case "DOCUMENT_READY", "DOCUMENT_FINAL_FILE_READY" -> "Document file ready for " + employeeName + ".";
+                case "DOCUMENT_REJECTED" -> "Document request rejected for " + employeeName + ".";
+                default -> null;
+            };
+            notificationType = "TEAM_" + type;
+            actionUrl = "/team/dashboard";
+        } else {
+            return;
+        }
         if (message == null) return;
 
         NotificationEvent leaderNotification = new NotificationEvent(
                 leader.getKeycloakId(),
                 message,
-                "TEAM_" + type,
-                "DOCUMENT",
+                notificationType,
+                normalizedRequestType,
                 event.getRequestId(),
-                "/team/dashboard"
+                actionUrl
         );
         leaderNotification.setEventId(requestDedupKey + ":leader-notification");
         notificationEventProducer.publish(leaderNotification);
+        log.info("Team leader notification published: notificationEventId={} eventType={} requestType={} requestId={} employeeId={} leaderId={}",
+                leaderNotification.getEventId(), event.getType(), normalizedRequestType, event.getRequestId(), event.getEmployeeId(), leader.getKeycloakId());
     }
 
     private String buildEmployeeMessage(RequestEvent event) {
@@ -160,52 +222,60 @@ public class RequestEventConsumer {
 
     private void maybeSendDocumentReadyEmail(RequestEvent event) {
         if (!"DOCUMENT_READY".equals(event.getType()) && !"DOCUMENT_FINAL_FILE_READY".equals(event.getType())) return;
-        if (event.getEmployeeId() == null || event.getEmployeeId().isBlank()) return;
-        if (event.getRequestId() == null) return;
+        log.info("Entering document email branch: eventType={} requestId={} employeeId={}",
+                event.getType(), event.getRequestId(), event.getEmployeeId());
+        requireEmployeeIdForEmail(event, "document");
+        requireRequestIdForEmail(event, "document");
 
         String emailDedupKey = "email:DOCUMENT_READY:" + event.getRequestId();
         if (processedEventService.isProcessed(emailDedupKey)) {
-            log.warn("Skipping duplicate document ready email for requestId={}", event.getRequestId());
+            log.warn("Dedupe skipped document email: dedupKey={} requestId={} eventType={}",
+                    emailDedupKey, event.getRequestId(), event.getType());
             return;
         }
 
-        User employee = userRepository.findByKeycloakId(event.getEmployeeId()).orElse(null);
-        if (employee == null || employee.getPerson() == null) return;
+        User employee = resolveEmployeeForEmail(event, "document");
         var person = employee.getPerson();
-        if (person.getEmail() == null || person.getEmail().isBlank()) return;
 
+        log.info("Calling HREmailService method for document email: method=sendDocumentReady requestId={} recipientEmail={} eventType={}",
+                event.getRequestId(), person.getEmail(), event.getType());
         boolean sent = emailService.sendDocumentReady(
                 person.getEmail(),
                 person.getFirstName(),
                 person.getLastName(),
                 "DOC-" + String.format("%06d", event.getRequestId())
         );
+        log.info("Email send result for document email: method=sendDocumentReady requestId={} eventType={} recipientEmail={} result={}",
+                event.getRequestId(), event.getType(), person.getEmail(), sent);
         if (!sent) {
-            throw new IllegalStateException("Document ready email was not sent for requestId=" + event.getRequestId());
+            throw emailFailure(event, "document", "HREmailService.sendDocumentReady returned false");
         }
         processedEventService.tryMarkProcessed(emailDedupKey, "document-ready-email");
     }
 
     private boolean maybeSendAuthorizationDecisionEmail(RequestEvent event) {
         if (!"AUTH_APPROVED".equals(event.getType()) && !"AUTH_REJECTED".equals(event.getType())) return true;
-        if (event.getEmployeeId() == null || event.getEmployeeId().isBlank()) return true;
-        if (event.getRequestId() == null) return true;
+        log.info("Entering authorization email branch: eventType={} requestId={} employeeId={}",
+                event.getType(), event.getRequestId(), event.getEmployeeId());
+        requireEmployeeIdForEmail(event, "authorization");
+        requireRequestIdForEmail(event, "authorization");
 
         String emailDedupKey = "email:" + event.getType() + ":" + event.getRequestId();
         if (processedEventService.isProcessed(emailDedupKey)) {
-            log.warn("Skipping duplicate authorization decision email for requestId={}", event.getRequestId());
+            log.warn("Dedupe skipped authorization email: dedupKey={} requestId={} eventType={}",
+                    emailDedupKey, event.getRequestId(), event.getType());
             return true;
         }
 
-        AuthorizationRequest request = authorizationRequestRepository.findById(event.getRequestId()).orElse(null);
-        if (request == null) return false;
+        AuthorizationRequest request = authorizationRequestRepository.findById(event.getRequestId())
+                .orElseThrow(() -> emailFailure(event, "authorization", "AuthorizationRequest not found"));
 
-        User employee = userRepository.findByKeycloakId(event.getEmployeeId()).orElse(null);
-        if (employee == null || employee.getPerson() == null) return false;
+        User employee = resolveEmployeeForEmail(event, "authorization");
         var person = employee.getPerson();
-        if (person.getEmail() == null || person.getEmail().isBlank()) return false;
 
         boolean approved = "AUTH_APPROVED".equals(event.getType());
+        log.info("Calling HREmailService method for authorization email: method=sendAuthorizationDecision requestId={} recipientEmail={} approved={} eventType={}",
+                event.getRequestId(), person.getEmail(), approved, event.getType());
         boolean sent = emailService.sendAuthorizationDecision(
                 person.getEmail(),
                 person.getFirstName(),
@@ -218,13 +288,14 @@ public class RequestEventConsumer {
                 request.getHrNote(),
                 "AUTH-" + String.format("%06d", event.getRequestId())
         );
+        log.info("Email send result for authorization email: method=sendAuthorizationDecision requestId={} eventType={} recipientEmail={} result={}",
+                event.getRequestId(), event.getType(), person.getEmail(), sent);
         if (sent) {
             processedEventService.tryMarkProcessed(emailDedupKey, "authorization-decision-email");
         } else {
-            log.error("Authorization decision email was not sent. requestId={} eventType={} employeeId={}",
-                    event.getRequestId(), event.getType(), event.getEmployeeId());
+            throw emailFailure(event, "authorization", "HREmailService.sendAuthorizationDecision returned false");
         }
-        return sent;
+        return true;
     }
 
     private boolean maybeSendLoanDecisionEmail(RequestEvent event) {
@@ -233,23 +304,23 @@ public class RequestEventConsumer {
                 && !"LOAN_CANCELLED_AFTER_MEETING".equals(event.getType())) {
             return true;
         }
-        if (event.getEmployeeId() == null || event.getEmployeeId().isBlank()) return true;
-        if (event.getRequestId() == null) return true;
+        log.info("Entering loan email branch: eventType={} requestId={} employeeId={}",
+                event.getType(), event.getRequestId(), event.getEmployeeId());
+        requireEmployeeIdForEmail(event, "loan");
+        requireRequestIdForEmail(event, "loan");
 
         String emailDedupKey = "email:" + event.getType() + ":" + event.getRequestId();
         if (processedEventService.isProcessed(emailDedupKey)) {
-            log.warn("Skipping duplicate loan decision email for requestId={} eventType={}",
-                    event.getRequestId(), event.getType());
+            log.warn("Dedupe skipped loan email: dedupKey={} requestId={} eventType={}",
+                    emailDedupKey, event.getRequestId(), event.getType());
             return true;
         }
 
-        LoanRequest request = loanRequestRepository.findById(event.getRequestId()).orElse(null);
-        if (request == null) return false;
+        LoanRequest request = loanRequestRepository.findById(event.getRequestId())
+                .orElseThrow(() -> emailFailure(event, "loan", "LoanRequest not found"));
 
-        User employee = userRepository.findByKeycloakId(event.getEmployeeId()).orElse(null);
-        if (employee == null || employee.getPerson() == null) return false;
+        User employee = resolveEmployeeForEmail(event, "loan");
         var person = employee.getPerson();
-        if (person.getEmail() == null || person.getEmail().isBlank()) return false;
 
         String refId = "LOAN-" + String.format("%06d", event.getRequestId());
         double amount = request.getAmount() != null ? request.getAmount().doubleValue() : 0;
@@ -259,6 +330,8 @@ public class RequestEventConsumer {
             double installment = request.getMonthlyInstallment() != null
                     ? request.getMonthlyInstallment().doubleValue()
                     : 0;
+            log.info("Calling HREmailService method for loan email: method=sendLoanApproved requestId={} recipientEmail={} eventType={}",
+                    event.getRequestId(), person.getEmail(), event.getType());
             sent = emailService.sendLoanApproved(
                     person.getEmail(),
                     person.getFirstName(),
@@ -276,6 +349,8 @@ public class RequestEventConsumer {
                     event.getComment(),
                     request.getDecisionReason()
             );
+            log.info("Calling HREmailService method for loan email: method=sendLoanRejected requestId={} recipientEmail={} eventType={} reasonPresent={}",
+                    event.getRequestId(), person.getEmail(), event.getType(), reason != null && !reason.isBlank());
             sent = emailService.sendLoanRejected(
                     person.getEmail(),
                     person.getFirstName(),
@@ -285,13 +360,50 @@ public class RequestEventConsumer {
                     refId
             );
         }
+        log.info("Email send result for loan email: requestId={} eventType={} recipientEmail={} result={}",
+                event.getRequestId(), event.getType(), person.getEmail(), sent);
         if (sent) {
             processedEventService.tryMarkProcessed(emailDedupKey, "loan-decision-email");
         } else {
-            log.error("Loan decision email was not sent. requestId={} eventType={} employeeId={}",
-                    event.getRequestId(), event.getType(), event.getEmployeeId());
+            String method = approved ? "HREmailService.sendLoanApproved" : "HREmailService.sendLoanRejected";
+            throw emailFailure(event, "loan", method + " returned false");
         }
-        return sent;
+        return true;
+    }
+
+    private void requireEmployeeIdForEmail(RequestEvent event, String emailFlow) {
+        if (event.getEmployeeId() == null || event.getEmployeeId().isBlank()) {
+            throw emailFailure(event, emailFlow, "missing employeeId");
+        }
+    }
+
+    private void requireRequestIdForEmail(RequestEvent event, String emailFlow) {
+        if (event.getRequestId() == null) {
+            throw emailFailure(event, emailFlow, "missing requestId");
+        }
+    }
+
+    private User resolveEmployeeForEmail(RequestEvent event, String emailFlow) {
+        User employee = userRepository.findByKeycloakId(event.getEmployeeId())
+                .orElseThrow(() -> emailFailure(event, emailFlow, "User not found for employeeId"));
+        if (employee.getPerson() == null) {
+            throw emailFailure(event, emailFlow, "User has no person profile");
+        }
+        if (employee.getPerson().getEmail() == null || employee.getPerson().getEmail().isBlank()) {
+            throw emailFailure(event, emailFlow, "Person email is missing");
+        }
+        log.info("Resolved recipient email for {} email: eventType={} requestId={} employeeId={} recipientEmail={}",
+                emailFlow, event.getType(), event.getRequestId(), event.getEmployeeId(), employee.getPerson().getEmail());
+        return employee;
+    }
+
+    private IllegalStateException emailFailure(RequestEvent event, String emailFlow, String reason) {
+        log.error("Cannot send {} email: reason={} eventType={} requestId={} employeeId={}",
+                emailFlow, reason, event.getType(), event.getRequestId(), event.getEmployeeId());
+        return new IllegalStateException(emailFlow + " email cannot be sent: " + reason
+                + " eventType=" + event.getType()
+                + " requestId=" + event.getRequestId()
+                + " employeeId=" + event.getEmployeeId());
     }
 
     private String resolveRequestDedupKey(RequestEvent event) {

@@ -309,6 +309,8 @@ public class AuthService {
     public LoginResponse loginUser(LoginRequest loginRequest, String ipAddress, String userAgent) {
         String tokenUrl = keycloakServerUrl + "/realms/" + realm + "/protocol/openid-connect/token";
         String username = loginRequest.getUsername();
+        logger.info("Login request received: identifier={} ipAddress={} userAgent={}",
+                username, ipAddress, userAgent);
 
         try {
             HttpHeaders headers = new HttpHeaders();
@@ -326,19 +328,22 @@ public class AuthService {
 
             HttpEntity<MultiValueMap<String, String>> request = new HttpEntity<>(body, headers);
 
+            logger.info("Authenticating login request with Keycloak: identifier={}", username);
             ResponseEntity<Map> response = restTemplate.postForEntity(tokenUrl, request, Map.class);
 
             if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
+                logger.info("Keycloak authentication succeeded: identifier={}", username);
                 userService.saveLoginHistory(username, ipAddress, userAgent, true);
                 return processTokenResponse(response.getBody(), username);
             }
         } catch (RestClientResponseException e) {
             userService.saveLoginHistory(username, ipAddress, userAgent, false);
-            logger.warn("Login rejected for '{}' with status {} and body {}", username, e.getStatusCode().value(), e.getResponseBodyAsString());
+            logger.warn("Keycloak authentication failed: identifier={} status={} body={}",
+                    username, e.getStatusCode().value(), e.getResponseBodyAsString());
             return new LoginResponse(mapKeycloakLoginError(e));
         } catch (RestClientException e) {
             userService.saveLoginHistory(username, ipAddress, userAgent, false);
-            logger.warn("Login failed for '{}': {}", username, e.getMessage());
+            logger.warn("Keycloak authentication request failed: identifier={} message={}", username, e.getMessage());
             return new LoginResponse("Authentication service unreachable. Please try again.");
         } catch (Exception e) {
             userService.saveLoginHistory(username, ipAddress, userAgent, false);
@@ -443,19 +448,41 @@ public class AuthService {
 
             Map<String, Object> userInfo = parseJwtToken(accessToken);
             String tokenUsername = (String) userInfo.getOrDefault("username", username);
-            LoginResponse inactiveResponse = rejectIfInactiveApplicationUser(tokenUsername);
+            String keycloakId = (String) userInfo.get("keycloakId");
+            String email = (String) userInfo.get("email");
+            logger.info("Processing Keycloak token for login: loginIdentifier={} tokenUsername={} keycloakId={} email={}",
+                    username, tokenUsername, keycloakId, email);
+
+            Optional<User> localUser = resolveLocalUserForLogin(keycloakId, tokenUsername, email);
+            if (localUser.isEmpty()) {
+                logger.error("Local account not found after Keycloak auth: loginIdentifier={} tokenUsername={} keycloakId={} email={}",
+                        username, tokenUsername, keycloakId, email);
+                return new LoginResponse("Local account not found");
+            }
+
+            User user = localUser.get();
+            logger.info("Local account found for login: loginIdentifier={} tokenUsername={} localUserId={} localUsername={} localKeycloakId={} localEmail={} active={} role={}",
+                    username,
+                    tokenUsername,
+                    user.getId(),
+                    user.getUsername(),
+                    user.getKeycloakId(),
+                    user.getPerson() != null ? user.getPerson().getEmail() : null,
+                    user.getActive(),
+                    user.getRole());
+
+            LoginResponse inactiveResponse = rejectIfInactiveApplicationUser(user);
             if (inactiveResponse != null) {
                 return inactiveResponse;
             }
 
-            String email = (String) userInfo.get("email");
             @SuppressWarnings("unchecked")
             List<String> roles = (List<String>) userInfo.get("roles");
 
             // Sync role from Keycloak to database without changing active status.
             if (roles != null && !roles.isEmpty()) {
                 String primaryRole = roles.get(0);
-                syncUserRoleToDatabase(tokenUsername, primaryRole);
+                syncUserRoleToDatabase(user.getUsername(), primaryRole);
             }
 
             return new LoginResponse(
@@ -463,7 +490,7 @@ public class AuthService {
                 refreshToken,
                 tokenType,
                 expiresIn != null ? expiresIn : AppConstants.DEFAULT_TOKEN_EXPIRY_SECONDS,
-                tokenUsername,
+                user.getUsername(),
                 email,
                 roles
             );
@@ -484,18 +511,52 @@ public class AuthService {
         }
     }
 
-    private LoginResponse rejectIfInactiveApplicationUser(String username) {
-        if (username == null || username.isBlank()) {
-            return new LoginResponse("Invalid token: username is missing");
+    private Optional<User> resolveLocalUserForLogin(String keycloakId, String username, String email) {
+        if (keycloakId != null && !keycloakId.isBlank()) {
+            logger.info("Looking up local account by keycloakId: keycloakId={}", keycloakId);
+            Optional<User> byKeycloakId = userService.findByKeycloakId(keycloakId);
+            if (byKeycloakId.isPresent()) {
+                return byKeycloakId;
+            }
+            logger.warn("Local account lookup by keycloakId failed: keycloakId={}", keycloakId);
         }
 
-        Optional<User> localUser = userService.findByUsername(username);
-        if (localUser.isEmpty()) {
-            return new LoginResponse("Local account not found");
+        if (username != null && !username.isBlank()) {
+            logger.info("Looking up local account by username: username={}", username);
+            Optional<User> byUsername = userService.findByUsername(username);
+            if (byUsername.isPresent()) {
+                return byUsername;
+            }
+            logger.warn("Local account lookup by exact username failed: username={}", username);
+
+            logger.info("Looking up local account by username ignoring case: username={}", username);
+            Optional<User> byUsernameIgnoreCase = userService.findByUsernameIgnoreCaseWithPerson(username);
+            if (byUsernameIgnoreCase.isPresent()) {
+                return byUsernameIgnoreCase;
+            }
+            logger.warn("Local account lookup by case-insensitive username failed: username={}", username);
         }
 
-        User user = localUser.get();
+        if (email != null && !email.isBlank()) {
+            logger.info("Looking up local account by person email: email={}", email);
+            Optional<User> byEmail = userService.findByPersonEmailIgnoreCaseWithPerson(email);
+            if (byEmail.isPresent()) {
+                return byEmail;
+            }
+            logger.warn("Local account lookup by person email failed: email={}", email);
+        }
+
+        return Optional.empty();
+    }
+
+    private LoginResponse rejectIfInactiveApplicationUser(User user) {
+        if (user == null) {
+            return new LoginResponse("Invalid token: local user is missing");
+        }
+
         if (!Boolean.TRUE.equals(user.getActive()) && user.getRole() != TypeRole.NEW_USER) {
+            logger.warn("Login rejected because local account is deactivated: localUserId={} username={} active={} role={}",
+                    user.getId(), user.getUsername(), user.getActive(), user.getRole());
             return new LoginResponse("Account is deactivated");
         }
 
@@ -510,9 +571,12 @@ public class AuthService {
         try {
             Jwt jwt = jwtDecoder.decode(accessToken);
 
+            String keycloakId = jwt.getClaimAsString("sub");
+            userInfo.put("keycloakId", keycloakId);
+
             String username = jwt.getClaimAsString("preferred_username");
             if (username == null || username.isEmpty()) {
-                username = jwt.getClaimAsString("sub");
+                username = keycloakId;
             }
             userInfo.put("username", username);
 

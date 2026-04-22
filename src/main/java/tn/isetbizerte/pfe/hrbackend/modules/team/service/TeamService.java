@@ -229,6 +229,7 @@ public class TeamService {
                         personalInfo.put("birthDate",  u.getPerson().getBirthDate() != null ? u.getPerson().getBirthDate().toString() : "");
                         personalInfo.put("maritalStatus", u.getPerson().getMaritalStatus() != null ? u.getPerson().getMaritalStatus() : "");
                         personalInfo.put("numberOfChildren", u.getPerson().getNumberOfChildren());
+                        personalInfo.put("departmentId", u.getPerson().getDepartmentId());
                         personalInfo.put("department", u.getPerson().getDepartment() != null ? u.getPerson().getDepartment() : "");
                         personalInfo.put("hireDate",   u.getPerson().getHireDate() != null ? u.getPerson().getHireDate().toString() : "");
                         personalInfo.put("avatarPhoto", u.getPerson().getAvatarPhoto() != null ? u.getPerson().getAvatarPhoto() : "");
@@ -285,6 +286,7 @@ public class TeamService {
             personalInfo.put("numberOfChildren", employee.getPerson().getNumberOfChildren());
             personalInfo.put("avatarPhoto",      employee.getPerson().getAvatarPhoto() != null ? employee.getPerson().getAvatarPhoto() : "");
             personalInfo.put("avatarColor",      employee.getPerson().getAvatarColor() != null ? employee.getPerson().getAvatarColor() : "");
+            personalInfo.put("departmentId",     employee.getPerson().getDepartmentId());
             personalInfo.put("department",       employee.getPerson().getDepartment() != null ? employee.getPerson().getDepartment() : "");
             personalInfo.put("hireDate",         employee.getPerson().getHireDate() != null ? employee.getPerson().getHireDate().toString() : "");
             response.put("personalInfo", personalInfo);
@@ -346,6 +348,7 @@ public class TeamService {
                         personalInfo.put("firstName",   member.getPerson().getFirstName());
                         personalInfo.put("lastName",    member.getPerson().getLastName());
                         personalInfo.put("email",       member.getPerson().getEmail());
+                        personalInfo.put("departmentId", member.getPerson().getDepartmentId());
                         personalInfo.put("department",  member.getPerson().getDepartment() != null ? member.getPerson().getDepartment() : "");
                         personalInfo.put("avatarPhoto", member.getPerson().getAvatarPhoto() != null ? member.getPerson().getAvatarPhoto() : "");
                         personalInfo.put("avatarColor", member.getPerson().getAvatarColor() != null ? member.getPerson().getAvatarColor() : "");

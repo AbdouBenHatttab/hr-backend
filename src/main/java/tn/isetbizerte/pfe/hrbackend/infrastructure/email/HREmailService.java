@@ -59,8 +59,8 @@ public class HREmailService {
         String name    = firstName + " " + lastName;
         String roleLabel = formatRole(newRole);
         send(email,
-            "Account Activated – " + COMPANY + " HRMS",
-            buildRoleAssignedBody(name, username, roleLabel));
+            "Welcome to the team – Your ArabSoft access is active",
+            buildRoleAssignedBody(name, roleLabel));
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -98,10 +98,23 @@ public class HREmailService {
     public boolean sendLoanApproved(String email, String firstName, String lastName,
                                     double amount, int months, double monthlyInstallment,
                                     String referenceId) {
-        String name = firstName + " " + lastName;
-        return send(email,
-            "Loan Request Approved – " + referenceId,
-            buildLoanApprovedBody(name, amount, months, monthlyInstallment, referenceId));
+        String requestId = extractRequestId(referenceId);
+        String subject = "Loan Request Approved – " + referenceId;
+        log.info("HREmailService.sendLoanApproved called: recipientEmail={} requestId={} subject={}",
+                email, requestId, subject);
+        try {
+            String name = firstName + " " + lastName;
+            boolean result = send(email,
+                subject,
+                buildLoanApprovedBody(name, amount, months, monthlyInstallment, referenceId));
+            log.info("HREmailService.sendLoanApproved result: recipientEmail={} requestId={} subject={} result={}",
+                    email, requestId, subject, result);
+            return result;
+        } catch (Exception e) {
+            log.error("HREmailService.sendLoanApproved exception: recipientEmail={} requestId={} subject={} message={}",
+                    email, requestId, subject, e.getMessage(), e);
+            return false;
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -110,10 +123,23 @@ public class HREmailService {
 
     public boolean sendLoanRejected(String email, String firstName, String lastName,
                                     double amount, String reason, String referenceId) {
-        String name = firstName + " " + lastName;
-        return send(email,
-            "Loan Request Not Approved – " + referenceId,
-            buildLoanRejectedBody(name, amount, reason, referenceId));
+        String requestId = extractRequestId(referenceId);
+        String subject = "Loan Request Not Approved – " + referenceId;
+        log.info("HREmailService.sendLoanRejected called: recipientEmail={} requestId={} subject={}",
+                email, requestId, subject);
+        try {
+            String name = firstName + " " + lastName;
+            boolean result = send(email,
+                subject,
+                buildLoanRejectedBody(name, amount, reason, referenceId));
+            log.info("HREmailService.sendLoanRejected result: recipientEmail={} requestId={} subject={} result={}",
+                    email, requestId, subject, result);
+            return result;
+        } catch (Exception e) {
+            log.error("HREmailService.sendLoanRejected exception: recipientEmail={} requestId={} subject={} message={}",
+                    email, requestId, subject, e.getMessage(), e);
+            return false;
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -171,10 +197,23 @@ public class HREmailService {
 
     public boolean sendDocumentReady(String email, String firstName, String lastName,
                                      String referenceId) {
-        String name = firstName + " " + lastName;
-        return send(email,
-                "Document Ready – " + referenceId,
-                buildDocumentReadyBody(name, referenceId));
+        String requestId = extractRequestId(referenceId);
+        String subject = "Document Ready – " + referenceId;
+        log.info("HREmailService.sendDocumentReady called: recipientEmail={} requestId={} subject={}",
+                email, requestId, subject);
+        try {
+            String name = firstName + " " + lastName;
+            boolean result = send(email,
+                    subject,
+                    buildDocumentReadyBody(name, referenceId));
+            log.info("HREmailService.sendDocumentReady result: recipientEmail={} requestId={} subject={} result={}",
+                    email, requestId, subject, result);
+            return result;
+        } catch (Exception e) {
+            log.error("HREmailService.sendDocumentReady exception: recipientEmail={} requestId={} subject={} message={}",
+                    email, requestId, subject, e.getMessage(), e);
+            return false;
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -186,14 +225,26 @@ public class HREmailService {
                                              LocalDate endDate, LocalDateTime processedAt,
                                              boolean approved, String decisionNote,
                                              String referenceId) {
-        String name = firstName + " " + lastName;
+        String requestId = extractRequestId(referenceId);
         String subject = approved
                 ? "Authorization Request Approved"
                 : "Authorization Request Rejected";
-        return send(email,
-                subject,
-                buildAuthorizationDecisionBody(name, authorizationType, startDate, endDate,
-                        processedAt, approved, decisionNote, referenceId));
+        log.info("HREmailService.sendAuthorizationDecision called: recipientEmail={} requestId={} subject={} approved={}",
+                email, requestId, subject, approved);
+        try {
+            String name = firstName + " " + lastName;
+            boolean result = send(email,
+                    subject,
+                    buildAuthorizationDecisionBody(name, authorizationType, startDate, endDate,
+                            processedAt, approved, decisionNote, referenceId));
+            log.info("HREmailService.sendAuthorizationDecision result: recipientEmail={} requestId={} subject={} result={}",
+                    email, requestId, subject, result);
+            return result;
+        } catch (Exception e) {
+            log.error("HREmailService.sendAuthorizationDecision exception: recipientEmail={} requestId={} subject={} message={}",
+                    email, requestId, subject, e.getMessage(), e);
+            return false;
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -202,6 +253,7 @@ public class HREmailService {
 
     private boolean send(String to, String subject, String html) {
         try {
+            log.info("Sending email via JavaMailSender: recipientEmail={} subject={}", to, subject);
             MimeMessage msg = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(msg, true, "UTF-8");
             helper.setFrom(fromEmail, COMPANY + " HRMS");
@@ -216,7 +268,8 @@ public class HREmailService {
             log.info("✅ Email sent to {} — {}", to, subject);
             return true;
         } catch (Exception e) {
-            log.error("❌ Failed to send email to {}: {}", to, e.getMessage());
+            log.error("❌ Failed to send email: recipientEmail={} subject={} errorType={} message={}",
+                    to, subject, e.getClass().getSimpleName(), e.getMessage(), e);
             return false;
         }
     }
@@ -225,34 +278,37 @@ public class HREmailService {
     // HTML BUILDERS
     // ═══════════════════════════════════════════════════════════════════
 
-    private String buildRoleAssignedBody(String name, String username, String role) {
-        return wrap("Account Activated", "Your account is now active", """
+    private String buildRoleAssignedBody(String name, String role) {
+        String roleLine = role != null && !role.isBlank()
+                ? "Your access has been prepared for your role as <strong>" + role + "</strong>, so the platform will show the tools and areas relevant to your work."
+                : "Your access has been prepared so the platform will show the tools and areas relevant to your work.";
+
+        return wrap("Welcome to ArabSoft", "Your access is active", """
             <p style="font-size:15px;color:#374151;line-height:1.8;">
                 Dear <strong>%s</strong>,
             </p>
             <p style="font-size:15px;color:#374151;line-height:1.8;">
-                We are pleased to inform you that your account on the
-                <strong>ArabSoft Human Resources Management System</strong>
-                has been activated. Your assigned role is:
+                Welcome to <strong>ArabSoft</strong>. We are pleased to let you know
+                that you are now officially onboarded and your access to the internal
+                HR platform is active.
             </p>
-            <div style="background:#EFF6FF;border-left:4px solid #2563EB;border-radius:8px;
-                        padding:16px 20px;margin:24px 0;">
-                <p style="margin:0;font-size:14px;color:#6B7280;">Role</p>
-                <p style="margin:4px 0 0;font-size:20px;font-weight:700;color:#1D4ED8;">%s</p>
-            </div>
-            <div style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;
-                        padding:16px 20px;margin:16px 0;">
-                <p style="margin:0;font-size:13px;color:#6B7280;">Username</p>
-                <p style="margin:4px 0 0;font-size:16px;font-weight:600;color:#111827;
-                           font-family:monospace;">%s</p>
-            </div>
             <p style="font-size:15px;color:#374151;line-height:1.8;">
-                You can now log in and access all features available to your role.
-                If you have any questions, please contact the HR department.
+                You can now sign in to manage your HR requests, follow your work
+                activities, and stay connected with the Human Resources team.
+            </p>
+            <p style="font-size:15px;color:#374151;line-height:1.8;">
+                %s
+            </p>
+            <p style="font-size:15px;color:#374151;line-height:1.8;">
+                We are glad to have you with us, and we wish you a smooth start
+                with the team.
             </p>
             %s
-            """.formatted(name, role, username,
-                actionButton("Log In to HRMS", frontendUrl + "/login", "#16A34A")));
+            <p style="font-size:14px;color:#64748B;line-height:1.7;text-align:center;margin-top:24px;">
+                For any access question, please contact the Human Resources Department.
+            </p>
+            """.formatted(name, roleLine,
+                actionButton("Log in to ArabSoft", frontendUrl + "/login", "#16A34A")));
     }
 
     private String buildLeaveApprovedBody(String name, String leaveType,
@@ -706,5 +762,14 @@ public class HREmailService {
 
     private String formatDateTimeOrDash(LocalDateTime dateTime) {
         return dateTime != null ? dateTime.format(DATETIME_FMT) : "—";
+    }
+
+    private String extractRequestId(String referenceId) {
+        if (referenceId == null || referenceId.isBlank()) return "unknown";
+        int separator = referenceId.lastIndexOf('-');
+        if (separator >= 0 && separator < referenceId.length() - 1) {
+            return referenceId.substring(separator + 1);
+        }
+        return referenceId;
     }
 }

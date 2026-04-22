@@ -1,6 +1,8 @@
 package tn.isetbizerte.pfe.hrbackend.modules.user.entity;
 
 import jakarta.persistence.*;
+import tn.isetbizerte.pfe.hrbackend.modules.department.entity.Department;
+import tn.isetbizerte.pfe.hrbackend.modules.jobtitle.entity.JobTitle;
 import java.time.LocalDate;
 
 @Entity
@@ -30,9 +32,13 @@ public class Person {
 
     private int numberOfChildren;
 
-    private String department;
+    @ManyToOne(fetch = FetchType.EAGER)
+    @JoinColumn(name = "department_id")
+    private Department departmentRef;
 
-    private String jobTitle;
+    @ManyToOne(fetch = FetchType.EAGER)
+    @JoinColumn(name = "job_title_id")
+    private JobTitle jobTitleRef;
 
     @Column(precision = 10, scale = 3)
     private java.math.BigDecimal salary;
@@ -135,11 +141,53 @@ public class Person {
         this.numberOfChildren = numberOfChildren;
     }
 
-    public String getDepartment() { return department; }
-    public void setDepartment(String department) { this.department = department; }
+    public String getDepartment() {
+        return departmentRef != null ? departmentRef.getName() : null;
+    }
 
-    public String getJobTitle() { return jobTitle; }
-    public void setJobTitle(String jobTitle) { this.jobTitle = jobTitle; }
+    public Long getDepartmentId() {
+        return departmentRef != null ? departmentRef.getId() : null;
+    }
+
+    public String getDepartmentDescription() {
+        return departmentRef != null ? departmentRef.getDescription() : null;
+    }
+
+    public Boolean getDepartmentActive() {
+        return departmentRef != null ? departmentRef.getActive() : null;
+    }
+
+    public Department getDepartmentRef() {
+        return departmentRef;
+    }
+
+    public void setDepartmentRef(Department departmentRef) {
+        this.departmentRef = departmentRef;
+    }
+
+    public Long getJobTitleId() {
+        return jobTitleRef != null ? jobTitleRef.getId() : null;
+    }
+
+    public String getJobTitle() {
+        return jobTitleRef != null ? jobTitleRef.getName() : null;
+    }
+
+    public String getJobTitleDescription() {
+        return jobTitleRef != null ? jobTitleRef.getDescription() : null;
+    }
+
+    public Boolean getJobTitleActive() {
+        return jobTitleRef != null ? jobTitleRef.getActive() : null;
+    }
+
+    public JobTitle getJobTitleRef() {
+        return jobTitleRef;
+    }
+
+    public void setJobTitleRef(JobTitle jobTitleRef) {
+        this.jobTitleRef = jobTitleRef;
+    }
 
     public java.math.BigDecimal getSalary() { return salary; }
     public void setSalary(java.math.BigDecimal salary) { this.salary = salary; }

@@ -4,10 +4,17 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
+import tn.isetbizerte.pfe.hrbackend.common.exception.BadRequestException;
+import tn.isetbizerte.pfe.hrbackend.common.exception.ResourceNotFoundException;
+import tn.isetbizerte.pfe.hrbackend.modules.department.service.DepartmentService;
+import tn.isetbizerte.pfe.hrbackend.modules.jobtitle.service.JobTitleService;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.Person;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
+import tn.isetbizerte.pfe.hrbackend.modules.user.dto.UpdateEmploymentRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.user.repository.PersonRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.user.repository.UserRepository;
+import tn.isetbizerte.pfe.hrbackend.modules.user.service.AuthenticatedUserResolver;
+import tn.isetbizerte.pfe.hrbackend.modules.user.service.EmploymentSalaryService;
 
 import java.util.HashMap;
 import java.util.List;
@@ -19,10 +26,23 @@ public class UserRoleInfoController {
 
     private final UserRepository   userRepository;
     private final PersonRepository  personRepository;
-
-    public UserRoleInfoController(UserRepository userRepository, PersonRepository personRepository) {
+    private final DepartmentService departmentService;
+    private final JobTitleService jobTitleService;
+    private final EmploymentSalaryService employmentSalaryService;
+    private final AuthenticatedUserResolver authenticatedUserResolver;
+    public UserRoleInfoController(
+            UserRepository userRepository,
+            PersonRepository personRepository,
+            DepartmentService departmentService,
+            JobTitleService jobTitleService,
+            EmploymentSalaryService employmentSalaryService,
+            AuthenticatedUserResolver authenticatedUserResolver) {
         this.userRepository  = userRepository;
         this.personRepository = personRepository;
+        this.departmentService = departmentService;
+        this.jobTitleService = jobTitleService;
+        this.employmentSalaryService = employmentSalaryService;
+        this.authenticatedUserResolver = authenticatedUserResolver;
     }
 
     /**
@@ -33,17 +53,9 @@ public class UserRoleInfoController {
     @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")
     @GetMapping("/api/me")
     public Map<String, Object> getMyProfile(@AuthenticationPrincipal Jwt jwt) {
-        String username = jwt.getClaimAsString("preferred_username");
-        Optional<User> userOpt = userRepository.findByUsername(username);
-
+        User user = authenticatedUserResolver.resolve(jwt)
+                .orElseThrow(() -> new ResourceNotFoundException("Profile not found"));
         Map<String, Object> response = new HashMap<>();
-        if (userOpt.isEmpty()) {
-            response.put("success", false);
-            response.put("message", "Profile not found");
-            return response;
-        }
-
-        User user = userOpt.get();
         response.put("success", true);
         response.put("id", user.getId());
         response.put("username", user.getUsername());
@@ -65,8 +77,14 @@ public class UserRoleInfoController {
             personalInfo.put("numberOfChildren", p.getNumberOfChildren());
             personalInfo.put("avatarPhoto",      p.getAvatarPhoto()    != null ? p.getAvatarPhoto()     : "");
             personalInfo.put("avatarColor",      p.getAvatarColor()    != null ? p.getAvatarColor()     : "");
+            personalInfo.put("departmentId",     p.getDepartmentId());
             personalInfo.put("department",       p.getDepartment()     != null ? p.getDepartment()      : "");
+            personalInfo.put("departmentDescription", p.getDepartmentDescription() != null ? p.getDepartmentDescription() : "");
+            personalInfo.put("departmentActive", p.getDepartmentActive());
+            personalInfo.put("jobTitleId",       p.getJobTitleId());
             personalInfo.put("jobTitle",         p.getJobTitle()       != null ? p.getJobTitle()        : "");
+            personalInfo.put("jobTitleDescription", p.getJobTitleDescription() != null ? p.getJobTitleDescription() : "");
+            personalInfo.put("jobTitleActive",   p.getJobTitleActive());
             personalInfo.put("salary",          p.getSalary()         != null ? p.getSalary()           : null);
             personalInfo.put("hireDate",         p.getHireDate()       != null ? p.getHireDate().toString() : "");
             response.put("personalInfo", personalInfo);
@@ -86,28 +104,38 @@ public class UserRoleInfoController {
             @RequestBody Map<String, Object> body,
             @AuthenticationPrincipal Jwt jwt) {
 
-        String username = jwt.getClaimAsString("preferred_username");
-        Optional<User> userOpt = userRepository.findByUsername(username);
-
         Map<String, Object> response = new HashMap<>();
-        if (userOpt.isEmpty() || userOpt.get().getPerson() == null) {
-            response.put("success", false);
-            response.put("message", "Profile not found");
-            return response;
+        User user = authenticatedUserResolver.resolve(jwt)
+                .orElseThrow(() -> new ResourceNotFoundException("Profile not found"));
+        if (user.getPerson() == null) {
+            throw new ResourceNotFoundException("Profile not found");
         }
 
-        Person p = userOpt.get().getPerson();
-
-        if (body.containsKey("phone"))           p.setPhone((String) body.get("phone"));
-        if (body.containsKey("address"))         p.setAddress((String) body.get("address"));
-        if (body.containsKey("maritalStatus"))   p.setMaritalStatus((String) body.get("maritalStatus"));
-        if (body.containsKey("numberOfChildren")) {
-            Object val = body.get("numberOfChildren");
-            p.setNumberOfChildren(val instanceof Integer ? (Integer) val : Integer.parseInt(val.toString()));
+        if (body.containsKey("department") || body.containsKey("departmentId")) {
+            throw new BadRequestException("Department is HR-managed employment data and cannot be changed from self-service.");
         }
-        if (body.containsKey("avatarPhoto"))  p.setAvatarPhoto((String) body.get("avatarPhoto"));
-        if (body.containsKey("avatarColor"))   p.setAvatarColor((String) body.get("avatarColor"));
-        if (body.containsKey("department"))    p.setDepartment((String) body.get("department"));
+
+        Person p = user.getPerson();
+
+        if (body.containsKey("phone")) {
+            p.setPhone((String) body.get("phone"));
+        }
+        if (body.containsKey("address")) {
+            p.setAddress((String) body.get("address"));
+        }
+        if (body.containsKey("maritalStatus")) {
+            p.setMaritalStatus((String) body.get("maritalStatus"));
+        }
+        if (body.containsKey("numberOfChildren") && body.get("numberOfChildren") != null) {
+            Object value = body.get("numberOfChildren");
+            p.setNumberOfChildren(value instanceof Integer ? (Integer) value : Integer.parseInt(value.toString()));
+        }
+        if (body.containsKey("avatarPhoto")) {
+            p.setAvatarPhoto((String) body.get("avatarPhoto"));
+        }
+        if (body.containsKey("avatarColor")) {
+            p.setAvatarColor((String) body.get("avatarColor"));
+        }
 
         personRepository.save(p);
 
@@ -118,13 +146,13 @@ public class UserRoleInfoController {
 
     /**
      * PATCH /api/hr/users/{userId}/employment
-     * HR sets salary and hire date for any user. Employees cannot self-edit salary.
+     * HR sets department, job title and hire date for any user.
      */
     @PreAuthorize("hasRole('HR_MANAGER')")
     @PatchMapping("/api/hr/users/{userId}/employment")
     public Map<String, Object> updateEmployment(
             @PathVariable Long userId,
-            @RequestBody Map<String, Object> body) {
+            @RequestBody UpdateEmploymentRequest body) {
 
         Optional<User> userOpt = userRepository.findById(userId);
         Map<String, Object> response = new HashMap<>();
@@ -134,15 +162,29 @@ public class UserRoleInfoController {
             return response;
         }
         Person p = userOpt.get().getPerson();
-        if (body.containsKey("salary") && body.get("salary") != null) {
-            p.setSalary(new java.math.BigDecimal(body.get("salary").toString()));
+        if (body.getHireDate() != null) {
+            p.setHireDate(body.getHireDate());
         }
-        if (body.containsKey("hireDate") && body.get("hireDate") != null
-                && !body.get("hireDate").toString().isEmpty()) {
-            p.setHireDate(java.time.LocalDate.parse(body.get("hireDate").toString()));
+        if (body.getDepartmentId() != null) {
+            var department = departmentService.getDepartmentEntity(body.getDepartmentId());
+            if (!Boolean.TRUE.equals(department.getActive()) && (p.getDepartmentRef() == null || !p.getDepartmentRef().getId().equals(department.getId()))) {
+                throw new BadRequestException("Department '" + department.getName() + "' is archived and cannot be assigned.");
+            }
+            p.setDepartmentRef(department);
+        } else {
+            p.setDepartmentRef(null);
         }
-        if (body.containsKey("department")) p.setDepartment((String) body.get("department"));
-        if (body.containsKey("jobTitle")) p.setJobTitle((String) body.get("jobTitle"));
+        if (body.getJobTitleId() != null) {
+            var jobTitle = jobTitleService.getJobTitleEntity(body.getJobTitleId());
+            if (!Boolean.TRUE.equals(jobTitle.getActive()) && (p.getJobTitleRef() == null || !p.getJobTitleRef().getId().equals(jobTitle.getId()))) {
+                throw new BadRequestException("Job title '" + jobTitle.getName() + "' is archived and cannot be assigned.");
+            }
+            p.setJobTitleRef(jobTitle);
+        } else {
+            p.setJobTitleRef(null);
+        }
+        // Salary stays system-controlled and is derived only from role.
+        p.setSalary(employmentSalaryService.resolveEffectiveSalary(userOpt.get().getRole()));
         personRepository.save(p);
         response.put("success", true);
         response.put("message", "Employment details updated.");

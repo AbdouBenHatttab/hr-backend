@@ -12,7 +12,7 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import tn.isetbizerte.pfe.hrbackend.common.enums.TypeRole;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
-import tn.isetbizerte.pfe.hrbackend.modules.user.repository.UserRepository;
+import tn.isetbizerte.pfe.hrbackend.modules.user.service.AuthenticatedUserResolver;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -21,13 +21,14 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class ActiveUserFilterTest {
 
-    private final UserRepository userRepository = mock(UserRepository.class);
-    private final ActiveUserFilter filter = new ActiveUserFilter(userRepository);
+    private final AuthenticatedUserResolver authenticatedUserResolver = mock(AuthenticatedUserResolver.class);
+    private final ActiveUserFilter filter = new ActiveUserFilter(authenticatedUserResolver);
 
     @AfterEach
     void tearDown() {
@@ -37,7 +38,7 @@ class ActiveUserFilterTest {
     @Test
     void doFilter_blocksDeactivatedApplicationUser() throws ServletException, IOException {
         User user = localUser(TypeRole.EMPLOYEE, false);
-        when(userRepository.findByKeycloakId("kc-user")).thenReturn(Optional.of(user));
+        when(authenticatedUserResolver.resolve(any())).thenReturn(Optional.of(user));
         authenticate("kc-user", "employee");
 
         MockHttpServletResponse response = doFilter("/api/me");
@@ -49,7 +50,7 @@ class ActiveUserFilterTest {
     @Test
     void doFilter_allowsReactivatedApplicationUser() throws ServletException, IOException {
         User user = localUser(TypeRole.EMPLOYEE, true);
-        when(userRepository.findByKeycloakId("kc-user")).thenReturn(Optional.of(user));
+        when(authenticatedUserResolver.resolve(any())).thenReturn(Optional.of(user));
         authenticate("kc-user", "employee");
 
         MockHttpServletResponse response = doFilter("/api/me");

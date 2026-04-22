@@ -15,7 +15,6 @@ import tn.isetbizerte.pfe.hrbackend.modules.user.service.UserService;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -30,7 +29,6 @@ public class HRService {
     private final UserService userService;
     private final KeycloakAdminService keycloakAdminService;
     private final KafkaEventProducer kafkaEventProducer;
-
     public HRService(UserService userService,
                      KeycloakAdminService keycloakAdminService,
                      KafkaEventProducer kafkaEventProducer) {
@@ -229,18 +227,15 @@ public class HRService {
         userService.saveUser(user);
         logger.info("Role updated in database for user: {}", user.getUsername());
 
-        // Auto-fill employment defaults when the user receives a real role.
-        // Do not overwrite HR-entered values.
+        // Keep salary system-controlled and role-based.
         if (newRole != TypeRole.NEW_USER && user.getPerson() != null) {
             Person p = user.getPerson();
             if (p.getHireDate() == null) {
                 p.setHireDate(LocalDate.now());
             }
-            if (p.getSalary() == null) {
-                p.setSalary(defaultSalaryForRole(newRole));
-            }
             userService.savePerson(p);
         }
+        userService.syncRoleBasedSalary(user);
 
         // Publish Kafka event for email notification
         boolean eventPublished = publishRoleAssignedEvent(user, oldRole, newRole, assignedBy);
@@ -294,16 +289,6 @@ public class HRService {
                     user.getUsername(), e.getMessage());
             return false;
         }
-    }
-
-    private BigDecimal defaultSalaryForRole(TypeRole role) {
-        if (role == null) return BigDecimal.ZERO;
-        return switch (role) {
-            case EMPLOYEE -> new BigDecimal("2000");
-            case TEAM_LEADER -> new BigDecimal("4000");
-            case HR_MANAGER -> new BigDecimal("3500");
-            case NEW_USER -> BigDecimal.ZERO;
-        };
     }
 
     /**
@@ -405,8 +390,14 @@ public class HRService {
             personalInfo.put("birthDate",       person.getBirthDate()  != null ? person.getBirthDate().toString() : "");
             personalInfo.put("maritalStatus",   person.getMaritalStatus()   != null ? person.getMaritalStatus()   : "");
             personalInfo.put("numberOfChildren",person.getNumberOfChildren());
+            personalInfo.put("departmentId",    person.getDepartmentId());
             personalInfo.put("department",      person.getDepartment() != null ? person.getDepartment() : "");
+            personalInfo.put("departmentDescription", person.getDepartmentDescription() != null ? person.getDepartmentDescription() : "");
+            personalInfo.put("departmentActive", person.getDepartmentActive());
+            personalInfo.put("jobTitleId",    person.getJobTitleId());
             personalInfo.put("jobTitle",        person.getJobTitle()   != null ? person.getJobTitle()   : "");
+            personalInfo.put("jobTitleDescription", person.getJobTitleDescription() != null ? person.getJobTitleDescription() : "");
+            personalInfo.put("jobTitleActive",  person.getJobTitleActive());
             personalInfo.put("salary",          person.getSalary());
             personalInfo.put("hireDate",        person.getHireDate()   != null ? person.getHireDate().toString()  : "");
             personalInfo.put("avatarPhoto",     person.getAvatarPhoto() != null ? person.getAvatarPhoto() : "");

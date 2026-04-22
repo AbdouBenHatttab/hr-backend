@@ -4,6 +4,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tn.isetbizerte.pfe.hrbackend.common.dto.RegisterRequest;
 import tn.isetbizerte.pfe.hrbackend.common.enums.TypeRole;
+import tn.isetbizerte.pfe.hrbackend.modules.department.service.DepartmentService;
 import tn.isetbizerte.pfe.hrbackend.common.exception.ResourceNotFoundException;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.Person;
@@ -15,7 +16,6 @@ import tn.isetbizerte.pfe.hrbackend.modules.user.repository.LoginHistoryReposito
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
-import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
@@ -29,13 +29,19 @@ public class UserService {
     private final UserRepository userRepository;
     private final PersonRepository personRepository;
     private final LoginHistoryRepository loginHistoryRepository;
+    private final DepartmentService departmentService;
+    private final EmploymentSalaryService employmentSalaryService;
 
     public UserService(UserRepository userRepository,
                        PersonRepository personRepository,
-                       LoginHistoryRepository loginHistoryRepository) {
+                       LoginHistoryRepository loginHistoryRepository,
+                       DepartmentService departmentService,
+                       EmploymentSalaryService employmentSalaryService) {
         this.userRepository = userRepository;
         this.personRepository = personRepository;
         this.loginHistoryRepository = loginHistoryRepository;
+        this.departmentService = departmentService;
+        this.employmentSalaryService = employmentSalaryService;
     }
 
     // User operations
@@ -51,8 +57,16 @@ public class UserService {
         return userRepository.findByUsername(username);
     }
 
+    public Optional<User> findByUsernameIgnoreCaseWithPerson(String username) {
+        return userRepository.findByUsernameIgnoreCaseWithPerson(username);
+    }
+
     public Optional<User> findByKeycloakId(String keycloakId) {
         return userRepository.findByKeycloakId(keycloakId);
+    }
+
+    public Optional<User> findByPersonEmailIgnoreCaseWithPerson(String email) {
+        return userRepository.findByPersonEmailIgnoreCaseWithPerson(email);
     }
 
     public Optional<User> findById(Long userId) {
@@ -83,7 +97,9 @@ public class UserService {
     public User updateUserRole(String username, TypeRole newRole) {
         User user = getUserByUsername(username);
         user.setRole(newRole);
-        return userRepository.save(user);
+        User saved = userRepository.save(user);
+        syncRoleBasedSalary(saved);
+        return saved;
     }
 
     /**
@@ -99,16 +115,13 @@ public class UserService {
             user.setRole(typeRole);
             User saved = userRepository.save(user);
 
-            // Auto-fill employment defaults when the user gets a real role.
-            // Do not overwrite HR-entered values.
+            // Keep salary system-controlled and role-based.
             if (typeRole != TypeRole.NEW_USER && saved.getPerson() != null) {
                 Person p = saved.getPerson();
                 if (p.getHireDate() == null) {
                     p.setHireDate(LocalDate.now());
                 }
-                if (p.getSalary() == null) {
-                    p.setSalary(defaultSalaryForRole(typeRole));
-                }
+                p.setSalary(employmentSalaryService.resolveEffectiveSalary(typeRole));
                 personRepository.save(p);
             }
 
@@ -121,16 +134,6 @@ public class UserService {
             // User not found - this shouldn't happen for valid users
             return null;
         }
-    }
-
-    private BigDecimal defaultSalaryForRole(TypeRole role) {
-        if (role == null) return BigDecimal.ZERO;
-        return switch (role) {
-            case EMPLOYEE -> new BigDecimal("2000");
-            case TEAM_LEADER -> new BigDecimal("4000");
-            case HR_MANAGER -> new BigDecimal("3500");
-            case NEW_USER -> BigDecimal.ZERO;
-        };
     }
 
     public long countUsers() {
@@ -150,6 +153,15 @@ public class UserService {
         return personRepository.save(person);
     }
 
+    public void syncRoleBasedSalary(User user) {
+        if (user == null || user.getPerson() == null) {
+            return;
+        }
+        Person person = user.getPerson();
+        person.setSalary(employmentSalaryService.resolveEffectiveSalary(user.getRole()));
+        personRepository.save(person);
+    }
+
     @Transactional
     public void saveRegisteredUser(RegisterRequest registerRequest, String keycloakUserId) {
         Person person = new Person();
@@ -161,7 +173,9 @@ public class UserService {
         person.setAddress(registerRequest.getAddress());
         person.setMaritalStatus(registerRequest.getMaritalStatus());
         person.setNumberOfChildren(registerRequest.getNumberOfChildren());
-        person.setDepartment(registerRequest.getDepartment());
+        if (registerRequest.getDepartmentId() != null) {
+            person.setDepartmentRef(departmentService.requireDepartmentForEmployment(registerRequest.getDepartmentId()));
+        }
 
         User user = new User(keycloakUserId, registerRequest.getUsername());
         user.setEmailVerified(true);

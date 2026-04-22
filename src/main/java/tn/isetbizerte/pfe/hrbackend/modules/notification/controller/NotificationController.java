@@ -24,28 +24,28 @@ public class NotificationController {
     @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")
     @GetMapping
     public Map<String, Object> getMyNotifications(@AuthenticationPrincipal Jwt jwt) {
-        String username = jwt.getClaimAsString("preferred_username");
+        String keycloakId = jwt.getSubject();
         Map<String, Object> res = new HashMap<>();
         res.put("success", true);
-        res.put("data", notificationService.getMyNotifications(username));
+        res.put("data", notificationService.getMyNotifications(keycloakId));
         return res;
     }
 
     @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")
     @GetMapping("/{id}/details")
     public Map<String, Object> getNotificationDetails(@PathVariable Long id, @AuthenticationPrincipal Jwt jwt) {
-        String username = jwt.getClaimAsString("preferred_username");
+        String keycloakId = jwt.getSubject();
         Map<String, Object> res = new HashMap<>();
         res.put("success", true);
-        res.put("data", notificationService.getNotificationDetails(username, id));
+        res.put("data", notificationService.getNotificationDetails(keycloakId, id));
         return res;
     }
 
     @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")
     @PatchMapping("/{id}/read")
     public Map<String, Object> markRead(@PathVariable Long id, @AuthenticationPrincipal Jwt jwt) {
-        String username = jwt.getClaimAsString("preferred_username");
-        notificationService.markAsRead(username, id);
+        String keycloakId = jwt.getSubject();
+        notificationService.markAsRead(keycloakId, id);
         Map<String, Object> res = new HashMap<>();
         res.put("success", true);
         res.put("message", "Notification marked as read");
@@ -55,8 +55,8 @@ public class NotificationController {
     @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")
     @PatchMapping("/read-all")
     public Map<String, Object> markAllRead(@AuthenticationPrincipal Jwt jwt) {
-        String username = jwt.getClaimAsString("preferred_username");
-        notificationService.markAllRead(username);
+        String keycloakId = jwt.getSubject();
+        notificationService.markAllRead(keycloakId);
         Map<String, Object> res = new HashMap<>();
         res.put("success", true);
         res.put("message", "All notifications marked as read");
@@ -66,7 +66,7 @@ public class NotificationController {
     @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")
     @PatchMapping("/read-batch")
     public Map<String, Object> markBatchRead(@RequestBody Map<String, Object> body, @AuthenticationPrincipal Jwt jwt) {
-        String username = jwt.getClaimAsString("preferred_username");
+        String keycloakId = jwt.getSubject();
         Object idsObj = body.get("ids");
         List<Long> ids = idsObj instanceof List
                 ? ((List<?>) idsObj).stream()
@@ -74,7 +74,7 @@ public class NotificationController {
                     .map(v -> ((Number) v).longValue())
                     .collect(Collectors.toList())
                 : List.of();
-        notificationService.markBatchRead(username, ids);
+        notificationService.markBatchRead(keycloakId, ids);
         Map<String, Object> res = new HashMap<>();
         res.put("success", true);
         res.put("message", "Notifications marked as read");

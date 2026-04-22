@@ -12,6 +12,7 @@ import tn.isetbizerte.pfe.hrbackend.modules.employee.repository.LeavePolicyRepos
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
 import tn.isetbizerte.pfe.hrbackend.modules.user.repository.UserRepository;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.Optional;
 
@@ -56,31 +57,102 @@ class LeaveBalanceServiceTest {
                 .isInstanceOf(BadRequestException.class)
                 .hasMessageContaining("Insufficient Annual balance");
 
-        assertThat(annualBalance.getReservedDays()).isEqualTo(8);
+        assertThat(annualBalance.getReservedDays()).isEqualByComparingTo("8");
     }
 
     @Test
     void reserveConsumeAndRelease_updatesSeparateReservedAndUsedBuckets() {
         service.reserveForRequest(employee, LeaveType.ANNUAL, LocalDate.now(), 5);
 
-        assertThat(annualBalance.getReservedDays()).isEqualTo(5);
-        assertThat(annualBalance.getUsedDays()).isZero();
-        assertThat(annualBalance.getAvailableDays()).isEqualTo(25);
+        assertThat(annualBalance.getReservedDays()).isEqualByComparingTo("5");
+        assertThat(annualBalance.getUsedDays()).isEqualByComparingTo("0");
+        assertThat(annualBalance.getAvailableDays()).isEqualByComparingTo("25");
 
         LeaveRequest approved = leave(5);
         service.consumeReserved(approved);
 
-        assertThat(annualBalance.getReservedDays()).isZero();
-        assertThat(annualBalance.getUsedDays()).isEqualTo(5);
-        assertThat(annualBalance.getAvailableDays()).isEqualTo(25);
+        assertThat(annualBalance.getReservedDays()).isEqualByComparingTo("0");
+        assertThat(annualBalance.getUsedDays()).isEqualByComparingTo("5");
+        assertThat(annualBalance.getAvailableDays()).isEqualByComparingTo("25");
 
         service.reserveForRequest(employee, LeaveType.ANNUAL, LocalDate.now(), 4);
         LeaveRequest rejected = leave(4);
         service.releaseReserved(rejected);
 
-        assertThat(annualBalance.getReservedDays()).isZero();
-        assertThat(annualBalance.getUsedDays()).isEqualTo(5);
-        assertThat(annualBalance.getAvailableDays()).isEqualTo(25);
+        assertThat(annualBalance.getReservedDays()).isEqualByComparingTo("0");
+        assertThat(annualBalance.getUsedDays()).isEqualByComparingTo("5");
+        assertThat(annualBalance.getAvailableDays()).isEqualByComparingTo("25");
+    }
+
+    @Test
+    void annualBalanceCreation_appliesCarryForwardCapAndMonthlyAccrual() {
+        LeavePolicy policy = new LeavePolicy(LeaveType.ANNUAL, 30, true);
+        policy.setAccrualManaged(true);
+        policy.setMonthlyAccrualDays(new BigDecimal("2.50"));
+        policy.setCarryForwardCapDays(new BigDecimal("5.00"));
+
+        int year = LocalDate.now().getYear();
+        EmployeeLeaveBalance previous = new EmployeeLeaveBalance(employee, LeaveType.ANNUAL, year - 1, 30);
+        previous.setUsedDays(18);
+
+        when(policyRepository.findByLeaveType(LeaveType.ANNUAL)).thenReturn(Optional.of(policy));
+        when(balanceRepository.findByUserAndLeaveTypeAndYear(employee, LeaveType.ANNUAL, year))
+                .thenReturn(Optional.empty());
+        when(balanceRepository.findByUserAndLeaveTypeAndYear(employee, LeaveType.ANNUAL, year - 1))
+                .thenReturn(Optional.of(previous));
+
+        EmployeeLeaveBalance current = service.accrueAnnualLeaveToDate(employee, year);
+
+        BigDecimal expectedAccrual = new BigDecimal("2.50").multiply(BigDecimal.valueOf(LocalDate.now().getMonthValue()));
+        assertThat(current.getCarryForwardDays()).isEqualByComparingTo("5");
+        assertThat(current.getAllocatedDays()).isEqualByComparingTo(expectedAccrual.add(new BigDecimal("5.00")));
+    }
+
+    @Test
+    void fixedSpecialLeaveTypes_areManagedButDoNotUseMonthlyAccrual() {
+        LeavePolicy sick = new LeavePolicy(LeaveType.SICK, 10, true);
+        when(policyRepository.findByLeaveType(LeaveType.SICK)).thenReturn(Optional.of(sick));
+        when(balanceRepository.findByUserAndLeaveTypeAndYear(employee, LeaveType.SICK, LocalDate.now().getYear()))
+                .thenReturn(Optional.empty());
+
+        service.reserveForRequest(employee, LeaveType.SICK, LocalDate.now(), 2);
+
+        verify(balanceRepository, atLeastOnce()).save(argThat(balance ->
+                balance.getLeaveType() == LeaveType.SICK
+                        && balance.getAllocatedDays().compareTo(BigDecimal.TEN) == 0
+                        && balance.getReservedDays().compareTo(BigDecimal.valueOf(2)) == 0
+        ));
+    }
+
+    @Test
+    void maternityAndPaternity_areFixedSpecialBalances() {
+        LeavePolicy maternity = new LeavePolicy(LeaveType.MATERNITY, 60, true);
+        LeavePolicy paternity = new LeavePolicy(LeaveType.PATERNITY, 3, true);
+        when(policyRepository.findByLeaveType(LeaveType.MATERNITY)).thenReturn(Optional.of(maternity));
+        when(policyRepository.findByLeaveType(LeaveType.PATERNITY)).thenReturn(Optional.of(paternity));
+        when(balanceRepository.findByUserAndLeaveTypeAndYear(eq(employee), any(), anyInt())).thenReturn(Optional.empty());
+
+        service.reserveForRequest(employee, LeaveType.MATERNITY, LocalDate.now(), 10);
+        service.reserveForRequest(employee, LeaveType.PATERNITY, LocalDate.now(), 1);
+
+        verify(balanceRepository, atLeastOnce()).save(argThat(balance ->
+                balance.getLeaveType() == LeaveType.MATERNITY
+                        && balance.getAllocatedDays().compareTo(BigDecimal.valueOf(60)) == 0
+        ));
+        verify(balanceRepository, atLeastOnce()).save(argThat(balance ->
+                balance.getLeaveType() == LeaveType.PATERNITY
+                        && balance.getAllocatedDays().compareTo(BigDecimal.valueOf(3)) == 0
+        ));
+    }
+
+    @Test
+    void unpaidLeave_isNotBalanceManaged() {
+        LeavePolicy unpaid = new LeavePolicy(LeaveType.UNPAID, 0, false);
+        when(policyRepository.findByLeaveType(LeaveType.UNPAID)).thenReturn(Optional.of(unpaid));
+
+        service.reserveForRequest(employee, LeaveType.UNPAID, LocalDate.now(), 5);
+
+        verify(balanceRepository, never()).findByUserAndLeaveTypeAndYear(any(), eq(LeaveType.UNPAID), anyInt());
     }
 
     private LeaveRequest leave(int days) {

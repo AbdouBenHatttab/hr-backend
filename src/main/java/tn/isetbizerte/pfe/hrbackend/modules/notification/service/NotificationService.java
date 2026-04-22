@@ -50,9 +50,8 @@ public class NotificationService {
     }
 
     @Transactional(readOnly = true)
-    public List<Map<String, Object>> getMyNotifications(String username) {
-        User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+    public List<Map<String, Object>> getMyNotifications(String userIdentifier) {
+        User user = resolveUser(userIdentifier);
 
         return notificationRepository.findByUserOrderByCreatedAtDesc(user)
                 .stream()
@@ -74,9 +73,8 @@ public class NotificationService {
     }
 
     @Transactional(readOnly = true)
-    public Map<String, Object> getNotificationDetails(String username, Long notificationId) {
-        User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+    public Map<String, Object> getNotificationDetails(String userIdentifier, Long notificationId) {
+        User user = resolveUser(userIdentifier);
 
         Notification notification = notificationRepository.findById(notificationId)
                 .orElseThrow(() -> new ResourceNotFoundException("Notification not found"));
@@ -103,9 +101,8 @@ public class NotificationService {
     }
 
     @Transactional
-    public void markAsRead(String username, Long notificationId) {
-        User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+    public void markAsRead(String userIdentifier, Long notificationId) {
+        User user = resolveUser(userIdentifier);
 
         Notification n = notificationRepository.findById(notificationId)
                 .orElseThrow(() -> new ResourceNotFoundException("Notification not found"));
@@ -119,9 +116,8 @@ public class NotificationService {
     }
 
     @Transactional
-    public void markAllRead(String username) {
-        User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+    public void markAllRead(String userIdentifier) {
+        User user = resolveUser(userIdentifier);
 
         List<Notification> list = notificationRepository.findByUserOrderByCreatedAtDesc(user);
         for (Notification n : list) {
@@ -131,15 +127,14 @@ public class NotificationService {
     }
 
     @Transactional
-    public void markBatchRead(String username, List<Long> ids) {
+    public void markBatchRead(String userIdentifier, List<Long> ids) {
         if (ids == null || ids.isEmpty()) return;
 
         // Avoid false 403s when the client accidentally sends duplicate IDs.
         List<Long> uniqueIds = ids.stream().distinct().toList();
         if (uniqueIds.isEmpty()) return;
 
-        User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        User user = resolveUser(userIdentifier);
 
         // Load the notifications that actually exist (some IDs may be stale if notifications were deleted).
         List<Notification> found = notificationRepository.findAllById(uniqueIds);
@@ -153,6 +148,15 @@ public class NotificationService {
             n.setRead(true);
         }
         notificationRepository.saveAll(list);
+    }
+
+    private User resolveUser(String identifier) {
+        if (identifier == null || identifier.isBlank()) {
+            throw new ResourceNotFoundException("User not found");
+        }
+        return userRepository.findByKeycloakId(identifier)
+                .or(() -> userRepository.findByUsername(identifier))
+                .orElseThrow(() -> new ResourceNotFoundException("User not found: " + identifier));
     }
 
     private String humanizeType(String type) {

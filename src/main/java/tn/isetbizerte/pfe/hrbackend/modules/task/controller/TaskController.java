@@ -94,10 +94,10 @@ public class TaskController {
     @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER')")
     @GetMapping("/api/employee/tasks")
     public ResponseEntity<Map<String, Object>> getMyTasks(@AuthenticationPrincipal Jwt jwt) {
-        String username = jwt.getClaimAsString("preferred_username");
+        String keycloakId = jwt.getSubject();
         Map<String, Object> res = new HashMap<>();
         res.put("success", true);
-        res.put("data", taskService.getMyTasks(username));
+        res.put("data", taskService.getMyTasks(keycloakId));
         return ResponseEntity.ok(res);
     }
 
@@ -107,10 +107,10 @@ public class TaskController {
     public ResponseEntity<Map<String, Object>> getMyTaskById(
             @PathVariable Long taskId,
             @AuthenticationPrincipal Jwt jwt) {
-        String username = jwt.getClaimAsString("preferred_username");
+        String keycloakId = jwt.getSubject();
         Map<String, Object> res = new HashMap<>();
         res.put("success", true);
-        res.put("data", taskService.getMyTaskById(username, taskId));
+        res.put("data", taskService.getMyTaskById(keycloakId, taskId));
         return ResponseEntity.ok(res);
     }
 
@@ -121,10 +121,10 @@ public class TaskController {
             @PathVariable Long taskId,
             @Valid @RequestBody UpdateTaskStatusRequest req,
             @AuthenticationPrincipal Jwt jwt) {
-        String username = jwt.getClaimAsString("preferred_username");
+        String keycloakId = jwt.getSubject();
         Map<String, Object> res = new HashMap<>();
         res.put("success", true);
-        res.put("data", taskService.updateTaskStatus(username, taskId, req.getStatus()));
+        res.put("data", taskService.updateTaskStatus(keycloakId, taskId, req.getStatus()));
         return ResponseEntity.ok(res);
     }
 }

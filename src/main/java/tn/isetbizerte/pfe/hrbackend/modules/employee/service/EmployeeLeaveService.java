@@ -18,6 +18,7 @@ import tn.isetbizerte.pfe.hrbackend.common.enums.TypeRole;
 import tn.isetbizerte.pfe.hrbackend.common.exception.UnauthorizedException;
 import tn.isetbizerte.pfe.hrbackend.common.event.RequestEvent;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.kafka.producer.RequestEventProducer;
+import tn.isetbizerte.pfe.hrbackend.modules.calendar.service.WorkingDayService;
 import tn.isetbizerte.pfe.hrbackend.modules.history.service.RequestHistoryService;
 import tn.isetbizerte.pfe.hrbackend.modules.team.entity.Team;
 import tn.isetbizerte.pfe.hrbackend.modules.team.repository.TeamRepository;
@@ -26,9 +27,9 @@ import tn.isetbizerte.pfe.hrbackend.modules.user.repository.UserRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.user.repository.PersonRepository;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.email.HREmailService;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.temporal.ChronoUnit;
 import java.util.List;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -53,6 +54,7 @@ public class EmployeeLeaveService {
     private final RequestEventProducer    requestEventProducer;
     private final RequestHistoryService   historyService;
     private final LeaveBalanceService      leaveBalanceService;
+    private final WorkingDayService        workingDayService;
 
     public EmployeeLeaveService(
             LeaveRequestRepository leaveRequestRepository,
@@ -63,7 +65,8 @@ public class EmployeeLeaveService {
             HREmailService emailService,
             RequestEventProducer requestEventProducer,
             RequestHistoryService historyService,
-            LeaveBalanceService leaveBalanceService
+            LeaveBalanceService leaveBalanceService,
+            WorkingDayService workingDayService
     ) {
         this.leaveRequestRepository = leaveRequestRepository;
         this.userRepository         = userRepository;
@@ -74,6 +77,7 @@ public class EmployeeLeaveService {
         this.requestEventProducer   = requestEventProducer;
         this.historyService         = historyService;
         this.leaveBalanceService    = leaveBalanceService;
+        this.workingDayService      = workingDayService;
     }
 
     /**
@@ -84,23 +88,22 @@ public class EmployeeLeaveService {
      */
     @CacheEvict(value = "calendarLeaves", allEntries = true)
     @Transactional
-    public LeaveRequestResponseDto createLeaveRequest(String username, CreateLeaveRequestDto dto) {
-        log.info("Creating leave request for user: {}", username);
+    public LeaveRequestResponseDto createLeaveRequest(String userIdentifier, CreateLeaveRequestDto dto) {
+        log.info("Creating leave request for user: {}", userIdentifier);
 
-        User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found: " + username));
+        User user = resolveUser(userIdentifier);
 
-        validateLeaveRequestDates(dto.getStartDate(), dto.getEndDate(), dto.getNumberOfDays());
+        int requestedWorkingDays = validateLeaveRequestDates(dto.getStartDate(), dto.getEndDate());
         validateNoOverlappingLeave(user, dto.getStartDate(), dto.getEndDate());
-        validateAnnualLeaveCreationRules(user, dto);
-        leaveBalanceService.reserveForRequest(user, dto.getLeaveType(), dto.getStartDate(), dto.getNumberOfDays());
+        validateAnnualLeaveCreationRules(user, dto, requestedWorkingDays);
+        leaveBalanceService.reserveForRequest(user, dto.getLeaveType(), dto.getStartDate(), requestedWorkingDays);
 
         LeaveRequest leaveRequest = new LeaveRequest();
         leaveRequest.setUser(user);
         leaveRequest.setLeaveType(dto.getLeaveType());
         leaveRequest.setStartDate(dto.getStartDate());
         leaveRequest.setEndDate(dto.getEndDate());
-        leaveRequest.setNumberOfDays(dto.getNumberOfDays());
+        leaveRequest.setNumberOfDays(requestedWorkingDays);
         leaveRequest.setReason(dto.getReason());
         leaveRequest.setRequestDate(LocalDateTime.now());
 
@@ -123,7 +126,7 @@ public class EmployeeLeaveService {
                 user.getKeycloakId(),
                 saved.getReason()
         );
-        log.info("Leave request created with ID: {} for user: {}", saved.getId(), username);
+        log.info("Leave request created with ID: {} for user: {}", saved.getId(), user.getUsername());
 
         // Notify requester (EMPLOYEE or TEAM_LEADER) that the request was submitted.
         try {
@@ -147,14 +150,22 @@ public class EmployeeLeaveService {
     /**
      * Get all leave requests for an employee
      */
-    public Page<LeaveRequestResponseDto> getMyLeaveRequests(String username, Pageable pageable) {
-        log.info("Fetching leave requests for user: {}", username);
+    public Page<LeaveRequestResponseDto> getMyLeaveRequests(String userIdentifier, Pageable pageable) {
+        log.info("Fetching leave requests for user: {}", userIdentifier);
 
-        User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found: " + username));
+        User user = resolveUser(userIdentifier);
 
         return leaveRequestRepository.findByUser(user, pageable)
                 .map(this::mapToResponseDto);
+    }
+
+    private User resolveUser(String identifier) {
+        if (identifier == null || identifier.isBlank()) {
+            throw new ResourceNotFoundException("User not found");
+        }
+        return userRepository.findByKeycloakId(identifier)
+                .or(() -> userRepository.findByUsername(identifier))
+                .orElseThrow(() -> new ResourceNotFoundException("User not found: " + identifier));
     }
 
     @CacheEvict(value = "calendarLeaves", allEntries = true)
@@ -171,7 +182,7 @@ public class EmployeeLeaveService {
         }
         String fromStage = computeApprovalStage(leave);
         if (!isEmployeeCancellationAllowed(fromStage)) {
-            throw new BadRequestException("Only leave requests pending Team Leader or HR review can be canceled by the employee.");
+            throw new BadRequestException("Only leave requests still pending Team Leader review can be canceled by the employee.");
         }
         LocalDateTime now = LocalDateTime.now();
         leaveBalanceService.releaseReserved(leave);
@@ -303,7 +314,8 @@ public class EmployeeLeaveService {
         }
 
         leave.setTeamLeaderDecision(approve ? ApprovalDecision.APPROVED : ApprovalDecision.REJECTED);
-        leave.setUpdatedAt(LocalDateTime.now());
+        LocalDateTime decisionAt = LocalDateTime.now();
+        leave.setUpdatedAt(decisionAt);
 
         if (!approve) {
             if (decisionReason == null || decisionReason.isBlank()) {
@@ -311,6 +323,7 @@ public class EmployeeLeaveService {
             }
             leave.setDecisionReason(decisionReason.trim());
             leave.setRejectedBy(leaderKeycloakId);
+            leave.setRejectedAt(decisionAt);
             leave.setStatus(LeaveStatus.REJECTED);
             leaveBalanceService.releaseReserved(leave);
             historyService.record(
@@ -403,7 +416,8 @@ public class EmployeeLeaveService {
         }
 
         leave.setHrDecision(approve ? ApprovalDecision.APPROVED : ApprovalDecision.REJECTED);
-        leave.setUpdatedAt(LocalDateTime.now());
+        LocalDateTime decisionAt = LocalDateTime.now();
+        leave.setUpdatedAt(decisionAt);
 
         if (!approve) {
             if (decisionReason == null || decisionReason.isBlank()) {
@@ -411,6 +425,7 @@ public class EmployeeLeaveService {
             }
             leave.setDecisionReason(decisionReason.trim());
             leave.setRejectedBy(hrKeycloakId);
+            leave.setRejectedAt(decisionAt);
             leave.setStatus(LeaveStatus.REJECTED);
             leaveBalanceService.releaseReserved(leave);
             historyService.record(
@@ -450,7 +465,7 @@ public class EmployeeLeaveService {
      * Get all leave requests — HR overview.
      */
     public Page<LeaveRequestResponseDto> getAllLeaveRequests(Pageable pageable) {
-        return leaveRequestRepository.findAll(pageable)
+        return leaveRequestRepository.findAllForHrOverview(pageable)
                 .map(this::mapToResponseDto);
     }
 
@@ -466,6 +481,7 @@ public class EmployeeLeaveService {
             leaveBalanceService.consumeReserved(leave);
             leave.setStatus(LeaveStatus.APPROVED);
             leave.setApprovalDate(LocalDate.now());
+            leave.setApprovedAt(LocalDateTime.now());
             // Generate unique QR verification token on full approval
             if (leave.getVerificationToken() == null) {
                 leave.setVerificationToken(UUID.randomUUID().toString());
@@ -528,27 +544,22 @@ public class EmployeeLeaveService {
     /**
      * Validate leave request dates
      */
-    private void validateLeaveRequestDates(
-            java.time.LocalDate startDate,
-            java.time.LocalDate endDate,
-            Integer numberOfDays
-    ) {
+    private int validateLeaveRequestDates(LocalDate startDate, LocalDate endDate) {
         if (startDate.isAfter(endDate)) {
             throw new BadRequestException("Start date must be before or equal to end date");
         }
 
-        long daysBetween = ChronoUnit.DAYS.between(startDate, endDate) + 1;
-        if (daysBetween != numberOfDays) {
-            throw new BadRequestException(
-                    String.format("Number of days (%d) does not match date range (%d days)", numberOfDays, daysBetween)
-            );
+        int workingDays = workingDayService.countWorkingDays(startDate, endDate);
+        if (workingDays <= 0) {
+            throw new BadRequestException("Leave request must include at least one working day.");
         }
 
-        if (numberOfDays > MAX_LEAVE_DAYS_PER_REQUEST) {
+        if (workingDays > MAX_LEAVE_DAYS_PER_REQUEST) {
             throw new BadRequestException(
                     String.format("Leave request cannot exceed %d days", MAX_LEAVE_DAYS_PER_REQUEST)
             );
         }
+        return workingDays;
     }
 
     private void validateNoOverlappingLeave(User user, LocalDate startDate, LocalDate endDate) {
@@ -569,20 +580,19 @@ public class EmployeeLeaveService {
         ));
     }
 
-    private void validateAnnualLeaveCreationRules(User user, CreateLeaveRequestDto dto) {
+    private void validateAnnualLeaveCreationRules(User user, CreateLeaveRequestDto dto, int requestedWorkingDays) {
         if (dto.getLeaveType() != LeaveType.ANNUAL) return;
 
         if (dto.getStartDate().isAfter(LocalDate.now().plusMonths(6))) {
             throw new BadRequestException("Annual leave cannot be requested more than 6 months in advance.");
         }
 
-        int requestedDays = dto.getNumberOfDays() != null ? dto.getNumberOfDays() : 0;
-        int availableDays = leaveBalanceService.getAvailableDays(user, LeaveType.ANNUAL, dto.getStartDate());
-        if (requestedDays > availableDays) {
+        BigDecimal availableDays = leaveBalanceService.getAvailableDays(user, LeaveType.ANNUAL, dto.getStartDate());
+        if (BigDecimal.valueOf(requestedWorkingDays).compareTo(availableDays) > 0) {
             throw new BadRequestException(String.format(
-                    "Insufficient annual leave balance. Requested %d days, but only %d days are available.",
-                    requestedDays,
-                    availableDays
+                    "Insufficient annual leave balance. Requested %d working day(s), but only %s day(s) are available.",
+                    requestedWorkingDays,
+                    availableDays.stripTrailingZeros().toPlainString()
             ));
         }
     }
@@ -609,6 +619,7 @@ public class EmployeeLeaveService {
         dto.setStatus(leaveRequest.getStatus());
         dto.setApprovalStage(computeApprovalStage(leaveRequest));
         dto.setApprovalDate(leaveRequest.getApprovalDate());
+        dto.setApprovedAt(leaveRequest.getApprovedAt());
         dto.setCreatedAt(leaveRequest.getCreatedAt());
         // Scoring fields
         dto.setSystemScore(leaveRequest.getSystemScore());
@@ -616,6 +627,7 @@ public class EmployeeLeaveService {
         dto.setDecisionReason(leaveRequest.getDecisionReason());
         dto.setApprovedBy(leaveRequest.getApprovedBy());
         dto.setRejectedBy(leaveRequest.getRejectedBy());
+        dto.setRejectedAt(leaveRequest.getRejectedAt());
         dto.setCanceledBy(leaveRequest.getCanceledBy());
         dto.setCanceledAt(leaveRequest.getCanceledAt());
         return dto;
@@ -636,6 +648,6 @@ public class EmployeeLeaveService {
     }
 
     private boolean isEmployeeCancellationAllowed(String approvalStage) {
-        return "PENDING_TL".equals(approvalStage) || "PENDING_HR".equals(approvalStage);
+        return "PENDING_TL".equals(approvalStage);
     }
 }

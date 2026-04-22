@@ -46,8 +46,8 @@ public class EmployeeLeaveController {
             @Valid @RequestBody CreateLeaveRequestDto request,
             @AuthenticationPrincipal Jwt jwt
     ) {
-        String username = jwt.getClaimAsString("preferred_username");
-        LeaveRequestResponseDto leaveResponse = employeeLeaveService.createLeaveRequest(username, request);
+        String keycloakId = jwt.getSubject();
+        LeaveRequestResponseDto leaveResponse = employeeLeaveService.createLeaveRequest(keycloakId, request);
 
         Map<String, Object> response = new HashMap<>();
         response.put("success", true);
@@ -67,8 +67,8 @@ public class EmployeeLeaveController {
             @AuthenticationPrincipal Jwt jwt,
             @RequestParam(required = false) Integer year
     ) {
-        String username = jwt.getClaimAsString("preferred_username");
-        List<LeaveBalanceDto> balances = leaveBalanceService.getMyBalances(username, year);
+        String keycloakId = jwt.getSubject();
+        List<LeaveBalanceDto> balances = leaveBalanceService.getMyBalances(keycloakId, year);
 
         Map<String, Object> response = new HashMap<>();
         response.put("success", true);
@@ -90,9 +90,9 @@ public class EmployeeLeaveController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size
     ) {
-        String username = jwt.getClaimAsString("preferred_username");
+        String keycloakId = jwt.getSubject();
         Pageable pageable = PageRequest.of(page, size);
-        Page<LeaveRequestResponseDto> leaves = employeeLeaveService.getMyLeaveRequests(username, pageable);
+        Page<LeaveRequestResponseDto> leaves = employeeLeaveService.getMyLeaveRequests(keycloakId, pageable);
 
         Map<String, Object> response = new HashMap<>();
         response.put("success", true);
