@@ -18,6 +18,7 @@ public class UserRoleAssignedEvent implements Serializable {
     private String lastName;
     private String oldRole;
     private String newRole;
+    private boolean firstApproval;
     private String assignedBy;
     private LocalDateTime timestamp;
 
@@ -26,7 +27,7 @@ public class UserRoleAssignedEvent implements Serializable {
 
     public UserRoleAssignedEvent(Long userId, String username, String email,
                                   String firstName, String lastName,
-                                  String oldRole, String newRole,
+                                  String oldRole, String newRole, boolean firstApproval,
                                   String assignedBy, LocalDateTime timestamp) {
         this.userId = userId;
         this.username = username;
@@ -35,6 +36,7 @@ public class UserRoleAssignedEvent implements Serializable {
         this.lastName = lastName;
         this.oldRole = oldRole;
         this.newRole = newRole;
+        this.firstApproval = firstApproval;
         this.assignedBy = assignedBy;
         this.timestamp = timestamp;
     }
@@ -96,6 +98,14 @@ public class UserRoleAssignedEvent implements Serializable {
         this.newRole = newRole;
     }
 
+    public boolean isFirstApproval() {
+        return firstApproval;
+    }
+
+    public void setFirstApproval(boolean firstApproval) {
+        this.firstApproval = firstApproval;
+    }
+
     public String getAssignedBy() {
         return assignedBy;
     }
@@ -122,6 +132,7 @@ public class UserRoleAssignedEvent implements Serializable {
                 ", lastName='" + lastName + '\'' +
                 ", oldRole='" + oldRole + '\'' +
                 ", newRole='" + newRole + '\'' +
+                ", firstApproval=" + firstApproval +
                 ", assignedBy='" + assignedBy + '\'' +
                 ", timestamp=" + timestamp +
                 '}';

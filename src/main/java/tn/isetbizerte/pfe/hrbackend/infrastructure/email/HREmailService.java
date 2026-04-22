@@ -42,6 +42,12 @@ public class HREmailService {
     @Value("${spring.mail.username:noreply@arabsoft-hrms.com}")
     private String fromEmail;
 
+    @Value("${app.mail.from-name:ArabSoft Human Resources}")
+    private String fromDisplayName;
+
+    @Value("${app.mail.reply-to:}")
+    private String replyToEmail;
+
     @Value("${app.frontend.url:http://localhost:5173}")
     private String frontendUrl;
 
@@ -55,12 +61,28 @@ public class HREmailService {
 
     @Async
     public void sendRoleAssigned(String email, String firstName, String lastName,
-                                  String username, String newRole) {
-        String name    = firstName + " " + lastName;
+                                  String username, String oldRole, String newRole,
+                                  String assignedBy, boolean firstApproval) {
+        String name = firstName + " " + lastName;
         String roleLabel = formatRole(newRole);
+
+        if (firstApproval) {
+            send(email,
+                "Welcome to the team – Your ArabSoft access is active",
+                buildRoleAssignedBody(name, roleLabel));
+            return;
+        }
+
+        if ("EMPLOYEE".equals(oldRole) && "TEAM_LEADER".equals(newRole)) {
+            send(email,
+                "Role Update – You are now a Team Leader",
+                buildPromotionRoleAssignedBody(name, roleLabel, assignedBy));
+            return;
+        }
+
         send(email,
-            "Welcome to the team – Your ArabSoft access is active",
-            buildRoleAssignedBody(name, roleLabel));
+            "Role Update – Your ArabSoft access has been updated",
+            buildRoleUpdatedBody(name, formatRole(oldRole), roleLabel, assignedBy));
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -256,7 +278,10 @@ public class HREmailService {
             log.info("Sending email via JavaMailSender: recipientEmail={} subject={}", to, subject);
             MimeMessage msg = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(msg, true, "UTF-8");
-            helper.setFrom(fromEmail, COMPANY + " HRMS");
+            helper.setFrom(fromEmail, fromDisplayName);
+            if (replyToEmail != null && !replyToEmail.isBlank()) {
+                helper.setReplyTo(replyToEmail);
+            }
             helper.setTo(to);
             helper.setSubject(subject);
             helper.setText(html, true);
@@ -309,6 +334,76 @@ public class HREmailService {
             </p>
             """.formatted(name, roleLine,
                 actionButton("Log in to ArabSoft", frontendUrl + "/login", "#16A34A")));
+    }
+
+    private String buildPromotionRoleAssignedBody(String name, String role, String assignedBy) {
+        String assignedByLine = assignedBy != null && !assignedBy.isBlank()
+                ? "This update was recorded by <strong>" + assignedBy + "</strong>."
+                : "This update has been recorded in the HR platform.";
+
+        return wrap("Role Update", "Your responsibilities and access have been updated", """
+            <p style="font-size:15px;color:#374151;line-height:1.8;">
+                Dear <strong>%s</strong>,
+            </p>
+            <p style="font-size:15px;color:#374151;line-height:1.8;">
+                We are pleased to confirm that your role in <strong>ArabSoft</strong>
+                has been updated to <strong>%s</strong>.
+            </p>
+            <p style="font-size:15px;color:#374151;line-height:1.8;">
+                Your platform access will now reflect the responsibilities and work
+                areas associated with this role.
+            </p>
+            <p style="font-size:15px;color:#374151;line-height:1.8;">
+                %s
+            </p>
+            %s
+            <p style="font-size:14px;color:#64748B;line-height:1.7;text-align:center;margin-top:24px;">
+                If you need clarification about this change, please contact the Human Resources Department.
+            </p>
+            """.formatted(
+                name,
+                role,
+                assignedByLine,
+                actionButton("Open ArabSoft", frontendUrl + "/login", "#2563EB")
+            ));
+    }
+
+    private String buildRoleUpdatedBody(String name, String oldRole, String newRole, String assignedBy) {
+        String previousRoleLine = oldRole != null && !oldRole.isBlank() && !"NONE".equalsIgnoreCase(oldRole)
+                ? "Your previous system role was <strong>" + oldRole + "</strong>."
+                : "This change replaces your previous pending access state.";
+        String assignedByLine = assignedBy != null && !assignedBy.isBlank()
+                ? "The update was recorded by <strong>" + assignedBy + "</strong>."
+                : "The update has been recorded in the HR platform.";
+
+        return wrap("Role Update", "Your ArabSoft role has changed", """
+            <p style="font-size:15px;color:#374151;line-height:1.8;">
+                Dear <strong>%s</strong>,
+            </p>
+            <p style="font-size:15px;color:#374151;line-height:1.8;">
+                Your system role in <strong>ArabSoft</strong> has been updated to
+                <strong>%s</strong>.
+            </p>
+            <p style="font-size:15px;color:#374151;line-height:1.8;">
+                %s
+            </p>
+            <p style="font-size:15px;color:#374151;line-height:1.8;">
+                %s
+            </p>
+            <p style="font-size:15px;color:#374151;line-height:1.8;">
+                Your available areas and actions in the HR platform will follow this updated role.
+            </p>
+            %s
+            <p style="font-size:14px;color:#64748B;line-height:1.7;text-align:center;margin-top:24px;">
+                If you have any questions about the change, please contact the Human Resources Department.
+            </p>
+            """.formatted(
+                name,
+                newRole,
+                previousRoleLine,
+                assignedByLine,
+                actionButton("Open ArabSoft", frontendUrl + "/login", "#2563EB")
+            ));
     }
 
     private String buildLeaveApprovedBody(String name, String leaveType,
@@ -664,7 +759,7 @@ public class HREmailService {
                       <td style="padding-left:16px;vertical-align:middle;">
                         <p style="margin:0;font-size:11px;color:#64748B;
                                    text-transform:uppercase;letter-spacing:0.1em;">
-                          ArabSoft Human Resources Management System
+                          %s
                         </p>
                       </td>
                     </tr>
@@ -687,10 +782,10 @@ public class HREmailService {
                   <td style="background:#F8FAFC;border-top:1px solid #E2E8F0;
                              padding:24px 40px;">
                     <p style="margin:0;font-size:13px;font-weight:700;color:#0F172A;">
-                      Human Resources Department · ArabSoft
+                      %s
                     </p>
                     <p style="margin:4px 0 0;font-size:12px;color:#64748B;">
-                      ArabSoft Human Resources Management System
+                      %s
                     </p>
                     <p style="margin:12px 0 0;font-size:11px;color:#94A3B8;">
                       This is an automated message generated by ArabSoft HRMS.
@@ -704,7 +799,7 @@ public class HREmailService {
             </table>
             </body>
             </html>
-            """.formatted(logoTag, title, subtitle, content);
+            """.formatted(logoTag, SYSTEM_NAME, title, subtitle, content, fromDisplayName, SYSTEM_NAME);
     }
 
     /** Renders a grid of key-value info pairs */

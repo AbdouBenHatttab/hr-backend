@@ -199,6 +199,10 @@ public class HRService {
         User user = userService.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + userId));
 
+        if (assignedBy != null && user.getUsername() != null && user.getUsername().equalsIgnoreCase(assignedBy)) {
+            throw new BadRequestException("You cannot change your own role.");
+        }
+
         TypeRole oldRole = user.getRole();
 
         // Validate Keycloak ID exists
@@ -275,6 +279,7 @@ public class HRService {
                     person.getLastName(),
                     oldRole != null ? oldRole.name() : "NONE",
                     newRole.name(),
+                    oldRole == TypeRole.NEW_USER && newRole != TypeRole.NEW_USER,
                     assignedBy,
                     LocalDateTime.now()
             );

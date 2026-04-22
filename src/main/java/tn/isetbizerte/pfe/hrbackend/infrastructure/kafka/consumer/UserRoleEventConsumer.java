@@ -51,7 +51,8 @@ public class UserRoleEventConsumer {
             // Use new professional email service
             hrEmailService.sendRoleAssigned(
                     event.getEmail(), event.getFirstName(), event.getLastName(),
-                    event.getUsername(), event.getNewRole());
+                    event.getUsername(), event.getOldRole(), event.getNewRole(),
+                    event.getAssignedBy(), event.isFirstApproval());
 
             logger.info("📧 Email notification triggered for user: {} with new role: {}",
                     event.getUsername(), event.getNewRole());
