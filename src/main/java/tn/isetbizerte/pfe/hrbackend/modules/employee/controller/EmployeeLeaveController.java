@@ -58,6 +58,27 @@ public class EmployeeLeaveController {
     }
 
     /**
+     * Employee updates their own leave request while it is still pending Team Leader review.
+     * PUT /api/employee/leave/{leaveId}
+     */
+    @PreAuthorize("hasAnyRole('EMPLOYEE', 'TEAM_LEADER')")
+    @PutMapping("/{leaveId}")
+    public ResponseEntity<Map<String, Object>> updateMyLeaveRequest(
+            @PathVariable Long leaveId,
+            @Valid @RequestBody CreateLeaveRequestDto request,
+            @AuthenticationPrincipal Jwt jwt
+    ) {
+        LeaveRequestResponseDto leaveResponse = employeeLeaveService.updateMyLeaveRequest(leaveId, jwt.getSubject(), request);
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("success", true);
+        response.put("message", "Leave request updated successfully");
+        response.put("data", leaveResponse);
+
+        return ResponseEntity.ok(response);
+    }
+
+    /**
      * Get current user's yearly leave balances.
      * GET /api/employee/leave/balances?year=2026
      */
