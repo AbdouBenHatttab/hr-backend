@@ -8,6 +8,7 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 import tn.isetbizerte.pfe.hrbackend.modules.task.dto.CreateProjectRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.task.dto.CreateTaskRequest;
+import tn.isetbizerte.pfe.hrbackend.modules.task.dto.TaskAssignmentPreviewRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.task.dto.UpdateTaskStatusRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.task.service.TaskService;
 
@@ -74,6 +75,19 @@ public class TaskController {
         res.put("success", true);
         res.put("message", "Task created");
         res.put("data", taskService.createTask(jwt.getSubject(), projectId, req));
+        return ResponseEntity.ok(res);
+    }
+
+    /** POST /api/leader/projects/{projectId}/tasks/preview — validate task assignment candidates */
+    @PreAuthorize("hasRole('TEAM_LEADER')")
+    @PostMapping("/api/leader/projects/{projectId}/tasks/preview")
+    public ResponseEntity<Map<String, Object>> previewTaskAssignment(
+            @PathVariable Long projectId,
+            @Valid @RequestBody TaskAssignmentPreviewRequest req,
+            @AuthenticationPrincipal Jwt jwt) {
+        Map<String, Object> res = new HashMap<>();
+        res.put("success", true);
+        res.put("data", taskService.previewTaskAssignment(jwt.getSubject(), projectId, req.getTask()));
         return ResponseEntity.ok(res);
     }
 

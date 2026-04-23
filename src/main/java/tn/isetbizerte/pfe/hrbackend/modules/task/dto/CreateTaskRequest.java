@@ -1,10 +1,12 @@
 package tn.isetbizerte.pfe.hrbackend.modules.task.dto;
 
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
+import tn.isetbizerte.pfe.hrbackend.common.enums.TaskAssignmentMode;
 import tn.isetbizerte.pfe.hrbackend.common.enums.TaskPriority;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
 
 public class CreateTaskRequest {
 
@@ -18,8 +20,9 @@ public class CreateTaskRequest {
     private LocalDate startDate;
     private LocalDate dueDate;
 
-    @NotNull(message = "Assignee is required")
     private Long assigneeId;
+    private List<Long> assigneeIds = new ArrayList<>();
+    private TaskAssignmentMode assignmentMode = TaskAssignmentMode.ONE;
 
     public String getTitle() { return title; }
     public void setTitle(String title) { this.title = title; }
@@ -38,4 +41,14 @@ public class CreateTaskRequest {
 
     public Long getAssigneeId() { return assigneeId; }
     public void setAssigneeId(Long assigneeId) { this.assigneeId = assigneeId; }
+
+    public List<Long> getAssigneeIds() { return assigneeIds; }
+    public void setAssigneeIds(List<Long> assigneeIds) {
+        this.assigneeIds = assigneeIds != null ? assigneeIds : new ArrayList<>();
+    }
+
+    public TaskAssignmentMode getAssignmentMode() { return assignmentMode; }
+    public void setAssignmentMode(TaskAssignmentMode assignmentMode) {
+        this.assignmentMode = assignmentMode != null ? assignmentMode : TaskAssignmentMode.ONE;
+    }
 }

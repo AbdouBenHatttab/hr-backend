@@ -11,8 +11,10 @@ import tn.isetbizerte.pfe.hrbackend.infrastructure.inbox.ProcessedEventService;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.kafka.producer.NotificationEventProducer;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.entity.AuthorizationRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.entity.LoanRequest;
+import tn.isetbizerte.pfe.hrbackend.modules.requests.entity.StoredEmployeeDocument;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.repository.AuthorizationRequestRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.repository.LoanRequestRepository;
+import tn.isetbizerte.pfe.hrbackend.modules.requests.repository.StoredEmployeeDocumentRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
 import tn.isetbizerte.pfe.hrbackend.modules.user.repository.UserRepository;
 
@@ -30,6 +32,7 @@ public class RequestEventConsumer {
     private final HREmailService emailService;
     private final AuthorizationRequestRepository authorizationRequestRepository;
     private final LoanRequestRepository loanRequestRepository;
+    private final StoredEmployeeDocumentRepository storedEmployeeDocumentRepository;
 
     public RequestEventConsumer(ObjectMapper objectMapper,
                                 NotificationEventProducer notificationEventProducer,
@@ -37,7 +40,8 @@ public class RequestEventConsumer {
                                 UserRepository userRepository,
                                 HREmailService emailService,
                                 AuthorizationRequestRepository authorizationRequestRepository,
-                                LoanRequestRepository loanRequestRepository) {
+                                LoanRequestRepository loanRequestRepository,
+                                StoredEmployeeDocumentRepository storedEmployeeDocumentRepository) {
         this.objectMapper = objectMapper;
         this.notificationEventProducer = notificationEventProducer;
         this.processedEventService = processedEventService;
@@ -45,6 +49,7 @@ public class RequestEventConsumer {
         this.emailService = emailService;
         this.authorizationRequestRepository = authorizationRequestRepository;
         this.loanRequestRepository = loanRequestRepository;
+        this.storedEmployeeDocumentRepository = storedEmployeeDocumentRepository;
     }
 
     @KafkaListener(topics = "${app.kafka.topic.request-events}")
@@ -79,6 +84,12 @@ public class RequestEventConsumer {
             log.info("Checking non-leave document email branch: requestId={} eventType={}",
                     event.getRequestId(), event.getType());
             maybeSendDocumentReadyEmail(event);
+
+            log.info("Checking required document email branch: requestId={} eventType={}",
+                    event.getRequestId(), event.getType());
+            if (!maybeSendRequiredDocumentEmail(event)) {
+                throw new IllegalStateException("Required document email was not sent for storedDocumentId=" + event.getRequestId());
+            }
 
             log.info("Checking non-leave loan email branch: requestId={} eventType={}",
                     event.getRequestId(), event.getType());
@@ -201,6 +212,8 @@ public class RequestEventConsumer {
             case "DOCUMENT_APPROVED" -> "Your document request was approved. HR will upload the final file when it is ready.";
             case "DOCUMENT_READY", "DOCUMENT_FINAL_FILE_READY" -> "Your document is ready for download.";
             case "DOCUMENT_REJECTED" -> "Your document request was rejected.";
+            case "REQUIRED_DOCUMENT_UPLOADED" -> "Your contract copy has been added to your required HR documents.";
+            case "REQUIRED_DOCUMENT_REPLACED" -> "Your contract copy has been updated in your required HR documents.";
             case "AUTH_SUBMITTED" -> "Your authorization request was submitted.";
             case "AUTH_APPROVED" -> "Your authorization request was approved.";
             case "AUTH_REJECTED" -> "Your authorization request was rejected.";
@@ -214,10 +227,55 @@ public class RequestEventConsumer {
         return switch (requestType.toUpperCase()) {
             case "LEAVE" -> "/employee/leave";
             case "LOAN" -> "/employee/loans";
-            case "DOCUMENT" -> "/employee/documents";
+            case "DOCUMENT", "REQUIRED_DOCUMENT" -> "/employee/documents";
             case "AUTH" -> "/employee/authorizations";
             default -> null;
         };
+    }
+
+    private boolean maybeSendRequiredDocumentEmail(RequestEvent event) {
+        if (!"REQUIRED_DOCUMENT_UPLOADED".equals(event.getType())
+                && !"REQUIRED_DOCUMENT_REPLACED".equals(event.getType())) {
+            return true;
+        }
+        log.info("Entering required document email branch: eventType={} storedDocumentId={} employeeId={}",
+                event.getType(), event.getRequestId(), event.getEmployeeId());
+        requireEmployeeIdForEmail(event, "required document");
+        requireRequestIdForEmail(event, "required document");
+
+        String emailDedupKey = "email:" + event.getType() + ":" + event.getRequestId();
+        if (processedEventService.isProcessed(emailDedupKey)) {
+            log.warn("Dedupe skipped required document email: dedupKey={} storedDocumentId={} eventType={}",
+                    emailDedupKey, event.getRequestId(), event.getType());
+            return true;
+        }
+
+        StoredEmployeeDocument document = storedEmployeeDocumentRepository.findById(event.getRequestId())
+                .orElseThrow(() -> emailFailure(event, "required document", "StoredEmployeeDocument not found"));
+        User employee = resolveEmployeeForEmail(event, "required document");
+        var person = employee.getPerson();
+        boolean replaced = "REQUIRED_DOCUMENT_REPLACED".equals(event.getType());
+        String referenceId = "REQ-DOC-" + String.format("%06d", event.getRequestId());
+
+        log.info("Calling HREmailService method for required document email: method=sendRequiredDocumentUploaded storedDocumentId={} recipientEmail={} replaced={} eventType={}",
+                event.getRequestId(), person.getEmail(), replaced, event.getType());
+        boolean sent = emailService.sendRequiredDocumentUploaded(
+                person.getEmail(),
+                person.getFirstName(),
+                person.getLastName(),
+                document.getDocumentType() != null ? formatLabel(document.getDocumentType().name()) : "Contract Copy",
+                document.getFileName(),
+                replaced,
+                referenceId
+        );
+        log.info("Email send result for required document email: storedDocumentId={} eventType={} recipientEmail={} result={}",
+                event.getRequestId(), event.getType(), person.getEmail(), sent);
+        if (sent) {
+            processedEventService.tryMarkProcessed(emailDedupKey, "required-document-email");
+        } else {
+            throw emailFailure(event, "required document", "HREmailService.sendRequiredDocumentUploaded returned false");
+        }
+        return true;
     }
 
     private void maybeSendDocumentReadyEmail(RequestEvent event) {
@@ -283,6 +341,9 @@ public class RequestEventConsumer {
                 request.getAuthorizationType() != null ? request.getAuthorizationType().name() : null,
                 request.getStartDate(),
                 request.getEndDate(),
+                request.getAbsenceDate(),
+                request.getFromTime(),
+                request.getToTime(),
                 request.getProcessedAt(),
                 approved,
                 request.getHrNote(),
@@ -436,5 +497,17 @@ public class RequestEventConsumer {
             if (value != null && !value.isBlank()) return value;
         }
         return null;
+    }
+
+    private String formatLabel(String enumValue) {
+        if (enumValue == null || enumValue.isBlank()) return "";
+        String[] parts = enumValue.toLowerCase().split("_");
+        StringBuilder sb = new StringBuilder();
+        for (String part : parts) {
+            if (part.isBlank()) continue;
+            if (sb.length() > 0) sb.append(' ');
+            sb.append(Character.toUpperCase(part.charAt(0))).append(part.substring(1));
+        }
+        return sb.toString();
     }
 }

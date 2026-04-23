@@ -7,9 +7,11 @@ import tn.isetbizerte.pfe.hrbackend.modules.requests.entity.StoredEmployeeDocume
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
 
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface StoredEmployeeDocumentRepository extends JpaRepository<StoredEmployeeDocument, Long> {
     List<StoredEmployeeDocument> findByEmployeeAndActiveTrueOrderByUploadedAtDesc(User employee);
     List<StoredEmployeeDocument> findByEmployeeAndDocumentTypeAndActiveTrueOrderByUploadedAtDesc(User employee, DocumentType documentType);
+    Optional<StoredEmployeeDocument> findFirstByEmployeeAndDocumentTypeAndActiveTrueOrderByUploadedAtDesc(User employee, DocumentType documentType);
 }

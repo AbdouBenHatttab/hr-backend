@@ -22,6 +22,7 @@ import tn.isetbizerte.pfe.hrbackend.modules.calendar.service.WorkingDayService;
 import tn.isetbizerte.pfe.hrbackend.modules.history.service.RequestHistoryService;
 import tn.isetbizerte.pfe.hrbackend.modules.team.entity.Team;
 import tn.isetbizerte.pfe.hrbackend.modules.team.repository.TeamRepository;
+import tn.isetbizerte.pfe.hrbackend.modules.user.entity.Person;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
 import tn.isetbizerte.pfe.hrbackend.modules.user.repository.UserRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.user.repository.PersonRepository;
@@ -248,10 +249,14 @@ public class EmployeeLeaveService {
                 fromStage,
                 computeApprovalStage(leave)
         );
-        requestEventProducer.publish(
-                new RequestEvent("LEAVE_CANCELLED_BY_EMPLOYEE", "LEAVE", leave.getId(),
-                        leave.getUser().getKeycloakId(), requesterKeycloakId, null)
-        );
+        try {
+            requestEventProducer.publish(
+                    new RequestEvent("LEAVE_CANCELLED_BY_EMPLOYEE", "LEAVE", leave.getId(),
+                            leave.getUser().getKeycloakId(), requesterKeycloakId, null)
+            );
+        } catch (Exception e) {
+            log.warn("Failed to enqueue LEAVE_CANCELLED_BY_EMPLOYEE request event for leaveId={}", leave.getId(), e);
+        }
         return mapToResponseDto(leaveRequestRepository.save(leave));
     }
 
@@ -336,6 +341,8 @@ public class EmployeeLeaveService {
                 throw new AccessDeniedException("Team Leader leave requests bypass team approval and go directly to HR.");
             }
         }
+
+        normalizeWorkflowState(leave);
 
         // Idempotency: if already processed, return current state
         if (leave.getStatus() != LeaveStatus.PENDING || leave.getTeamLeaderDecision() != ApprovalDecision.PENDING) {
@@ -437,6 +444,8 @@ public class EmployeeLeaveService {
                 && hrKeycloakId.equals(leave.getUser().getKeycloakId())) {
             throw new AccessDeniedException("You cannot approve or reject your own leave request.");
         }
+
+        normalizeWorkflowState(leave);
 
         // Idempotency: if already processed, return current state
         if (leave.getStatus() != LeaveStatus.PENDING || leave.getHrDecision() != ApprovalDecision.PENDING) {
@@ -678,6 +687,8 @@ public class EmployeeLeaveService {
      * Convert entity to response DTO
      */
     private LeaveRequestResponseDto mapToResponseDto(LeaveRequest leaveRequest) {
+        normalizeWorkflowState(leaveRequest);
+
         LeaveRequestResponseDto dto = new LeaveRequestResponseDto();
         dto.setId(leaveRequest.getId());
         dto.setEmployeeFullName(leaveRequest.getEmployeeFullName());
@@ -704,6 +715,9 @@ public class EmployeeLeaveService {
         dto.setDecisionReason(leaveRequest.getDecisionReason());
         dto.setApprovedBy(leaveRequest.getApprovedBy());
         dto.setRejectedBy(leaveRequest.getRejectedBy());
+        ActorDisplay rejectedBy = resolveActorDisplay(leaveRequest.getRejectedBy());
+        dto.setRejectedByName(rejectedBy.name());
+        dto.setRejectedByRole(rejectedBy.role());
         dto.setRejectedAt(leaveRequest.getRejectedAt());
         dto.setCanceledBy(leaveRequest.getCanceledBy());
         dto.setCanceledAt(leaveRequest.getCanceledAt());
@@ -711,6 +725,7 @@ public class EmployeeLeaveService {
     }
 
     private String computeApprovalStage(LeaveRequest leave) {
+        normalizeWorkflowState(leave);
         if (leave.getStatus() == LeaveStatus.CANCELLED_BY_EMPLOYEE) return "CANCELLED_BY_EMPLOYEE";
         if (leave.getStatus() == LeaveStatus.REJECTED) return "REJECTED";
         if (leave.getStatus() == LeaveStatus.APPROVED) return "APPROVED";
@@ -725,6 +740,71 @@ public class EmployeeLeaveService {
     }
 
     private boolean isEmployeeCancellationAllowed(String approvalStage) {
-        return "PENDING_TL".equals(approvalStage) || "PENDING_HR".equals(approvalStage);
+        return "PENDING_TL".equals(approvalStage);
     }
+
+    private ActorDisplay resolveActorDisplay(String actorId) {
+        if (actorId == null || actorId.isBlank()) {
+            return new ActorDisplay(null, null);
+        }
+
+        var actor = userRepository.findByKeycloakId(actorId);
+        if (actor == null || actor.isEmpty()) {
+            return new ActorDisplay(null, resolveRoleValue(actorId));
+        }
+
+        User user = actor.get();
+        return new ActorDisplay(resolveFullName(user), resolveRoleValue(user.getRole()));
+    }
+
+    private String resolveFullName(User user) {
+        if (user == null) return null;
+        Person person = user.getPerson();
+        if (person != null) {
+            String fullName = String.join(" ",
+                    nullToBlank(person.getFirstName()),
+                    nullToBlank(person.getLastName())
+            ).trim();
+            if (!fullName.isBlank()) return fullName;
+        }
+        return user.getUsername();
+    }
+
+    private String resolveRoleValue(TypeRole role) {
+        return role != null ? role.name() : null;
+    }
+
+    private String resolveRoleValue(String value) {
+        if (value == null) return null;
+        try {
+            return TypeRole.valueOf(value).name();
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
+    }
+
+    private String nullToBlank(String value) {
+        return value == null ? "" : value;
+    }
+
+    private void normalizeWorkflowState(LeaveRequest leave) {
+        if (leave == null) return;
+        if (leave.getStatus() == LeaveStatus.CANCELLED_BY_EMPLOYEE) return;
+
+        if (leave.getTeamLeaderDecision() == ApprovalDecision.REJECTED
+                || leave.getHrDecision() == ApprovalDecision.REJECTED) {
+            leave.setStatus(LeaveStatus.REJECTED);
+            return;
+        }
+
+        if (leave.getTeamLeaderDecision() == ApprovalDecision.APPROVED
+                && leave.getHrDecision() == ApprovalDecision.APPROVED) {
+            leave.setStatus(LeaveStatus.APPROVED);
+            return;
+        }
+
+        leave.setStatus(LeaveStatus.PENDING);
+    }
+
+    private record ActorDisplay(String name, String role) {}
 }

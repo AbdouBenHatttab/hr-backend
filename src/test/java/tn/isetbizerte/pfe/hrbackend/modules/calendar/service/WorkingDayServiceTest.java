@@ -40,4 +40,21 @@ class WorkingDayServiceTest {
 
         assertThat(service.countWorkingDays(start, end)).isEqualTo(2);
     }
+
+    @Test
+    void estimate_returnsDeductedDaysAndExcludedHolidayDates() {
+        LocalDate start = LocalDate.of(2026, 3, 19);
+        LocalDate holiday = LocalDate.of(2026, 3, 20);
+        LocalDate saturday = LocalDate.of(2026, 3, 21);
+        LocalDate sunday = LocalDate.of(2026, 3, 22);
+        LocalDate end = LocalDate.of(2026, 3, 23);
+        when(holidayRepository.existsByCountryCodeAndHolidayDateAndActiveTrue("TN", holiday))
+                .thenReturn(true);
+
+        var estimate = service.estimate(start, end);
+
+        assertThat(estimate.getDeductedDays()).isEqualTo(2);
+        assertThat(estimate.getExcludedHolidayDates()).containsExactly(holiday);
+        assertThat(estimate.getExcludedWeekendDates()).containsExactly(saturday, sunday);
+    }
 }

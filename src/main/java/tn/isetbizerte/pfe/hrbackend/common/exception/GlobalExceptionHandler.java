@@ -52,7 +52,10 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<Map<String, Object>> handleAccessDeniedException(AccessDeniedException ex) {
-        return buildErrorResponse(HttpStatus.FORBIDDEN, "Access denied");
+        String message = ex.getMessage() == null || ex.getMessage().isBlank()
+                ? "Access denied"
+                : ex.getMessage();
+        return buildErrorResponse(HttpStatus.FORBIDDEN, message);
     }
 
     @ExceptionHandler(ObjectOptimisticLockingFailureException.class)

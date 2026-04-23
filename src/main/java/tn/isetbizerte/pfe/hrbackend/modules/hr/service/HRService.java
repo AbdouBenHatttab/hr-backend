@@ -2,6 +2,7 @@ package tn.isetbizerte.pfe.hrbackend.modules.hr.service;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import tn.isetbizerte.pfe.hrbackend.common.enums.DocumentType;
 import org.springframework.stereotype.Service;
 import tn.isetbizerte.pfe.hrbackend.common.enums.TypeRole;
 import tn.isetbizerte.pfe.hrbackend.common.event.UserRoleAssignedEvent;
@@ -9,6 +10,8 @@ import tn.isetbizerte.pfe.hrbackend.common.exception.BadRequestException;
 import tn.isetbizerte.pfe.hrbackend.common.exception.ResourceNotFoundException;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.kafka.producer.KafkaEventProducer;
 import tn.isetbizerte.pfe.hrbackend.modules.hr.dto.AssignRoleResponse;
+import tn.isetbizerte.pfe.hrbackend.modules.requests.entity.StoredEmployeeDocument;
+import tn.isetbizerte.pfe.hrbackend.modules.requests.repository.StoredEmployeeDocumentRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.Person;
 import tn.isetbizerte.pfe.hrbackend.modules.user.service.UserService;
@@ -29,12 +32,15 @@ public class HRService {
     private final UserService userService;
     private final KeycloakAdminService keycloakAdminService;
     private final KafkaEventProducer kafkaEventProducer;
+    private final StoredEmployeeDocumentRepository storedDocumentRepository;
     public HRService(UserService userService,
                      KeycloakAdminService keycloakAdminService,
-                     KafkaEventProducer kafkaEventProducer) {
+                     KafkaEventProducer kafkaEventProducer,
+                     StoredEmployeeDocumentRepository storedDocumentRepository) {
         this.userService = userService;
         this.keycloakAdminService = keycloakAdminService;
         this.kafkaEventProducer = kafkaEventProducer;
+        this.storedDocumentRepository = storedDocumentRepository;
     }
 
     /**
@@ -410,6 +416,31 @@ public class HRService {
             userInfo.put("personalInfo", personalInfo);
         }
 
+        userInfo.put("requiredDocuments", buildRequiredDocuments(user));
+
         return userInfo;
+    }
+
+    private Map<String, Object> buildRequiredDocuments(User user) {
+        Map<String, Object> required = new HashMap<>();
+        boolean applies = user.getRole() == TypeRole.EMPLOYEE || user.getRole() == TypeRole.TEAM_LEADER;
+        Map<String, Object> contractCopy = new HashMap<>();
+        contractCopy.put("required", applies);
+        contractCopy.put("uploaded", false);
+
+        if (applies) {
+            Optional<StoredEmployeeDocument> existing = storedDocumentRepository
+                    .findFirstByEmployeeAndDocumentTypeAndActiveTrueOrderByUploadedAtDesc(user, DocumentType.CONTRACT_COPY);
+            existing.ifPresent(doc -> {
+                contractCopy.put("uploaded", true);
+                contractCopy.put("documentId", doc.getId());
+                contractCopy.put("fileName", doc.getFileName());
+                contractCopy.put("uploadedAt", doc.getUploadedAt());
+                contractCopy.put("uploadedBy", doc.getUploadedBy());
+            });
+        }
+
+        required.put("contractCopy", contractCopy);
+        return required;
     }
 }

@@ -12,6 +12,7 @@ import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
 import tn.isetbizerte.pfe.hrbackend.modules.user.repository.UserRepository;
 
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -182,8 +183,8 @@ public class NotificationService {
 
         boolean rejected = request.getStatus() != null && "REJECTED".equals(request.getStatus().name());
         String statusLabel = formatEnum(request.getStatus() != null ? request.getStatus().name() : null);
-        String typeLabel = formatEnum(request.getAuthorizationType() != null ? request.getAuthorizationType().name() : null);
-        String period = formatPeriod(request.getStartDate(), request.getEndDate());
+        String typeLabel = formatAuthorizationType(request);
+        String period = formatAuthorizationPeriod(request);
         String summary = rejected
                 ? "Your " + typeLabel + " authorization request was rejected."
                 : "Your " + typeLabel + " authorization request was approved.";
@@ -221,6 +222,31 @@ public class NotificationService {
         if (startDate != null && endDate != null) return startDate + " to " + endDate;
         if (startDate != null) return "From " + startDate;
         return "Until " + endDate;
+    }
+
+    private String formatAuthorizationType(AuthorizationRequest request) {
+        if (request.getAuthorizationType() != null
+                && "TIME_PERMISSION".equals(request.getAuthorizationType().name())) {
+            return "Short Absence Request";
+        }
+        return formatEnum(request.getAuthorizationType() != null ? request.getAuthorizationType().name() : null);
+    }
+
+    private String formatAuthorizationPeriod(AuthorizationRequest request) {
+        if (request.getAuthorizationType() != null
+                && "TIME_PERMISSION".equals(request.getAuthorizationType().name())) {
+            LocalDate date = request.getAbsenceDate() != null ? request.getAbsenceDate() : request.getStartDate();
+            if (date == null) return "Not specified";
+            if (request.getFromTime() != null && request.getToTime() != null) {
+                return date + " · " + formatTime(request.getFromTime()) + "-" + formatTime(request.getToTime());
+            }
+            return date.toString();
+        }
+        return formatPeriod(request.getStartDate(), request.getEndDate());
+    }
+
+    private String formatTime(LocalTime time) {
+        return time == null ? "" : time.toString().substring(0, 5);
     }
 
     private String formatEnum(String value) {

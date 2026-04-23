@@ -40,6 +40,7 @@ public class SecurityConfig {
                             .requestMatchers("/api/new-user/**").hasRole("NEW_USER")
                         .requestMatchers("/api/me", "/api/me/**").hasAnyRole("EMPLOYEE", "TEAM_LEADER", "HR_MANAGER")
                         .requestMatchers("/api/employee/**").hasAnyRole("EMPLOYEE", "TEAM_LEADER", "HR_MANAGER")
+                        .requestMatchers("/api/calendar/**").hasAnyRole("EMPLOYEE", "TEAM_LEADER", "HR_MANAGER")
                         .requestMatchers("/api/leader/**").hasRole("TEAM_LEADER")
                         .requestMatchers("/api/hr/**").hasRole("HR_MANAGER")
                         .requestMatchers("/api/reports/**").hasAnyRole("EMPLOYEE", "TEAM_LEADER", "HR_MANAGER")

@@ -3,7 +3,10 @@ package tn.isetbizerte.pfe.hrbackend.modules.requests.repository;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.entity.AuthorizationRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
 
@@ -17,4 +20,13 @@ public interface AuthorizationRequestRepository extends JpaRepository<Authorizat
     List<AuthorizationRequest> findAllByOrderByRequestedAtDesc();
     Page<AuthorizationRequest> findAllByOrderByRequestedAtDesc(Pageable pageable);
     Optional<AuthorizationRequest> findByVerificationToken(String token);
+
+    @Modifying
+    @Transactional
+    @Query(value = """
+            UPDATE authorization_requests
+            SET authorization_type = 'TIME_PERMISSION'
+            WHERE authorization_type IN ('WORK_FROM_HOME', 'OVERTIME', 'EARLY_DEPARTURE', 'LATE_ARRIVAL')
+            """, nativeQuery = true)
+    int normalizeLegacyAuthorizationTypes();
 }

@@ -10,6 +10,7 @@ public class CalendarLeaveDto {
     private String employeeUsername;
     private String employeeFullName;
     private String status;
+    private String approvalStage;
     private String leaveType;
     private String reason;
     private Integer numberOfDays;
@@ -72,6 +73,14 @@ public class CalendarLeaveDto {
 
     public void setStatus(String status) {
         this.status = status;
+    }
+
+    public String getApprovalStage() {
+        return approvalStage;
+    }
+
+    public void setApprovalStage(String approvalStage) {
+        this.approvalStage = approvalStage;
     }
 
     public String getLeaveType() {

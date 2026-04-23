@@ -20,13 +20,17 @@ import tn.isetbizerte.pfe.hrbackend.modules.user.service.AuthenticatedUserResolv
 import tn.isetbizerte.pfe.hrbackend.infrastructure.storage.DocumentAttachmentStorageService;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.storage.StoredAttachment;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.storage.UploadFileValidator;
+import tn.isetbizerte.pfe.hrbackend.modules.calendar.service.WorkingDayService;
+import tn.isetbizerte.pfe.hrbackend.modules.employee.repository.LeaveRequestRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.CreateAuthorizationRequestDto;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.CreateDocumentRequestDto;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.*;
 import java.util.stream.Collectors;
 import org.springframework.data.domain.Page;
@@ -36,6 +40,8 @@ import org.springframework.security.oauth2.jwt.Jwt;
 @Service
 @Slf4j
 public class RequestsService {
+    private static final LocalTime SHORT_ABSENCE_WORKDAY_START = LocalTime.of(8, 0);
+    private static final LocalTime SHORT_ABSENCE_WORKDAY_END = LocalTime.of(17, 0);
 
     private final DocumentRequestRepository      documentRepo;
     private final StoredEmployeeDocumentRepository storedDocumentRepo;
@@ -48,6 +54,8 @@ public class RequestsService {
     private final RequestEventProducer           requestEventProducer;
     private final RequestHistoryService          historyService;
     private final DocumentAttachmentStorageService attachmentStorage;
+    private final LeaveRequestRepository         leaveRequestRepository;
+    private final WorkingDayService              workingDayService;
 
     public RequestsService(DocumentRequestRepository documentRepo,
                            StoredEmployeeDocumentRepository storedDocumentRepo,
@@ -59,7 +67,9 @@ public class RequestsService {
                            LoanScoreEngine loanScoreEngine,
                            RequestEventProducer requestEventProducer,
                            RequestHistoryService historyService,
-                           DocumentAttachmentStorageService attachmentStorage) {
+                           DocumentAttachmentStorageService attachmentStorage,
+                           LeaveRequestRepository leaveRequestRepository,
+                           WorkingDayService workingDayService) {
         this.documentRepo     = documentRepo;
         this.storedDocumentRepo = storedDocumentRepo;
         this.loanRepo         = loanRepo;
@@ -71,6 +81,8 @@ public class RequestsService {
         this.requestEventProducer  = requestEventProducer;
         this.historyService   = historyService;
         this.attachmentStorage = attachmentStorage;
+        this.leaveRequestRepository = leaveRequestRepository;
+        this.workingDayService = workingDayService;
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -83,6 +95,9 @@ public class RequestsService {
         DocumentRequest req = new DocumentRequest();
         req.setUser(user);
         DocumentType type = body.getDocumentType();
+        if (type == DocumentType.CONTRACT_COPY) {
+            throw new BadRequestException("Contract copy is an HR-managed required document and cannot be requested by employees.");
+        }
         req.setDocumentType(type);
         req.setFulfillmentMode(fulfillmentModeFor(type));
         req.setNotes(body.getNotes());
@@ -312,15 +327,25 @@ public class RequestsService {
                                                             byte[] bytes) {
         User employee = userRepository.findById(employeeUserId)
                 .orElseThrow(() -> new ResourceNotFoundException("Employee user not found: " + employeeUserId));
-        DocumentType type = DocumentType.valueOf(documentType);
+        DocumentType type;
+        try {
+            type = DocumentType.valueOf(documentType);
+        } catch (IllegalArgumentException | NullPointerException e) {
+            throw new BadRequestException("Invalid HR-managed document type.");
+        }
         if (type != DocumentType.CONTRACT_COPY) {
             throw new BadRequestException("Only contract copies are supported as HR-managed stored documents.");
+        }
+        if (employee.getRole() != TypeRole.EMPLOYEE && employee.getRole() != TypeRole.TEAM_LEADER) {
+            throw new BadRequestException("Contract copies are required only for employees and team leaders.");
         }
         UploadFileValidator.ValidatedFile validatedFile = UploadFileValidator.validate(originalFileName, bytes);
 
         try {
-            for (StoredEmployeeDocument existing : storedDocumentRepo
-                    .findByEmployeeAndDocumentTypeAndActiveTrueOrderByUploadedAtDesc(employee, type)) {
+            List<StoredEmployeeDocument> existingDocuments = storedDocumentRepo
+                    .findByEmployeeAndDocumentTypeAndActiveTrueOrderByUploadedAtDesc(employee, type);
+            boolean replacingExisting = !existingDocuments.isEmpty();
+            for (StoredEmployeeDocument existing : existingDocuments) {
                 existing.setActive(false);
                 existing.setUpdatedAt(LocalDateTime.now());
             }
@@ -345,10 +370,29 @@ public class RequestsService {
             storedDocumentRepo.save(doc);
 
             historyService.record("DOCUMENT", "HR_STORED_DOCUMENT", doc.getId(), uploadedByKeycloakId, doc.getFileName());
+            publishRequiredDocumentEvent(employee, doc, uploadedByKeycloakId, replacingExisting);
             return mapStoredDocument(doc);
         } catch (Exception e) {
             log.warn("Stored employee document upload failed. employeeUserId={} actorId={}", employeeUserId, uploadedByKeycloakId, e);
             throw new BadRequestException("Failed to store employee document. Please try again.");
+        }
+    }
+
+    private void publishRequiredDocumentEvent(User employee, StoredEmployeeDocument doc, String uploadedByKeycloakId, boolean replaced) {
+        try {
+            requestEventProducer.publish(new RequestEvent(
+                    replaced ? "REQUIRED_DOCUMENT_REPLACED" : "REQUIRED_DOCUMENT_UPLOADED",
+                    "REQUIRED_DOCUMENT",
+                    doc.getId(),
+                    employee.getKeycloakId(),
+                    uploadedByKeycloakId,
+                    doc.getFileName()
+            ));
+            log.info("Required document event enqueued. eventType={} employeeUserId={} storedDocumentId={}",
+                    replaced ? "REQUIRED_DOCUMENT_REPLACED" : "REQUIRED_DOCUMENT_UPLOADED", employee.getId(), doc.getId());
+        } catch (Exception e) {
+            log.error("Failed to enqueue required document event. Upload remains stored. employeeUserId={} storedDocumentId={} eventType={}",
+                    employee.getId(), doc.getId(), replaced ? "REQUIRED_DOCUMENT_REPLACED" : "REQUIRED_DOCUMENT_UPLOADED", e);
         }
     }
 
@@ -798,8 +842,19 @@ public class RequestsService {
         AuthorizationRequest req = new AuthorizationRequest();
         req.setUser(user);
         req.setAuthorizationType(body.getAuthorizationType());
-        req.setStartDate(body.getStartDate());
-        req.setEndDate(body.getEndDate());
+        if (body.getAuthorizationType() == AuthorizationType.TIME_PERMISSION) {
+            LocalDate absenceDate = body.getEffectiveAbsenceDate();
+            validateShortAbsenceAvailability(user, absenceDate);
+            validateShortAbsenceTimeWindow(body.getFromTime(), body.getToTime());
+            req.setAbsenceDate(absenceDate);
+            req.setFromTime(body.getFromTime());
+            req.setToTime(body.getToTime());
+            req.setStartDate(absenceDate);
+            req.setEndDate(absenceDate);
+        } else {
+            req.setStartDate(body.getStartDate());
+            req.setEndDate(body.getEndDate());
+        }
         req.setReason(body.getReason());
         authRepo.save(req);
         historyService.record(
@@ -826,14 +881,58 @@ public class RequestsService {
         return mapAuth(req);
     }
 
+    private void validateShortAbsenceAvailability(User user, LocalDate date) {
+        if (date == null) {
+            throw new BadRequestException("Short absence requests require a date.");
+        }
+
+        DayOfWeek day = date.getDayOfWeek();
+        if (day == DayOfWeek.SATURDAY || day == DayOfWeek.SUNDAY) {
+            throw new BadRequestException("Short absence date must be a working day. Weekends are not allowed.");
+        }
+        if (workingDayService.isPublicHoliday(date)) {
+            throw new BadRequestException("Short absence date cannot be a public holiday.");
+        }
+
+        var overlaps = leaveRequestRepository.findByUserAndDateRangeAndStatusIn(
+                user,
+                date,
+                date,
+                List.of(LeaveStatus.PENDING, LeaveStatus.APPROVED)
+        );
+        if (overlaps.stream().anyMatch(leave -> leave.getStatus() == LeaveStatus.APPROVED)) {
+            throw new BadRequestException("Short absence date overlaps an approved leave.");
+        }
+        if (!overlaps.isEmpty()) {
+            throw new BadRequestException("Short absence date overlaps a pending leave request.");
+        }
+    }
+
+    private void validateShortAbsenceTimeWindow(LocalTime fromTime, LocalTime toTime) {
+        if (fromTime == null || toTime == null) {
+            throw new BadRequestException("Short absence requests require from time and to time.");
+        }
+        if (fromTime.isBefore(SHORT_ABSENCE_WORKDAY_START)
+                || fromTime.isAfter(SHORT_ABSENCE_WORKDAY_END)
+                || toTime.isBefore(SHORT_ABSENCE_WORKDAY_START)
+                || toTime.isAfter(SHORT_ABSENCE_WORKDAY_END)) {
+            throw new BadRequestException("Short absence must be within company working hours.");
+        }
+        if (!toTime.isAfter(fromTime)) {
+            throw new BadRequestException("To time must be after from time.");
+        }
+    }
+
     public Page<Map<String, Object>> getMyAuthRequests(Jwt jwt, Pageable pageable) {
         User user = authenticatedUserResolver.require(jwt);
+        normalizeLegacyAuthorizationTypes();
         return authRepo.findByUserOrderByRequestedAtDesc(user, pageable)
                 .map(this::mapAuth);
     }
 
     @Transactional
     public Map<String, Object> cancelMyAuthRequest(Long id, String requesterKeycloakId) {
+        normalizeLegacyAuthorizationTypes();
         AuthorizationRequest req = authRepo.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Authorization request not found: " + id));
         validateOwner(req.getUser().getKeycloakId(), requesterKeycloakId);
@@ -858,12 +957,14 @@ public class RequestsService {
     }
 
     public Page<Map<String, Object>> getAllAuthRequests(Pageable pageable) {
+        normalizeLegacyAuthorizationTypes();
         return authRepo.findAllByOrderByRequestedAtDesc(pageable)
                 .map(this::mapAuth);
     }
 
     @Transactional
     public Map<String, Object> decideAuth(Long id, boolean approve, String hrNote, String decidedByKeycloakId) {
+        normalizeLegacyAuthorizationTypes();
         AuthorizationRequest req = authRepo.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Authorization request not found: " + id));
         String note = hrNote != null ? hrNote.trim() : "";
@@ -908,6 +1009,18 @@ public class RequestsService {
                 )
         );
         return mapAuth(req);
+    }
+
+    private void normalizeLegacyAuthorizationTypes() {
+        try {
+            int updated = authRepo.normalizeLegacyAuthorizationTypes();
+            if (updated > 0) {
+                log.warn("Normalized {} legacy authorization request type(s) to TIME_PERMISSION.", updated);
+            }
+        } catch (Exception e) {
+            log.error("Failed to normalize legacy authorization request types before authorization read.", e);
+            throw e;
+        }
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -1130,6 +1243,10 @@ public class RequestsService {
         m.put("authorizationTypeLabel", fmt(r.getAuthorizationType().name()));
         m.put("startDate",         r.getStartDate());
         m.put("endDate",           r.getEndDate());
+        m.put("absenceDate",       r.getAbsenceDate());
+        m.put("fromTime",          r.getFromTime());
+        m.put("toTime",            r.getToTime());
+        m.put("periodLabel",       authorizationPeriodLabel(r));
         m.put("reason",            r.getReason());
         m.put("status",            r.getStatus().name());
         m.put("approvedBy",        r.getApprovedBy());
@@ -1146,6 +1263,25 @@ public class RequestsService {
             m.put("employeeUsername", r.getUser().getUsername());
         }
         return m;
+    }
+
+    private String authorizationPeriodLabel(AuthorizationRequest r) {
+        if (r.getAuthorizationType() == AuthorizationType.TIME_PERMISSION) {
+            LocalDate date = r.getAbsenceDate() != null ? r.getAbsenceDate() : r.getStartDate();
+            String dateLabel = date != null ? date.toString() : "Date not specified";
+            if (r.getFromTime() != null && r.getToTime() != null) {
+                return dateLabel + " · " + formatTime(r.getFromTime()) + "-" + formatTime(r.getToTime());
+            }
+            return dateLabel;
+        }
+        if (r.getStartDate() == null && r.getEndDate() == null) return "";
+        if (r.getStartDate() != null && r.getEndDate() != null) return r.getStartDate() + " to " + r.getEndDate();
+        if (r.getStartDate() != null) return "From " + r.getStartDate();
+        return "Until " + r.getEndDate();
+    }
+
+    private String formatTime(LocalTime time) {
+        return time == null ? "" : time.toString().substring(0, 5);
     }
 }
 

@@ -5,11 +5,16 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tn.isetbizerte.pfe.hrbackend.common.enums.TaskStatus;
+import tn.isetbizerte.pfe.hrbackend.common.enums.TaskAssignmentMode;
 import tn.isetbizerte.pfe.hrbackend.common.enums.TypeRole;
+import tn.isetbizerte.pfe.hrbackend.common.enums.LeaveStatus;
 import tn.isetbizerte.pfe.hrbackend.common.event.NotificationEvent;
 import tn.isetbizerte.pfe.hrbackend.common.exception.BadRequestException;
 import tn.isetbizerte.pfe.hrbackend.common.exception.ResourceNotFoundException;
 import tn.isetbizerte.pfe.hrbackend.common.exception.UnauthorizedException;
+import tn.isetbizerte.pfe.hrbackend.modules.calendar.service.WorkingDayService;
+import tn.isetbizerte.pfe.hrbackend.modules.employee.entity.LeaveRequest;
+import tn.isetbizerte.pfe.hrbackend.modules.employee.repository.LeaveRequestRepository;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.email.HREmailService;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.kafka.producer.NotificationEventProducer;
 import tn.isetbizerte.pfe.hrbackend.modules.notification.service.NotificationService;
@@ -25,9 +30,15 @@ import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
 import tn.isetbizerte.pfe.hrbackend.modules.user.repository.UserRepository;
 
 import java.time.LocalDateTime;
+import java.time.LocalDate;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -39,12 +50,16 @@ public class TaskService {
     private final TaskRepository    taskRepository;
     private final TeamRepository    teamRepository;
     private final UserRepository    userRepository;
+    private final LeaveRequestRepository leaveRequestRepository;
+    private final WorkingDayService workingDayService;
     private final NotificationEventProducer notificationEventProducer;
     private final HREmailService hrEmailService;
     private final NotificationService notificationService;
 
     public TaskService(ProjectRepository projectRepository, TaskRepository taskRepository,
                        TeamRepository teamRepository, UserRepository userRepository,
+                       LeaveRequestRepository leaveRequestRepository,
+                       WorkingDayService workingDayService,
                        NotificationEventProducer notificationEventProducer,
                        HREmailService hrEmailService,
                        NotificationService notificationService) {
@@ -52,6 +67,8 @@ public class TaskService {
         this.taskRepository    = taskRepository;
         this.teamRepository    = teamRepository;
         this.userRepository    = userRepository;
+        this.leaveRequestRepository = leaveRequestRepository;
+        this.workingDayService = workingDayService;
         this.notificationEventProducer = notificationEventProducer;
         this.hrEmailService = hrEmailService;
         this.notificationService = notificationService;
@@ -99,33 +116,37 @@ public class TaskService {
 
     @Transactional
     public Map<String, Object> createTask(String leaderKeycloakId, Long projectId, CreateTaskRequest req) {
-        Team team = getTeamByLeader(leaderKeycloakId);
-        Project project = projectRepository.findById(projectId)
-                .orElseThrow(() -> new ResourceNotFoundException("Project not found: " + projectId));
-        if (!project.getTeam().getId().equals(team.getId()))
-            throw new UnauthorizedException("Project does not belong to your team.");
+        TaskAssignmentContext context = buildAssignmentContext(leaderKeycloakId, projectId, req, true);
+        List<Map<String, Object>> createdTasks = new ArrayList<>();
 
-        User assignee = userRepository.findById(req.getAssigneeId())
-                .orElseThrow(() -> new ResourceNotFoundException("User not found: " + req.getAssigneeId()));
+        for (User assignee : context.preview.creatableAssignees) {
+            Task task = new Task();
+            task.setTitle(req.getTitle());
+            task.setDescription(req.getDescription());
+            task.setPriority(req.getPriority());
+            task.setStartDate(req.getStartDate());
+            task.setDueDate(req.getDueDate());
+            task.setProject(context.project);
+            task.setAssignee(assignee);
+            taskRepository.save(task);
+            notifyAssigneeOfTaskAssignment(task, assignee, leaderKeycloakId);
+            createdTasks.add(mapTask(task));
+            logger.info("Task '{}' created in project '{}' for assignee={}", task.getTitle(), context.project.getName(), assignee.getId());
+        }
 
-        // Assignee must be in the same team (or the TL themselves)
-        boolean isMember = (assignee.getTeam() != null && assignee.getTeam().getId().equals(team.getId()))
-                        || (assignee.getRole() == TypeRole.TEAM_LEADER && assignee.getKeycloakId().equals(leaderKeycloakId));
-        if (!isMember)
-            throw new BadRequestException("Assignee is not a member of your team.");
+        Map<String, Object> preview = context.preview.toMap();
+        preview.put("createdTasks", createdTasks);
+        preview.put("createdCount", createdTasks.size());
+        preview.put("requestedCount", context.requestedAssignees.size());
+        preview.put("mode", req.getAssignmentMode().name());
+        preview.put("projectId", context.project.getId());
+        preview.put("projectName", context.project.getName());
+        preview.put("message", buildCreateMessage(createdTasks.size(), context.preview.blocked.size(), context.preview.warned.size()));
+        return preview;
+    }
 
-        Task task = new Task();
-        task.setTitle(req.getTitle());
-        task.setDescription(req.getDescription());
-        task.setPriority(req.getPriority());
-        task.setStartDate(req.getStartDate());
-        task.setDueDate(req.getDueDate());
-        task.setProject(project);
-        task.setAssignee(assignee);
-        taskRepository.save(task);
-        notifyAssigneeOfTaskAssignment(task, assignee, leaderKeycloakId);
-        logger.info("Task '{}' created in project '{}'", task.getTitle(), project.getName());
-        return mapTask(task);
+    public Map<String, Object> previewTaskAssignment(String leaderKeycloakId, Long projectId, CreateTaskRequest req) {
+        return buildAssignmentContext(leaderKeycloakId, projectId, req, false).preview.toMap();
     }
 
     @Transactional
@@ -344,6 +365,184 @@ public class TaskService {
                 .orElse("Team Leader");
     }
 
+    private TaskAssignmentContext buildAssignmentContext(String leaderKeycloakId, Long projectId, CreateTaskRequest req, boolean requireCreatableAssignee) {
+        Team team = getTeamByLeader(leaderKeycloakId);
+        Project project = projectRepository.findById(projectId)
+                .orElseThrow(() -> new ResourceNotFoundException("Project not found: " + projectId));
+        if (!project.getTeam().getId().equals(team.getId())) {
+            throw new UnauthorizedException("Project does not belong to your team.");
+        }
+
+        LocalDate taskStart = req.getStartDate() != null ? req.getStartDate() : req.getDueDate();
+        LocalDate taskEnd = req.getDueDate() != null ? req.getDueDate() : req.getStartDate();
+        if (taskStart != null && taskEnd != null && taskEnd.isBefore(taskStart)) {
+            throw new BadRequestException("Due date cannot be before start date.");
+        }
+
+        List<User> requestedAssignees = resolveRequestedAssignees(team, leaderKeycloakId, req);
+        AssignmentPreview preview = previewAssignments(requestedAssignees, taskStart, taskEnd);
+
+        if (requireCreatableAssignee && preview.creatableAssignees.isEmpty()) {
+            throw new BadRequestException("No eligible assignees available for this task. Resolve blocked assignment conflicts first.");
+        }
+
+        return new TaskAssignmentContext(team, project, requestedAssignees, preview);
+    }
+
+    private List<User> resolveRequestedAssignees(Team team, String leaderKeycloakId, CreateTaskRequest req) {
+        TaskAssignmentMode mode = req.getAssignmentMode() != null ? req.getAssignmentMode() : TaskAssignmentMode.ONE;
+
+        if (mode == TaskAssignmentMode.ALL) {
+            List<User> assignable = new ArrayList<>();
+            if (team.getMembers() != null) assignable.addAll(team.getMembers());
+            if (team.getTeamLeader() != null && leaderKeycloakId.equals(team.getTeamLeader().getKeycloakId())) {
+                assignable.add(team.getTeamLeader());
+            }
+            return dedupeUsers(assignable);
+        }
+
+        if (mode == TaskAssignmentMode.SELECTED) {
+            List<Long> ids = req.getAssigneeIds() != null ? req.getAssigneeIds() : List.of();
+            if (ids.isEmpty()) {
+                throw new BadRequestException("Select at least one assignee.");
+            }
+            return dedupeUsers(ids.stream().map(this::getUserById).collect(Collectors.toList()))
+                    .stream()
+                    .peek(user -> validateAssignableToTeam(team, leaderKeycloakId, user))
+                    .collect(Collectors.toList());
+        }
+
+        if (req.getAssigneeId() == null) {
+            throw new BadRequestException("Assignee is required.");
+        }
+
+        User assignee = getUserById(req.getAssigneeId());
+        validateAssignableToTeam(team, leaderKeycloakId, assignee);
+        return List.of(assignee);
+    }
+
+    private User getUserById(Long userId) {
+        return userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found: " + userId));
+    }
+
+    private List<User> dedupeUsers(List<User> users) {
+        Map<Long, User> unique = new LinkedHashMap<>();
+        for (User user : users) {
+            if (user != null && user.getId() != null) unique.put(user.getId(), user);
+        }
+        return new ArrayList<>(unique.values());
+    }
+
+    private void validateAssignableToTeam(Team team, String leaderKeycloakId, User assignee) {
+        boolean isMember = (assignee.getTeam() != null && assignee.getTeam().getId().equals(team.getId()))
+                || (assignee.getRole() == TypeRole.TEAM_LEADER && assignee.getKeycloakId().equals(leaderKeycloakId));
+        if (!isMember) {
+            throw new BadRequestException("Assignee is not a member of your team.");
+        }
+    }
+
+    private AssignmentPreview previewAssignments(List<User> assignees, LocalDate taskStart, LocalDate taskEnd) {
+        AssignmentPreview preview = new AssignmentPreview();
+        List<String> dateIssues = collectDateIssues(taskStart, taskEnd);
+
+        for (User assignee : assignees) {
+            Map<String, Object> summary = assigneeSummary(assignee);
+
+            if (!dateIssues.isEmpty()) {
+                preview.blocked.add(withReasons(summary, dateIssues));
+                continue;
+            }
+
+            if (taskStart == null || taskEnd == null) {
+                preview.eligible.add(summary);
+                preview.creatableAssignees.add(assignee);
+                continue;
+            }
+
+            List<LeaveRequest> overlaps = leaveRequestRepository.findByUserIdAndDateRangeAndStatusIn(
+                    assignee.getId(),
+                    taskStart,
+                    taskEnd,
+                    List.of(LeaveStatus.APPROVED, LeaveStatus.PENDING)
+            );
+
+            List<String> blockingReasons = overlaps.stream()
+                    .filter(leave -> leave.getStatus() == LeaveStatus.APPROVED)
+                    .sorted(Comparator.comparing(LeaveRequest::getStartDate))
+                    .map(leave -> String.format("Approved leave overlaps %s to %s", leave.getStartDate(), leave.getEndDate()))
+                    .collect(Collectors.toList());
+
+            if (!blockingReasons.isEmpty()) {
+                preview.blocked.add(withReasons(summary, blockingReasons));
+                continue;
+            }
+
+            List<String> warningReasons = overlaps.stream()
+                    .filter(leave -> leave.getStatus() == LeaveStatus.PENDING)
+                    .sorted(Comparator.comparing(LeaveRequest::getStartDate))
+                    .map(leave -> String.format("Pending leave overlaps %s to %s", leave.getStartDate(), leave.getEndDate()))
+                    .collect(Collectors.toList());
+
+            if (!warningReasons.isEmpty()) {
+                preview.warned.add(withReasons(summary, warningReasons));
+            } else {
+                preview.eligible.add(summary);
+            }
+            preview.creatableAssignees.add(assignee);
+        }
+
+        preview.requestedCount = assignees.size();
+        preview.eligibleCount = preview.eligible.size();
+        preview.warnedCount = preview.warned.size();
+        preview.blockedCount = preview.blocked.size();
+        preview.canCreate = !preview.creatableAssignees.isEmpty();
+        return preview;
+    }
+
+    private List<String> collectDateIssues(LocalDate startDate, LocalDate endDate) {
+        Set<String> issues = new LinkedHashSet<>();
+        if (startDate != null && !workingDayService.isWorkingDay(startDate)) {
+            issues.add(dateIssueLabel("Start date", startDate));
+        }
+        if (endDate != null && !endDate.equals(startDate) && !workingDayService.isWorkingDay(endDate)) {
+            issues.add(dateIssueLabel("Due date", endDate));
+        }
+        return new ArrayList<>(issues);
+    }
+
+    private String dateIssueLabel(String label, LocalDate date) {
+        if (workingDayService.isPublicHoliday(date)) {
+            return label + " falls on a public holiday.";
+        }
+        return label + " falls on a weekend.";
+    }
+
+    private Map<String, Object> assigneeSummary(User assignee) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("assigneeId", assignee.getId());
+        data.put("assigneeName", assignee.getPerson() != null
+                ? (assignee.getPerson().getFirstName() + " " + assignee.getPerson().getLastName()).trim()
+                : assignee.getUsername());
+        data.put("assigneeUsername", assignee.getUsername());
+        return data;
+    }
+
+    private Map<String, Object> withReasons(Map<String, Object> data, List<String> reasons) {
+        Map<String, Object> copy = new LinkedHashMap<>(data);
+        copy.put("reasons", reasons);
+        return copy;
+    }
+
+    private String buildCreateMessage(int createdCount, int blockedCount, int warnedCount) {
+        if (createdCount == 0) return "No tasks created.";
+        String base = createdCount == 1 ? "1 task created." : createdCount + " tasks created.";
+        if (blockedCount > 0 || warnedCount > 0) {
+            return String.format("%s %d blocked, %d warned.", base, blockedCount, warnedCount);
+        }
+        return base;
+    }
+
     private Map<String, Object> mapProject(Project p) {
         Map<String, Object> m = new HashMap<>();
         m.put("id",          p.getId());
@@ -374,5 +573,44 @@ public class TaskService {
         m.put("createdAt",    t.getCreatedAt());
         m.put("updatedAt",    t.getUpdatedAt());
         return m;
+    }
+
+    private static class TaskAssignmentContext {
+        private final Team team;
+        private final Project project;
+        private final List<User> requestedAssignees;
+        private final AssignmentPreview preview;
+
+        private TaskAssignmentContext(Team team, Project project, List<User> requestedAssignees, AssignmentPreview preview) {
+            this.team = team;
+            this.project = project;
+            this.requestedAssignees = requestedAssignees;
+            this.preview = preview;
+        }
+    }
+
+    private static class AssignmentPreview {
+        private final List<Map<String, Object>> eligible = new ArrayList<>();
+        private final List<Map<String, Object>> warned = new ArrayList<>();
+        private final List<Map<String, Object>> blocked = new ArrayList<>();
+        private final List<User> creatableAssignees = new ArrayList<>();
+        private boolean canCreate;
+        private int requestedCount;
+        private int eligibleCount;
+        private int warnedCount;
+        private int blockedCount;
+
+        private Map<String, Object> toMap() {
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("canCreate", canCreate);
+            data.put("requestedCount", requestedCount);
+            data.put("eligibleCount", eligibleCount);
+            data.put("warnedCount", warnedCount);
+            data.put("blockedCount", blockedCount);
+            data.put("eligibleAssignees", eligible);
+            data.put("warnedAssignees", warned);
+            data.put("blockedAssignees", blocked);
+            return data;
+        }
     }
 }

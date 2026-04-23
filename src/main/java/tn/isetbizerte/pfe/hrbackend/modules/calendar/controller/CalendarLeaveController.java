@@ -11,7 +11,9 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.format.annotation.DateTimeFormat.ISO;
 import tn.isetbizerte.pfe.hrbackend.modules.calendar.dto.CalendarLeaveDto;
+import tn.isetbizerte.pfe.hrbackend.modules.calendar.dto.WorkingDaysEstimateDto;
 import tn.isetbizerte.pfe.hrbackend.modules.calendar.service.CalendarLeaveService;
+import tn.isetbizerte.pfe.hrbackend.modules.calendar.service.WorkingDayService;
 
 import java.time.LocalDate;
 import java.util.HashMap;
@@ -23,9 +25,12 @@ import java.util.Map;
 public class CalendarLeaveController {
 
     private final CalendarLeaveService calendarLeaveService;
+    private final WorkingDayService workingDayService;
 
-    public CalendarLeaveController(CalendarLeaveService calendarLeaveService) {
+    public CalendarLeaveController(CalendarLeaveService calendarLeaveService,
+                                   WorkingDayService workingDayService) {
         this.calendarLeaveService = calendarLeaveService;
+        this.workingDayService = workingDayService;
     }
 
     @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")
@@ -58,6 +63,22 @@ public class CalendarLeaveController {
         response.put("end", end);
         response.put("count", leaves.size());
         response.put("data", leaves);
+
+        return ResponseEntity.ok(response);
+    }
+
+    @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")
+    @GetMapping("/working-days")
+    public ResponseEntity<Map<String, Object>> estimateWorkingDays(
+            @RequestParam @DateTimeFormat(iso = ISO.DATE) LocalDate start,
+            @RequestParam @DateTimeFormat(iso = ISO.DATE) LocalDate end
+    ) {
+        WorkingDaysEstimateDto estimate = workingDayService.estimate(start, end);
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("success", true);
+        response.put("message", "Working days estimated successfully");
+        response.put("data", estimate);
 
         return ResponseEntity.ok(response);
     }

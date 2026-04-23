@@ -33,6 +33,8 @@ public class LeaveRequestResponseDto {
     private String  decisionReason;
     private String  approvedBy;
     private String  rejectedBy;
+    private String  rejectedByName;
+    private String  rejectedByRole;
     private LocalDateTime rejectedAt;
     private String  canceledBy;
     private LocalDateTime canceledAt;
@@ -178,6 +180,12 @@ public class LeaveRequestResponseDto {
 
     public String getRejectedBy() { return rejectedBy; }
     public void setRejectedBy(String rejectedBy) { this.rejectedBy = rejectedBy; }
+
+    public String getRejectedByName() { return rejectedByName; }
+    public void setRejectedByName(String rejectedByName) { this.rejectedByName = rejectedByName; }
+
+    public String getRejectedByRole() { return rejectedByRole; }
+    public void setRejectedByRole(String rejectedByRole) { this.rejectedByRole = rejectedByRole; }
 
     public LocalDateTime getRejectedAt() { return rejectedAt; }
     public void setRejectedAt(LocalDateTime rejectedAt) { this.rejectedAt = rejectedAt; }

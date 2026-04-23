@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 
 /**
@@ -238,13 +239,38 @@ public class HREmailService {
         }
     }
 
+    public boolean sendRequiredDocumentUploaded(String email, String firstName, String lastName,
+                                                String documentLabel, String fileName, boolean replaced,
+                                                String referenceId) {
+        String subject = replaced
+                ? "Required HR Document Updated - " + referenceId
+                : "Required HR Document Added - " + referenceId;
+        log.info("HREmailService.sendRequiredDocumentUploaded called: recipientEmail={} referenceId={} subject={} replaced={}",
+                email, referenceId, subject, replaced);
+        try {
+            String name = firstName + " " + lastName;
+            boolean result = send(email,
+                    subject,
+                    buildRequiredDocumentUploadedBody(name, documentLabel, fileName, replaced));
+            log.info("HREmailService.sendRequiredDocumentUploaded result: recipientEmail={} referenceId={} subject={} result={}",
+                    email, referenceId, subject, result);
+            return result;
+        } catch (Exception e) {
+            log.error("HREmailService.sendRequiredDocumentUploaded exception: recipientEmail={} referenceId={} subject={} message={}",
+                    email, referenceId, subject, e.getMessage(), e);
+            return false;
+        }
+    }
+
     // ═══════════════════════════════════════════════════════════════════
     // 10 — AUTHORIZATION DECISION
     // ═══════════════════════════════════════════════════════════════════
 
     public boolean sendAuthorizationDecision(String email, String firstName, String lastName,
                                              String authorizationType, LocalDate startDate,
-                                             LocalDate endDate, LocalDateTime processedAt,
+                                             LocalDate endDate, LocalDate absenceDate,
+                                             LocalTime fromTime, LocalTime toTime,
+                                             LocalDateTime processedAt,
                                              boolean approved, String decisionNote,
                                              String referenceId) {
         String requestId = extractRequestId(referenceId);
@@ -258,6 +284,7 @@ public class HREmailService {
             boolean result = send(email,
                     subject,
                     buildAuthorizationDecisionBody(name, authorizationType, startDate, endDate,
+                            absenceDate, fromTime, toTime,
                             processedAt, approved, decisionNote, referenceId));
             log.info("HREmailService.sendAuthorizationDecision result: recipientEmail={} requestId={} subject={} result={}",
                     email, requestId, subject, result);
@@ -677,8 +704,33 @@ public class HREmailService {
                 actionButton("Open My Documents", frontendUrl + "/employee/documents", "#2563EB")));
     }
 
+    private String buildRequiredDocumentUploadedBody(String name, String documentLabel, String fileName, boolean replaced) {
+        String document = documentLabel != null && !documentLabel.isBlank() ? documentLabel : "Required HR document";
+        String uploadedFile = fileName != null && !fileName.isBlank() ? fileName : "Uploaded file";
+        String actionText = replaced ? "updated" : "added";
+        return wrap(replaced ? "Required HR Document Updated" : "Required HR Document Added", document + " is available", """
+            <p style="font-size:15px;color:#374151;line-height:1.8;">
+                Dear <strong>%s</strong>,
+            </p>
+            <p style="font-size:15px;color:#374151;line-height:1.8;">
+                The Human Resources Department has %s your contract copy in your required HR documents.
+                You can access it from your documents area.
+            </p>
+            %s
+            %s
+            """.formatted(name, actionText,
+                infoGrid(new String[][]{
+                    {"Document", document},
+                    {"File", uploadedFile},
+                    {"Status", "Available for download"},
+                }),
+                actionButton("Open My Documents", frontendUrl + "/employee/documents", "#2563EB")));
+    }
+
     private String buildAuthorizationDecisionBody(String name, String authorizationType,
                                                   LocalDate startDate, LocalDate endDate,
+                                                  LocalDate absenceDate, LocalTime fromTime,
+                                                  LocalTime toTime,
                                                   LocalDateTime processedAt,
                                                   boolean approved, String decisionNote,
                                                   String refId) {
@@ -714,9 +766,8 @@ public class HREmailService {
             """.formatted(name, statusColor, statusText,
                 infoGrid(new String[][]{
                     {"Reference ID", refId},
-                    {"Authorization Type", formatEnum(authorizationType)},
-                    {"Start Date", formatDateOrDash(startDate)},
-                    {"End Date", formatDateOrDash(endDate)},
+                    {"Authorization Type", formatAuthorizationType(authorizationType)},
+                    {"Requested Period", formatAuthorizationPeriod(authorizationType, startDate, endDate, absenceDate, fromTime, toTime)},
                     {"Status", approved ? "Approved" : "Rejected"},
                     {"Processed Date", formatDateTimeOrDash(processedAt)},
                 }),
@@ -726,6 +777,33 @@ public class HREmailService {
                 note,
                 actionButton("Open My Authorizations", frontendUrl + "/employee/authorizations",
                         approved ? "#16A34A" : "#DC2626")));
+    }
+
+    private String formatAuthorizationType(String authorizationType) {
+        if ("TIME_PERMISSION".equals(authorizationType)) return "Short Absence Request";
+        return formatEnum(authorizationType);
+    }
+
+    private String formatAuthorizationPeriod(String authorizationType, LocalDate startDate, LocalDate endDate,
+                                             LocalDate absenceDate, LocalTime fromTime, LocalTime toTime) {
+        if ("TIME_PERMISSION".equals(authorizationType)) {
+            LocalDate date = absenceDate != null ? absenceDate : startDate;
+            if (date == null) return "Not specified";
+            if (fromTime != null && toTime != null) {
+                return formatDateOrDash(date) + " · " + formatTime(fromTime) + "-" + formatTime(toTime);
+            }
+            return formatDateOrDash(date);
+        }
+        if (startDate == null && endDate == null) return "Not specified";
+        if (startDate != null && endDate != null) {
+            return formatDateOrDash(startDate) + " to " + formatDateOrDash(endDate);
+        }
+        if (startDate != null) return "From " + formatDateOrDash(startDate);
+        return "Until " + formatDateOrDash(endDate);
+    }
+
+    private String formatTime(LocalTime time) {
+        return time == null ? "" : time.toString().substring(0, 5);
     }
 
     // ═══════════════════════════════════════════════════════════════════

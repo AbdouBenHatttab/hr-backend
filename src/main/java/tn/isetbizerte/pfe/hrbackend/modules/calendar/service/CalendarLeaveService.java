@@ -3,6 +3,7 @@ package tn.isetbizerte.pfe.hrbackend.modules.calendar.service;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
+import tn.isetbizerte.pfe.hrbackend.common.enums.ApprovalDecision;
 import tn.isetbizerte.pfe.hrbackend.common.enums.TypeRole;
 import tn.isetbizerte.pfe.hrbackend.common.enums.LeaveStatus;
 import tn.isetbizerte.pfe.hrbackend.common.exception.ResourceNotFoundException;
@@ -99,6 +100,7 @@ public class CalendarLeaveService {
         dto.setEmployeeUsername(leave.getUser().getUsername());
         dto.setEmployeeFullName(leave.getEmployeeFullName());
         dto.setStatus(leave.getStatus().name());
+        dto.setApprovalStage(computeApprovalStage(leave));
         dto.setLeaveType(leave.getLeaveType().name());
         dto.setReason(leave.getReason());
         dto.setNumberOfDays(leave.getNumberOfDays());
@@ -107,6 +109,28 @@ public class CalendarLeaveService {
         dto.setApprovedBy(leave.getApprovedBy());
         dto.setRejectedBy(leave.getRejectedBy());
         return dto;
+    }
+
+    private String computeApprovalStage(LeaveRequest leave) {
+        if (leave.getStatus() == LeaveStatus.CANCELLED_BY_EMPLOYEE) return "CANCELLED_BY_EMPLOYEE";
+        if (leave.getStatus() == LeaveStatus.REJECTED
+                || leave.getTeamLeaderDecision() == ApprovalDecision.REJECTED
+                || leave.getHrDecision() == ApprovalDecision.REJECTED) {
+            return "REJECTED";
+        }
+        if (leave.getStatus() == LeaveStatus.APPROVED
+                || (leave.getTeamLeaderDecision() == ApprovalDecision.APPROVED
+                && leave.getHrDecision() == ApprovalDecision.APPROVED)) {
+            return "APPROVED";
+        }
+        if (leave.getTeamLeaderDecision() == ApprovalDecision.APPROVED
+                && leave.getHrDecision() == ApprovalDecision.PENDING) {
+            return "PENDING_HR";
+        }
+        if (leave.getTeamLeaderDecision() == ApprovalDecision.PENDING) {
+            return "PENDING_TL";
+        }
+        return "PENDING";
     }
 
     private List<LeaveStatus> resolveStatuses(List<LeaveStatus> statusFilter, boolean includePending) {

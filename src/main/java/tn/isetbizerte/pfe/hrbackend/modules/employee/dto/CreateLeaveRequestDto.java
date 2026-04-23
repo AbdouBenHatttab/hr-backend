@@ -18,8 +18,6 @@ public class CreateLeaveRequestDto {
     @FutureOrPresent(message = "End date must be today or in the future")
     private LocalDate endDate;
 
-    @NotNull(message = "Number of days is required")
-    @Positive(message = "Number of days must be positive")
     private Integer numberOfDays;
 
     @Size(max = 1000, message = "Reason must not exceed 1000 characters")

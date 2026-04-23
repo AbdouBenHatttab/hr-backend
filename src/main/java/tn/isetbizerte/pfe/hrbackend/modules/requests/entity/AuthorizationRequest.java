@@ -7,6 +7,7 @@ import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 
 @Entity
 @Table(name = "authorization_requests")
@@ -28,6 +29,9 @@ public class AuthorizationRequest {
 
     private LocalDate startDate;
     private LocalDate endDate;
+    private LocalDate absenceDate;
+    private LocalTime fromTime;
+    private LocalTime toTime;
 
     @Column(length = 1000)
     private String reason;
@@ -68,6 +72,15 @@ public class AuthorizationRequest {
 
     public LocalDate getEndDate() { return endDate; }
     public void setEndDate(LocalDate endDate) { this.endDate = endDate; }
+
+    public LocalDate getAbsenceDate() { return absenceDate; }
+    public void setAbsenceDate(LocalDate absenceDate) { this.absenceDate = absenceDate; }
+
+    public LocalTime getFromTime() { return fromTime; }
+    public void setFromTime(LocalTime fromTime) { this.fromTime = fromTime; }
+
+    public LocalTime getToTime() { return toTime; }
+    public void setToTime(LocalTime toTime) { this.toTime = toTime; }
 
     public String getReason() { return reason; }
     public void setReason(String reason) { this.reason = reason; }
