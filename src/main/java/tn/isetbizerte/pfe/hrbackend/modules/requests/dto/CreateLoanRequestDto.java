@@ -13,7 +13,6 @@ public class CreateLoanRequestDto {
     @Digits(integer = 10, fraction = 2, message = "Amount format is invalid")
     private BigDecimal amount;
 
-    @NotNull(message = "Repayment months is required")
     @Min(value = 1, message = "Repayment months must be at least 1")
     @Max(value = 120, message = "Repayment months cannot exceed 120")
     private Integer repaymentMonths;

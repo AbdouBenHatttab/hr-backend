@@ -29,6 +29,12 @@ public class LoanRequest {
     @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal amount;
 
+    @Column(precision = 10, scale = 2)
+    private BigDecimal approvedAmount;
+
+    @Column(length = 1000)
+    private String approvedAmountJustification;
+
     @Column(nullable = false)
     private Integer repaymentMonths;
 
@@ -101,6 +107,12 @@ public class LoanRequest {
 
     public BigDecimal getAmount() { return amount; }
     public void setAmount(BigDecimal amount) { this.amount = amount; }
+
+    public BigDecimal getApprovedAmount() { return approvedAmount; }
+    public void setApprovedAmount(BigDecimal approvedAmount) { this.approvedAmount = approvedAmount; }
+
+    public String getApprovedAmountJustification() { return approvedAmountJustification; }
+    public void setApprovedAmountJustification(String approvedAmountJustification) { this.approvedAmountJustification = approvedAmountJustification; }
 
     public Integer getRepaymentMonths() { return repaymentMonths; }
     public void setRepaymentMonths(Integer repaymentMonths) { this.repaymentMonths = repaymentMonths; }

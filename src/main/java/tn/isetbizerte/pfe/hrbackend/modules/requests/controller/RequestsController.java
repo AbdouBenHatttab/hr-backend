@@ -11,14 +11,13 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.CancelLoanAfterMeetingDto;
+import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.ApproveLoanRequestDto;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.CreateAuthorizationRequestDto;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.CreateDocumentRequestDto;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.CreateLoanRequestDto;
+import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.ScheduleLoanMeetingDto;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.service.RequestsService;
 
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.LocalTime;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -229,10 +228,18 @@ public class RequestsController {
     @PreAuthorize("hasRole('HR_MANAGER')")
     @PostMapping(RequestApiRoutes.HR_LOANS_APPROVE)
     public ResponseEntity<Map<String, Object>> approveLoan(@PathVariable Long id,
-                                                            @RequestBody(required = false) Map<String, Object> body,
-                                                            @AuthenticationPrincipal Jwt jwt) {
-        String note = body != null ? (String) body.getOrDefault("hrNote", "") : "";
-        return ok("Loan approved.", service.decideLoan(id, true, note, jwt.getSubject()));
+                                                             @RequestBody(required = false) ApproveLoanRequestDto body,
+                                                             @AuthenticationPrincipal Jwt jwt) {
+        return ok("Loan approved.", service.decideLoan(
+                id,
+                true,
+                body != null ? body.getHrNote() : "",
+                body != null ? body.getRepaymentMonths() : null,
+                body != null ? body.getApprovedAmount() : null,
+                body != null ? body.resolveMonthlyPayback() : null,
+                body != null ? body.getApprovedAmountJustification() : null,
+                jwt.getSubject()
+        ));
     }
 
     @PreAuthorize("hasRole('HR_MANAGER')")
@@ -246,25 +253,20 @@ public class RequestsController {
                     body.getOrDefault("reason", body.getOrDefault("hrNote", "")));
             note = value != null ? value.toString() : "";
         }
-        return ok("Loan rejected.", service.decideLoan(id, false, note, jwt.getSubject()));
+        return ok("Loan rejected.", service.decideLoan(id, false, note, null, null, null, jwt.getSubject()));
     }
 
     @PreAuthorize("hasRole('HR_MANAGER')")
     @PostMapping(RequestApiRoutes.HR_LOANS_SCHEDULE_MEETING)
     public ResponseEntity<Map<String, Object>> scheduleLoanMeeting(@PathVariable Long id,
-                                                                    @RequestBody Map<String, Object> body,
+                                                                    @RequestBody ScheduleLoanMeetingDto body,
                                                                     @AuthenticationPrincipal Jwt jwt) {
-        LocalDateTime meetingAt;
-        Object meetingAtValue = body.get("meetingAt");
-        if (meetingAtValue != null && !meetingAtValue.toString().isBlank()) {
-            meetingAt = LocalDateTime.parse(meetingAtValue.toString());
-        } else {
-            LocalDate date = LocalDate.parse((String) body.get("meetingDate"));
-            LocalTime time = LocalTime.parse((String) body.get("meetingTime"));
-            meetingAt = LocalDateTime.of(date, time);
-        }
-        String note = body.get("meetingNote") != null ? body.get("meetingNote").toString() : "";
-        return ok("Loan meeting scheduled.", service.scheduleLoanMeeting(id, meetingAt, note, jwt.getSubject()));
+        return ok("Loan meeting scheduled.", service.scheduleLoanMeeting(
+                id,
+                body != null ? body.getMeetingAt() : null,
+                body != null ? body.getMeetingNote() : null,
+                jwt.getSubject()
+        ));
     }
 
     @PreAuthorize("hasRole('HR_MANAGER')")

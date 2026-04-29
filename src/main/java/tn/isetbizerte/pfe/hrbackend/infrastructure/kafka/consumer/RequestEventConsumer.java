@@ -96,6 +96,8 @@ public class RequestEventConsumer {
             if (!maybeSendLoanDecisionEmail(event)) {
                 throw new IllegalStateException("Loan decision email was not sent for requestId=" + event.getRequestId());
             }
+            maybeSendLoanMeetingEmail(event);
+            maybeSendLoanFinalFileReadyEmail(event);
 
             log.info("Checking non-leave authorization email branch: requestId={} eventType={}",
                     event.getRequestId(), event.getType());
@@ -205,9 +207,14 @@ public class RequestEventConsumer {
             case "LEAVE_APPROVED" -> "Your leave request was approved.";
             case "LEAVE_REJECTED" -> "Your leave request was rejected.";
             case "LOAN_SUBMITTED" -> "Your loan request was submitted.";
+            case "LOAN_SYSTEM_REJECTED" -> "Your loan request was rejected automatically based on eligibility rules.";
+            case "LOAN_CANCELLED_BY_EMPLOYEE" -> "Your loan request was cancelled.";
+            case "LOAN_MEETING_SCHEDULED" -> "Your loan meeting has been scheduled.";
+            case "LOAN_MEETING_UPDATED" -> "Your loan meeting has been updated.";
             case "LOAN_APPROVED" -> "Your loan request was approved.";
             case "LOAN_REJECTED" -> "Your loan request was rejected.";
             case "LOAN_CANCELLED_AFTER_MEETING" -> "Your loan request was canceled after the meeting.";
+            case "LOAN_FINAL_FILE_READY" -> "Your final HR loan document is ready.";
             case "DOCUMENT_SUBMITTED" -> "Your document request was submitted.";
             case "DOCUMENT_APPROVED" -> "Your document request was approved. HR will upload the final file when it is ready.";
             case "DOCUMENT_READY", "DOCUMENT_FINAL_FILE_READY" -> "Your document is ready for download.";
@@ -362,7 +369,8 @@ public class RequestEventConsumer {
     private boolean maybeSendLoanDecisionEmail(RequestEvent event) {
         if (!"LOAN_APPROVED".equals(event.getType())
                 && !"LOAN_REJECTED".equals(event.getType())
-                && !"LOAN_CANCELLED_AFTER_MEETING".equals(event.getType())) {
+                && !"LOAN_CANCELLED_AFTER_MEETING".equals(event.getType())
+                && !"LOAN_SYSTEM_REJECTED".equals(event.getType())) {
             return true;
         }
         log.info("Entering loan email branch: eventType={} requestId={} employeeId={}",
@@ -384,8 +392,10 @@ public class RequestEventConsumer {
         var person = employee.getPerson();
 
         String refId = "LOAN-" + String.format("%06d", event.getRequestId());
-        double amount = request.getAmount() != null ? request.getAmount().doubleValue() : 0;
         boolean approved = "LOAN_APPROVED".equals(event.getType());
+        double amount = approved && request.getApprovedAmount() != null
+                ? request.getApprovedAmount().doubleValue()
+                : request.getAmount() != null ? request.getAmount().doubleValue() : 0;
         boolean sent;
         if (approved) {
             double installment = request.getMonthlyInstallment() != null
@@ -430,6 +440,86 @@ public class RequestEventConsumer {
             throw emailFailure(event, "loan", method + " returned false");
         }
         return true;
+    }
+
+    private void maybeSendLoanMeetingEmail(RequestEvent event) {
+        if (!"LOAN_MEETING_SCHEDULED".equals(event.getType())
+                && !"LOAN_MEETING_UPDATED".equals(event.getType())) {
+            return;
+        }
+        log.info("Entering loan meeting email branch: eventType={} requestId={} employeeId={}",
+                event.getType(), event.getRequestId(), event.getEmployeeId());
+        requireEmployeeIdForEmail(event, "loan meeting");
+        requireRequestIdForEmail(event, "loan meeting");
+
+        String emailDedupKey = "email:" + event.getType() + ":" + event.getRequestId();
+        if (processedEventService.isProcessed(emailDedupKey)) {
+            log.warn("Dedupe skipped loan meeting email: dedupKey={} requestId={} eventType={}",
+                    emailDedupKey, event.getRequestId(), event.getType());
+            return;
+        }
+
+        LoanRequest request = loanRequestRepository.findById(event.getRequestId())
+                .orElseThrow(() -> emailFailure(event, "loan meeting", "LoanRequest not found"));
+        User employee = resolveEmployeeForEmail(event, "loan meeting");
+        var person = employee.getPerson();
+        boolean updated = "LOAN_MEETING_UPDATED".equals(event.getType());
+        String refId = "LOAN-" + String.format("%06d", event.getRequestId());
+
+        log.info("Calling HREmailService method for loan meeting email: method=sendLoanMeetingNotification requestId={} recipientEmail={} updated={}",
+                event.getRequestId(), person.getEmail(), updated);
+        boolean sent = emailService.sendLoanMeetingNotification(
+                person.getEmail(),
+                person.getFirstName(),
+                person.getLastName(),
+                request.getMeetingAt(),
+                updated,
+                refId
+        );
+        log.info("Email send result for loan meeting email: requestId={} eventType={} recipientEmail={} result={}",
+                event.getRequestId(), event.getType(), person.getEmail(), sent);
+        if (sent) {
+            processedEventService.tryMarkProcessed(emailDedupKey, "loan-meeting-email");
+        } else {
+            throw emailFailure(event, "loan meeting", "HREmailService.sendLoanMeetingNotification returned false");
+        }
+    }
+
+    private void maybeSendLoanFinalFileReadyEmail(RequestEvent event) {
+        if (!"LOAN_FINAL_FILE_READY".equals(event.getType())) {
+            return;
+        }
+        log.info("Entering loan final file email branch: eventType={} requestId={} employeeId={}",
+                event.getType(), event.getRequestId(), event.getEmployeeId());
+        requireEmployeeIdForEmail(event, "loan final file");
+        requireRequestIdForEmail(event, "loan final file");
+
+        String emailDedupKey = "email:" + event.getType() + ":" + event.getRequestId();
+        if (processedEventService.isProcessed(emailDedupKey)) {
+            log.warn("Dedupe skipped loan final file email: dedupKey={} requestId={} eventType={}",
+                    emailDedupKey, event.getRequestId(), event.getType());
+            return;
+        }
+
+        User employee = resolveEmployeeForEmail(event, "loan final file");
+        var person = employee.getPerson();
+        String refId = "LOAN-" + String.format("%06d", event.getRequestId());
+
+        log.info("Calling HREmailService method for loan final file email: method=sendLoanFinalFileReady requestId={} recipientEmail={}",
+                event.getRequestId(), person.getEmail());
+        boolean sent = emailService.sendLoanFinalFileReady(
+                person.getEmail(),
+                person.getFirstName(),
+                person.getLastName(),
+                refId
+        );
+        log.info("Email send result for loan final file email: requestId={} eventType={} recipientEmail={} result={}",
+                event.getRequestId(), event.getType(), person.getEmail(), sent);
+        if (sent) {
+            processedEventService.tryMarkProcessed(emailDedupKey, "loan-final-file-email");
+        } else {
+            throw emailFailure(event, "loan final file", "HREmailService.sendLoanFinalFileReady returned false");
+        }
     }
 
     private void requireEmployeeIdForEmail(RequestEvent event, String emailFlow) {

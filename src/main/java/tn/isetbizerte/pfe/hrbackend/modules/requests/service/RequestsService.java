@@ -31,6 +31,7 @@ import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
 import org.springframework.data.domain.Page;
@@ -42,6 +43,23 @@ import org.springframework.security.oauth2.jwt.Jwt;
 public class RequestsService {
     private static final LocalTime SHORT_ABSENCE_WORKDAY_START = LocalTime.of(8, 0);
     private static final LocalTime SHORT_ABSENCE_WORKDAY_END = LocalTime.of(17, 0);
+    private static final LocalTime LOAN_MEETING_START = LocalTime.of(8, 0);
+    private static final LocalTime LOAN_MEETING_LUNCH_START = LocalTime.of(12, 0);
+    private static final LocalTime LOAN_MEETING_LATEST_START = LocalTime.of(16, 0);
+    private static final LocalTime LOAN_MEETING_WORKDAY_END = LocalTime.of(17, 0);
+    private static final Set<LocalTime> LOAN_MEETING_ALLOWED_START_TIMES = Set.of(
+            LocalTime.of(8, 0),
+            LocalTime.of(9, 0),
+            LocalTime.of(10, 0),
+            LocalTime.of(11, 0),
+            LocalTime.of(13, 0),
+            LocalTime.of(14, 0),
+            LocalTime.of(15, 0),
+            LocalTime.of(16, 0)
+    );
+    private static final int LOAN_REPAYMENT_MONTHS_COMPATIBILITY_VALUE = 1;
+    private static final BigDecimal LOAN_TOTAL_PAYBACK_LOWER_TOLERANCE = new BigDecimal("1.00");
+    private static final BigDecimal LOAN_MAX_TOTAL_PAYBACK_MULTIPLIER = new BigDecimal("1.20");
 
     private final DocumentRequestRepository      documentRepo;
     private final StoredEmployeeDocumentRepository storedDocumentRepo;
@@ -435,7 +453,7 @@ public class RequestsService {
 
     @Transactional
     public Map<String, Object> createLoanRequest(Jwt jwt, LoanType loanType,
-                                                  BigDecimal amount, int repaymentMonths, String reason) {
+                                                  BigDecimal amount, Integer repaymentMonths, String reason) {
         User user = authenticatedUserResolver.require(jwt);
         String hardFailReason = getLoanHardFailReason(user, amount);
 
@@ -443,7 +461,7 @@ public class RequestsService {
         req.setUser(user);
         req.setLoanType(loanType);
         req.setAmount(amount);
-        req.setRepaymentMonths(repaymentMonths);
+        req.setRepaymentMonths(repaymentMonths != null ? repaymentMonths : LOAN_REPAYMENT_MONTHS_COMPATIBILITY_VALUE);
         req.setReason(reason);
 
         if (hardFailReason != null) {
@@ -452,16 +470,11 @@ public class RequestsService {
             req.setSystemRecommendation("REJECT");
             req.setDecisionReason(hardFailReason);
             req.setMeetingRequired(false);
-            req.setMonthlyInstallment(amount.divide(BigDecimal.valueOf(repaymentMonths), 2, RoundingMode.HALF_UP));
             req.setProcessedAt(LocalDateTime.now());
         } else {
-            // Run scoring engine — sets monthlyInstallment, riskScore, recommendation, decisionReason
-            loanScoreEngine.evaluate(req);
-
-            if (isSystemHardReject(req)) {
-                req.setStatus(RequestStatus.SYSTEM_REJECTED);
-                req.setProcessedAt(LocalDateTime.now());
-            }
+            req.setSystemRecommendation("REVIEW");
+            req.setDecisionReason("Loan passed hard eligibility checks and is ready for HR review.");
+            req.setMeetingRequired(false);
         }
 
         loanRepo.save(req);
@@ -601,6 +614,9 @@ public class RequestsService {
         if (req.getStatus() != RequestStatus.PENDING) {
             throw new BadRequestException("Only pending loan requests can be canceled by the employee.");
         }
+        if (req.getMeetingAt() != null) {
+            throw new BadRequestException("Loan cannot be canceled by the employee after a meeting has been scheduled.");
+        }
         LocalDateTime canceledAt = LocalDateTime.now();
         req.setStatus(RequestStatus.CANCELLED_BY_EMPLOYEE);
         req.setCanceledBy(requesterKeycloakId);
@@ -621,11 +637,32 @@ public class RequestsService {
                 .map(this::mapLoan);
     }
 
+    private BigDecimal resolveLoanMaxEligibleAmount(LoanRequest req) {
+        if (req.getUser() == null
+                || req.getUser().getPerson() == null
+                || req.getUser().getPerson().getSalary() == null
+                || req.getUser().getPerson().getSalary().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BadRequestException("Employee salary is required to validate the maximum eligible loan amount.");
+        }
+        return req.getUser().getPerson().getSalary().multiply(new BigDecimal("3"));
+    }
+
     @Transactional
-    public Map<String, Object> decideLoan(Long id, boolean approve, String hrNote, String decidedByKeycloakId) {
+    public Map<String, Object> decideLoan(Long id, boolean approve, String hrNote,
+                                          Integer repaymentMonths, BigDecimal approvedAmount,
+                                          BigDecimal monthlyPayback, String decidedByKeycloakId) {
+        return decideLoan(id, approve, hrNote, repaymentMonths, approvedAmount, monthlyPayback, null, decidedByKeycloakId);
+    }
+
+    @Transactional
+    public Map<String, Object> decideLoan(Long id, boolean approve, String hrNote,
+                                          Integer repaymentMonths, BigDecimal approvedAmount,
+                                          BigDecimal monthlyPayback, String approvedAmountJustification,
+                                          String decidedByKeycloakId) {
         LoanRequest req = loanRepo.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Loan request not found: " + id));
         String note = hrNote != null ? hrNote.trim() : "";
+        String amountJustification = approvedAmountJustification != null ? approvedAmountJustification.trim() : "";
         if (req.getUser() != null && decidedByKeycloakId != null
                 && decidedByKeycloakId.equals(req.getUser().getKeycloakId())) {
             throw new AccessDeniedException("You cannot approve or reject your own loan request.");
@@ -634,6 +671,51 @@ public class RequestsService {
             throw new BadRequestException("Request already " + req.getStatus().name().toLowerCase());
         if (!approve && note.isBlank()) {
             throw new BadRequestException("Rejection reason is required.");
+        }
+        if (!approve && req.getMeetingAt() != null) {
+            throw new BadRequestException("Loan cannot be rejected after a meeting has been scheduled. Cancel after meeting if no agreement is reached.");
+        }
+        if (approve) {
+            if (req.getMeetingAt() == null) {
+                throw new BadRequestException("A meeting must be scheduled before approving this loan.");
+            }
+            if (LocalDateTime.now().isBefore(req.getMeetingAt())) {
+                throw new BadRequestException("This loan has a scheduled meeting. Final approval is available after the meeting time.");
+            }
+            if (repaymentMonths == null) {
+                throw new BadRequestException("Repayment duration is required for loan approval.");
+            }
+            if (repaymentMonths < 1 || repaymentMonths > 60) {
+                throw new BadRequestException("Repayment duration must be between 1 and 60 months.");
+            }
+            if (approvedAmount == null) {
+                throw new BadRequestException("Approved amount is required for loan approval.");
+            }
+            if (approvedAmount.compareTo(BigDecimal.ZERO) <= 0) {
+                throw new BadRequestException("Approved amount must be greater than 0.");
+            }
+            BigDecimal requestedAmount = req.getAmount();
+            BigDecimal maxEligibleAmount = resolveLoanMaxEligibleAmount(req);
+            if (approvedAmount.compareTo(maxEligibleAmount) > 0) {
+                throw new BadRequestException("Approved amount cannot exceed the employee's maximum eligible amount.");
+            }
+            if (requestedAmount != null && approvedAmount.compareTo(requestedAmount) > 0 && amountJustification.isBlank()) {
+                throw new BadRequestException("Justification is required when approving more than the requested amount.");
+            }
+            if (monthlyPayback == null) {
+                throw new BadRequestException("Monthly payback is required for loan approval.");
+            }
+            if (monthlyPayback.compareTo(BigDecimal.ZERO) <= 0) {
+                throw new BadRequestException("Monthly payback must be greater than 0.");
+            }
+            BigDecimal totalPayback = monthlyPayback.multiply(BigDecimal.valueOf(repaymentMonths));
+            if (totalPayback.add(LOAN_TOTAL_PAYBACK_LOWER_TOLERANCE).compareTo(approvedAmount) < 0) {
+                throw new BadRequestException("Total payback must cover the approved amount.");
+            }
+            BigDecimal maxTotalPayback = approvedAmount.multiply(LOAN_MAX_TOTAL_PAYBACK_MULTIPLIER);
+            if (totalPayback.compareTo(maxTotalPayback) > 0) {
+                throw new BadRequestException("Total payback cannot exceed 20% above the approved amount.");
+            }
         }
         String action = approve ? "HR_APPROVED" : "HR_REJECTED";
         if (historyService.exists("LOAN", action, req.getId(), decidedByKeycloakId)) {
@@ -644,6 +726,12 @@ public class RequestsService {
         req.setHrNote(note);
         req.setProcessedAt(decidedAt);
         if (approve) {
+            BigDecimal normalizedApprovedAmount = approvedAmount.setScale(2, RoundingMode.HALF_UP);
+            BigDecimal normalizedMonthlyPayback = monthlyPayback.setScale(2, RoundingMode.HALF_UP);
+            req.setApprovedAmount(normalizedApprovedAmount);
+            req.setApprovedAmountJustification(req.getAmount() != null && approvedAmount.compareTo(req.getAmount()) > 0 ? amountJustification : null);
+            req.setRepaymentMonths(repaymentMonths);
+            req.setMonthlyInstallment(normalizedMonthlyPayback);
             req.setApprovedBy(decidedByKeycloakId);
             req.setApprovedAt(decidedAt);
             req.setVerificationToken(UUID.randomUUID().toString());
@@ -700,9 +788,13 @@ public class RequestsService {
         if (req.getStatus() != RequestStatus.PENDING) {
             throw new BadRequestException("Meeting can only be scheduled for loans pending HR review.");
         }
+        if (req.getMeetingAt() != null) {
+            throw new BadRequestException("Loan meeting has already been scheduled and cannot be changed.");
+        }
         if (meetingAt == null) {
             throw new BadRequestException("Meeting date and time are required.");
         }
+        validateLoanMeetingAvailability(req, meetingAt, decidedByKeycloakId);
         req.setMeetingAt(meetingAt);
         req.setMeetingNote(meetingNote);
         req.setMeetingScheduledBy(decidedByKeycloakId);
@@ -710,7 +802,72 @@ public class RequestsService {
         loanRepo.save(req);
         historyService.record("LOAN", "HR_SCHEDULED_MEETING", req.getId(), decidedByKeycloakId,
                 meetingAt + (meetingNote != null && !meetingNote.isBlank() ? " - " + meetingNote : ""));
+        requestEventProducer.publish(
+                new RequestEvent(
+                        "LOAN_MEETING_SCHEDULED",
+                        "LOAN",
+                        req.getId(),
+                        req.getUser().getKeycloakId(),
+                        decidedByKeycloakId,
+                        meetingAt.toString()
+                )
+        );
         return mapLoan(req);
+    }
+
+    private void validateLoanMeetingAvailability(LoanRequest req, LocalDateTime meetingAt, String decidedByKeycloakId) {
+        if (meetingAt == null) {
+            throw new BadRequestException("Meeting date and time are required.");
+        }
+        LocalDate meetingDate = meetingAt.toLocalDate();
+        if (!meetingDate.isAfter(LocalDate.now())) {
+            throw new BadRequestException("Loan meetings must be scheduled at least one day in advance.");
+        }
+        if (!workingDayService.isWorkingDay(meetingDate)) {
+            throw new BadRequestException("Loan meetings can only be scheduled on working days.");
+        }
+
+        LocalTime startTime = meetingAt.toLocalTime();
+        LocalTime endTime = startTime.plusHours(1);
+        if (!LOAN_MEETING_ALLOWED_START_TIMES.contains(startTime)
+                || startTime.isBefore(LOAN_MEETING_START)
+                || startTime.isAfter(LOAN_MEETING_LATEST_START)
+                || endTime.isAfter(LOAN_MEETING_WORKDAY_END)
+                || startTime.equals(LOAN_MEETING_LUNCH_START)) {
+            throw new BadRequestException("Loan meetings must start at an available hourly slot between 08:00 and 16:00, excluding 12:00 lunch break.");
+        }
+
+        if (decidedByKeycloakId != null && !decidedByKeycloakId.isBlank()
+                && loanRepo.existsScheduledMeetingConflictForHr(req.getId(), decidedByKeycloakId, meetingAt, RequestStatus.PENDING)) {
+            throw new BadRequestException("You already have another loan meeting scheduled at this time.");
+        }
+
+        if (req.getUser() != null
+                && loanRepo.existsScheduledMeetingConflictForEmployee(req.getId(), req.getUser(), meetingAt, RequestStatus.PENDING)) {
+            throw new BadRequestException("This employee already has another loan meeting scheduled at this time.");
+        }
+
+        if (req.getUser() != null
+                && authRepo.existsShortAbsenceOverlap(
+                req.getUser(),
+                AuthorizationType.TIME_PERMISSION,
+                RequestStatus.APPROVED,
+                meetingDate,
+                startTime,
+                endTime
+        )) {
+            throw new BadRequestException("This employee has an approved short absence during the selected meeting time.");
+        }
+
+        var overlaps = leaveRequestRepository.findByUserAndDateRangeAndStatusIn(
+                req.getUser(),
+                meetingDate,
+                meetingDate,
+                List.of(LeaveStatus.PENDING, LeaveStatus.APPROVED)
+        );
+        if (!overlaps.isEmpty()) {
+            throw new BadRequestException("This employee is not available on the selected meeting date.");
+        }
     }
 
     @Transactional
@@ -804,6 +961,16 @@ public class RequestsService {
             loanRepo.save(req);
 
             historyService.record("LOAN", "HR_UPLOADED_FINAL_FILE", req.getId(), decidedByKeycloakId, req.getAttachmentFileName());
+            requestEventProducer.publish(
+                    new RequestEvent(
+                            "LOAN_FINAL_FILE_READY",
+                            "LOAN",
+                            req.getId(),
+                            req.getUser().getKeycloakId(),
+                            decidedByKeycloakId,
+                            req.getAttachmentFileName()
+                    )
+            );
             return mapLoan(req);
         } catch (Exception e) {
             log.warn("Loan final file store failed. requestId={} actorId={}", id, decidedByKeycloakId, e);
@@ -1191,6 +1358,8 @@ public class RequestsService {
         m.put("loanType",        r.getLoanType().name());
         m.put("loanTypeLabel",   fmt(r.getLoanType().name()));
         m.put("amount",          r.getAmount());
+        m.put("approvedAmount",  r.getApprovedAmount());
+        m.put("approvedAmountJustification", r.getApprovedAmountJustification());
         m.put("repaymentMonths", r.getRepaymentMonths());
         m.put("reason",          r.getReason());
         m.put("status",          r.getStatus().name());
@@ -1215,10 +1384,22 @@ public class RequestsService {
         m.put("attachmentSizeBytes", r.getAttachmentSizeBytes());
         m.put("employeeName",    r.getEmployeeFullName());
         if (r.getUser() != null) {
+            m.put("employeeId", r.getUser().getId());
             m.put("employeeUsername", r.getUser().getUsername());
+            m.put("employeeRole", r.getUser().getRole() != null ? r.getUser().getRole().name() : null);
         }
         // Scoring fields
         m.put("monthlyInstallment",   r.getMonthlyInstallment());
+        m.put("monthlyPayback",       r.getMonthlyInstallment());
+        if (r.getMonthlyInstallment() != null && r.getRepaymentMonths() != null) {
+            BigDecimal totalPayback = r.getMonthlyInstallment().multiply(BigDecimal.valueOf(r.getRepaymentMonths()));
+            m.put("totalPayback", totalPayback);
+            BigDecimal approvedForPayback = r.getApprovedAmount() != null ? r.getApprovedAmount() : r.getAmount();
+            if (approvedForPayback != null) {
+                BigDecimal additionalPayback = totalPayback.subtract(approvedForPayback);
+                m.put("additionalPayback", additionalPayback.compareTo(BigDecimal.ZERO) > 0 ? additionalPayback : BigDecimal.ZERO);
+            }
+        }
         m.put("riskScore",            r.getRiskScore());
         m.put("systemRecommendation", r.getSystemRecommendation());
         m.put("decisionReason",       r.getDecisionReason());
@@ -1229,9 +1410,21 @@ public class RequestsService {
         m.put("meetingScheduledAt",   r.getMeetingScheduledAt());
         // Include salary for HR risk assessment
         if (r.getUser() != null && r.getUser().getPerson() != null) {
-            m.put("employeeSalary",           r.getUser().getPerson().getSalary());
-            m.put("employeeHireDate",         r.getUser().getPerson().getHireDate());
-            m.put("currentMonthlyDeductions", r.getUser().getPerson().getCurrentMonthlyDeductions());
+            var person = r.getUser().getPerson();
+            m.put("employeeEmail",            person.getEmail());
+            m.put("employeeDepartment",       person.getDepartment());
+            m.put("employeeJobTitle",         person.getJobTitle());
+            m.put("employeeSalary",           person.getSalary());
+            m.put("employeeHireDate",         person.getHireDate());
+            m.put("currentMonthlyDeductions", person.getCurrentMonthlyDeductions());
+            if (person.getHireDate() != null) {
+                m.put("employeeSeniorityMonths", ChronoUnit.MONTHS.between(person.getHireDate(), LocalDate.now()));
+            }
+            if (person.getSalary() != null) {
+                BigDecimal maxEligibleAmount = person.getSalary().multiply(new BigDecimal("3"));
+                m.put("maxLoan", maxEligibleAmount);
+                m.put("maxEligibleAmount", maxEligibleAmount);
+            }
         }
         return m;
     }

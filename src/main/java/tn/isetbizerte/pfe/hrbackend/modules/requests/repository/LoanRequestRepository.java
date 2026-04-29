@@ -7,10 +7,12 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import tn.isetbizerte.pfe.hrbackend.common.enums.RequestStatus;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.entity.LoanRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
 
 import jakarta.persistence.LockModeType;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -25,4 +27,34 @@ public interface LoanRequestRepository extends JpaRepository<LoanRequest, Long> 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select l from LoanRequest l where l.id = :id")
     Optional<LoanRequest> findByIdForUpdate(@Param("id") Long id);
+
+    @Query("""
+            select count(l) > 0
+            from LoanRequest l
+            where l.id <> :loanId
+              and l.status = :status
+              and l.meetingScheduledBy = :meetingScheduledBy
+              and l.meetingAt = :meetingAt
+            """)
+    boolean existsScheduledMeetingConflictForHr(
+            @Param("loanId") Long loanId,
+            @Param("meetingScheduledBy") String meetingScheduledBy,
+            @Param("meetingAt") LocalDateTime meetingAt,
+            @Param("status") RequestStatus status
+    );
+
+    @Query("""
+            select count(l) > 0
+            from LoanRequest l
+            where l.id <> :loanId
+              and l.status = :status
+              and l.user = :user
+              and l.meetingAt = :meetingAt
+            """)
+    boolean existsScheduledMeetingConflictForEmployee(
+            @Param("loanId") Long loanId,
+            @Param("user") User user,
+            @Param("meetingAt") LocalDateTime meetingAt,
+            @Param("status") RequestStatus status
+    );
 }

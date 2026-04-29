@@ -165,6 +165,51 @@ public class HREmailService {
         }
     }
 
+    public boolean sendLoanMeetingNotification(String email, String firstName, String lastName,
+                                               LocalDateTime meetingAt, boolean updated,
+                                               String referenceId) {
+        String requestId = extractRequestId(referenceId);
+        String subject = updated
+                ? "Loan Meeting Updated – " + referenceId
+                : "Loan Meeting Scheduled – " + referenceId;
+        log.info("HREmailService.sendLoanMeetingNotification called: recipientEmail={} requestId={} subject={} updated={}",
+                email, requestId, subject, updated);
+        try {
+            String name = firstName + " " + lastName;
+            boolean result = send(email,
+                    subject,
+                    buildLoanMeetingNotificationBody(name, meetingAt, updated, referenceId));
+            log.info("HREmailService.sendLoanMeetingNotification result: recipientEmail={} requestId={} subject={} result={}",
+                    email, requestId, subject, result);
+            return result;
+        } catch (Exception e) {
+            log.error("HREmailService.sendLoanMeetingNotification exception: recipientEmail={} requestId={} subject={} message={}",
+                    email, requestId, subject, e.getMessage(), e);
+            return false;
+        }
+    }
+
+    public boolean sendLoanFinalFileReady(String email, String firstName, String lastName,
+                                          String referenceId) {
+        String requestId = extractRequestId(referenceId);
+        String subject = "Final Loan Document Ready – " + referenceId;
+        log.info("HREmailService.sendLoanFinalFileReady called: recipientEmail={} requestId={} subject={}",
+                email, requestId, subject);
+        try {
+            String name = firstName + " " + lastName;
+            boolean result = send(email,
+                    subject,
+                    buildLoanFinalFileReadyBody(name, referenceId));
+            log.info("HREmailService.sendLoanFinalFileReady result: recipientEmail={} requestId={} subject={} result={}",
+                    email, requestId, subject, result);
+            return result;
+        } catch (Exception e) {
+            log.error("HREmailService.sendLoanFinalFileReady exception: recipientEmail={} requestId={} subject={} message={}",
+                    email, requestId, subject, e.getMessage(), e);
+            return false;
+        }
+    }
+
     // ═══════════════════════════════════════════════════════════════════
     // 6 — PASSWORD RESET OTP
     // ═══════════════════════════════════════════════════════════════════
@@ -548,6 +593,48 @@ public class HREmailService {
                     {"Requested Amount",String.format("%.0f TND", amount)},
                 }),
                 reason != null ? reason : "Does not meet current loan eligibility criteria."));
+    }
+
+    private String buildLoanMeetingNotificationBody(String name, LocalDateTime meetingAt,
+                                                    boolean updated, String refId) {
+        String action = updated ? "updated" : "scheduled";
+        return wrap(updated ? "Loan Meeting Updated" : "Loan Meeting Scheduled", "Reference: " + refId, """
+            <p style="font-size:15px;color:#374151;line-height:1.8;">
+                Dear <strong>%s</strong>,
+            </p>
+            <p style="font-size:15px;color:#374151;line-height:1.8;">
+                Your loan meeting has been %s. Please check your loan request details
+                for the date and time.
+            </p>
+            %s
+            %s
+            """.formatted(name, action,
+                infoGrid(new String[][]{
+                    {"Reference ID", refId},
+                    {"Meeting", formatDateTimeOrDash(meetingAt)},
+                    {"Status", updated ? "Updated" : "Scheduled"},
+                }),
+                actionButton("Open My Loans", frontendUrl + "/employee/loans", "#2563EB")));
+    }
+
+    private String buildLoanFinalFileReadyBody(String name, String refId) {
+        return wrap("Final Loan Document Ready", "Reference: " + refId, """
+            <p style="font-size:15px;color:#374151;line-height:1.8;">
+                Dear <strong>%s</strong>,
+            </p>
+            <p style="font-size:15px;color:#374151;line-height:1.8;">
+                Your final HR loan document is ready. You can download it from your
+                loan history.
+            </p>
+            %s
+            %s
+            """.formatted(name,
+                infoGrid(new String[][]{
+                    {"Reference ID", refId},
+                    {"Document", "Final HR loan document"},
+                    {"Status", "Ready for download"},
+                }),
+                actionButton("Open My Loans", frontendUrl + "/employee/loans", "#2563EB")));
     }
 
     private String buildPasswordResetBody(String name, String otpCode, String expiresAt) {
