@@ -26,6 +26,14 @@ public interface AuthorizationRequestRepository extends JpaRepository<Authorizat
     Page<AuthorizationRequest> findAllByOrderByRequestedAtDesc(Pageable pageable);
     Optional<AuthorizationRequest> findByVerificationToken(String token);
 
+    List<AuthorizationRequest> findByUserAndAuthorizationTypeAndStatusAndAbsenceDateBetweenOrderByAbsenceDateAscFromTimeAsc(
+            User user,
+            AuthorizationType authorizationType,
+            RequestStatus status,
+            LocalDate taskStart,
+            LocalDate taskEnd
+    );
+
     @Modifying
     @Transactional
     @Query(value = """

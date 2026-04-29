@@ -9,6 +9,8 @@ import org.springframework.web.bind.annotation.*;
 import tn.isetbizerte.pfe.hrbackend.modules.task.dto.CreateProjectRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.task.dto.CreateTaskRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.task.dto.TaskAssignmentPreviewRequest;
+import tn.isetbizerte.pfe.hrbackend.modules.task.dto.UpdateProjectRequest;
+import tn.isetbizerte.pfe.hrbackend.modules.task.dto.UpdateTaskRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.task.dto.UpdateTaskStatusRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.task.service.TaskService;
 
@@ -51,6 +53,20 @@ public class TaskController {
         return ResponseEntity.ok(res);
     }
 
+    /** PATCH /api/leader/projects/{projectId} — edit project basic info */
+    @PreAuthorize("hasRole('TEAM_LEADER')")
+    @PatchMapping("/api/leader/projects/{projectId}")
+    public ResponseEntity<Map<String, Object>> updateProject(
+            @PathVariable Long projectId,
+            @Valid @RequestBody UpdateProjectRequest req,
+            @AuthenticationPrincipal Jwt jwt) {
+        Map<String, Object> res = new HashMap<>();
+        res.put("success", true);
+        res.put("message", "Project updated");
+        res.put("data", taskService.updateProject(jwt.getSubject(), projectId, req));
+        return ResponseEntity.ok(res);
+    }
+
     /** DELETE /api/leader/projects/{projectId} — delete a project */
     @PreAuthorize("hasRole('TEAM_LEADER')")
     @DeleteMapping("/api/leader/projects/{projectId}")
@@ -88,6 +104,20 @@ public class TaskController {
         Map<String, Object> res = new HashMap<>();
         res.put("success", true);
         res.put("data", taskService.previewTaskAssignment(jwt.getSubject(), projectId, req.getTask()));
+        return ResponseEntity.ok(res);
+    }
+
+    /** PATCH /api/leader/tasks/{taskId} — edit task basic info */
+    @PreAuthorize("hasRole('TEAM_LEADER')")
+    @PatchMapping("/api/leader/tasks/{taskId}")
+    public ResponseEntity<Map<String, Object>> updateTask(
+            @PathVariable Long taskId,
+            @Valid @RequestBody UpdateTaskRequest req,
+            @AuthenticationPrincipal Jwt jwt) {
+        Map<String, Object> res = new HashMap<>();
+        res.put("success", true);
+        res.put("message", "Task updated");
+        res.put("data", taskService.updateTask(jwt.getSubject(), taskId, req));
         return ResponseEntity.ok(res);
     }
 

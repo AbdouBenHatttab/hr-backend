@@ -14,6 +14,10 @@ public interface ProjectRepository extends JpaRepository<Project, Long> {
 
     List<Project> findByTeamId(Long teamId);
 
+    boolean existsByTeamIdAndNameIgnoreCase(Long teamId, String name);
+
+    boolean existsByTeamIdAndNameIgnoreCaseAndIdNot(Long teamId, String name, Long id);
+
     @Query("SELECT p FROM Project p LEFT JOIN FETCH p.tasks WHERE p.id = :id")
     Optional<Project> findByIdWithTasks(@Param("id") Long id);
 

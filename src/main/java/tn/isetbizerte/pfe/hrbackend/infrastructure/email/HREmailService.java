@@ -247,7 +247,21 @@ public class HREmailService {
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    // 8 — TASK COMPLETED (TEAM LEADER)
+    // 8 — TASK UPDATED
+    // ═══════════════════════════════════════════════════════════════════
+
+    @Async
+    public void sendTaskUpdated(String email, String firstName, String lastName,
+                                String taskTitle, String taskDescription, String projectName,
+                                String priority, LocalDate startDate, LocalDate dueDate, String updatedBy) {
+        String name = firstName + " " + lastName;
+        send(email,
+                "Task Updated – " + COMPANY + " HRMS",
+                buildTaskUpdatedBody(name, taskTitle, taskDescription, projectName, priority, startDate, dueDate, updatedBy));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 9 — TASK COMPLETED (TEAM LEADER)
     // ═══════════════════════════════════════════════════════════════════
 
     @Async
@@ -260,7 +274,7 @@ public class HREmailService {
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    // 9 — DOCUMENT READY
+    // 10 — DOCUMENT READY
     // ═══════════════════════════════════════════════════════════════════
 
     public boolean sendDocumentReady(String email, String firstName, String lastName,
@@ -740,6 +754,40 @@ public class HREmailService {
                     {"Start Date", start},
                     {"Due Date", due},
                     {"Assigned By", assignedByValue}
+                }),
+                actionButton("Open My Tasks", frontendUrl + "/employee/tasks", "#2563EB")));
+    }
+
+    private String buildTaskUpdatedBody(String name, String taskTitle, String taskDescription, String projectName,
+                                        String priority, LocalDate startDate, LocalDate dueDate, String updatedBy) {
+        String due = dueDate != null ? dueDate.format(DATE_FMT) : "No due date";
+        String start = startDate != null ? startDate.format(DATE_FMT) : "No start date";
+        String description = (taskDescription != null && !taskDescription.isBlank()) ? taskDescription : "No description provided";
+        String projectValue = (projectName != null && !projectName.isBlank()) ? projectName : "No project";
+        String priorityLabel = priority != null ? priority.replace("_", " ") : "MEDIUM";
+        String updatedByValue = (updatedBy != null && !updatedBy.isBlank()) ? updatedBy : "Team Leader";
+
+        return wrap("Task Updated", "A task assigned to you has been updated", """
+            <p style="font-size:15px;color:#374151;line-height:1.8;">
+                Dear <strong>%s</strong>,
+            </p>
+            <p style="font-size:15px;color:#374151;line-height:1.8;">
+                A task assigned to you has been updated. Please review the latest details below.
+            </p>
+            %s
+            <p style="font-size:15px;color:#374151;line-height:1.8;">
+                If you need clarification, please contact your Team Leader.
+            </p>
+            %s
+            """.formatted(name,
+                infoGrid(new String[][]{
+                    {"Task Title", taskTitle},
+                    {"What to do", description},
+                    {"Project", projectValue},
+                    {"Priority", priorityLabel},
+                    {"Start Date", start},
+                    {"Due Date", due},
+                    {"Updated By", updatedByValue}
                 }),
                 actionButton("Open My Tasks", frontendUrl + "/employee/tasks", "#2563EB")));
     }

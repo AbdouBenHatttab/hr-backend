@@ -4,6 +4,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tn.isetbizerte.pfe.hrbackend.common.enums.AuthorizationType;
+import tn.isetbizerte.pfe.hrbackend.common.enums.RequestStatus;
 import tn.isetbizerte.pfe.hrbackend.common.enums.TaskStatus;
 import tn.isetbizerte.pfe.hrbackend.common.enums.TaskAssignmentMode;
 import tn.isetbizerte.pfe.hrbackend.common.enums.TypeRole;
@@ -18,8 +20,12 @@ import tn.isetbizerte.pfe.hrbackend.modules.employee.repository.LeaveRequestRepo
 import tn.isetbizerte.pfe.hrbackend.infrastructure.email.HREmailService;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.kafka.producer.NotificationEventProducer;
 import tn.isetbizerte.pfe.hrbackend.modules.notification.service.NotificationService;
+import tn.isetbizerte.pfe.hrbackend.modules.requests.entity.AuthorizationRequest;
+import tn.isetbizerte.pfe.hrbackend.modules.requests.repository.AuthorizationRequestRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.task.dto.CreateProjectRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.task.dto.CreateTaskRequest;
+import tn.isetbizerte.pfe.hrbackend.modules.task.dto.UpdateProjectRequest;
+import tn.isetbizerte.pfe.hrbackend.modules.task.dto.UpdateTaskRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.task.entity.Project;
 import tn.isetbizerte.pfe.hrbackend.modules.task.entity.Task;
 import tn.isetbizerte.pfe.hrbackend.modules.task.repository.ProjectRepository;
@@ -31,6 +37,7 @@ import tn.isetbizerte.pfe.hrbackend.modules.user.repository.UserRepository;
 
 import java.time.LocalDateTime;
 import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -45,12 +52,14 @@ import java.util.stream.Collectors;
 public class TaskService {
 
     private static final Logger logger = LoggerFactory.getLogger(TaskService.class);
+    private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm");
 
     private final ProjectRepository projectRepository;
     private final TaskRepository    taskRepository;
     private final TeamRepository    teamRepository;
     private final UserRepository    userRepository;
     private final LeaveRequestRepository leaveRequestRepository;
+    private final AuthorizationRequestRepository authorizationRequestRepository;
     private final WorkingDayService workingDayService;
     private final NotificationEventProducer notificationEventProducer;
     private final HREmailService hrEmailService;
@@ -59,6 +68,7 @@ public class TaskService {
     public TaskService(ProjectRepository projectRepository, TaskRepository taskRepository,
                        TeamRepository teamRepository, UserRepository userRepository,
                        LeaveRequestRepository leaveRequestRepository,
+                       AuthorizationRequestRepository authorizationRequestRepository,
                        WorkingDayService workingDayService,
                        NotificationEventProducer notificationEventProducer,
                        HREmailService hrEmailService,
@@ -68,6 +78,7 @@ public class TaskService {
         this.teamRepository    = teamRepository;
         this.userRepository    = userRepository;
         this.leaveRequestRepository = leaveRequestRepository;
+        this.authorizationRequestRepository = authorizationRequestRepository;
         this.workingDayService = workingDayService;
         this.notificationEventProducer = notificationEventProducer;
         this.hrEmailService = hrEmailService;
@@ -81,8 +92,12 @@ public class TaskService {
     @Transactional
     public Map<String, Object> createProject(String leaderKeycloakId, CreateProjectRequest req) {
         Team team = getTeamByLeader(leaderKeycloakId);
+        String projectName = normalizeProjectName(req.getName());
+        if (projectRepository.existsByTeamIdAndNameIgnoreCase(team.getId(), projectName)) {
+            throw new BadRequestException("A project with this name already exists in your team.");
+        }
         Project project = new Project();
-        project.setName(req.getName());
+        project.setName(projectName);
         project.setDescription(req.getDescription());
         project.setTeam(team);
         projectRepository.save(project);
@@ -97,12 +112,25 @@ public class TaskService {
     }
 
     @Transactional
+    public Map<String, Object> updateProject(String leaderKeycloakId, Long projectId, UpdateProjectRequest req) {
+        Team team = getTeamByLeader(leaderKeycloakId);
+        Project project = getProjectInTeam(projectId, team);
+        String projectName = normalizeProjectName(req.getName());
+        if (projectRepository.existsByTeamIdAndNameIgnoreCaseAndIdNot(team.getId(), projectName, project.getId())) {
+            throw new BadRequestException("A project with this name already exists in your team.");
+        }
+        project.setName(projectName);
+        project.setDescription(req.getDescription());
+        project.setUpdatedAt(LocalDateTime.now());
+        projectRepository.save(project);
+        logger.info("Project '{}' updated for team '{}'", project.getName(), team.getName());
+        return mapProject(project);
+    }
+
+    @Transactional
     public Map<String, Object> deleteProject(String leaderKeycloakId, Long projectId) {
         Team team = getTeamByLeader(leaderKeycloakId);
-        Project project = projectRepository.findById(projectId)
-                .orElseThrow(() -> new ResourceNotFoundException("Project not found: " + projectId));
-        if (!project.getTeam().getId().equals(team.getId()))
-            throw new UnauthorizedException("This project does not belong to your team.");
+        Project project = getProjectInTeam(projectId, team);
         projectRepository.delete(project);
         Map<String, Object> res = new HashMap<>();
         res.put("success", true);
@@ -150,12 +178,48 @@ public class TaskService {
     }
 
     @Transactional
+    public Map<String, Object> updateTask(String leaderKeycloakId, Long taskId, UpdateTaskRequest req) {
+        Team team = getTeamByLeader(leaderKeycloakId);
+        Task task = getTaskInTeam(taskId, team);
+
+        LocalDate taskStart = req.getStartDate();
+        LocalDate taskEnd = req.getDueDate();
+        List<String> pastDateIssues = collectPastDateIssues(taskStart, taskEnd);
+        if (!pastDateIssues.isEmpty()) {
+            throw new BadRequestException(pastDateIssues.get(0));
+        }
+        if (taskEnd.isBefore(taskStart)) {
+            throw new BadRequestException("Due date cannot be before start date.");
+        }
+
+        if (task.getAssignee() != null) {
+            AssignmentPreview preview = previewAssignments(List.of(task.getAssignee()), taskStart, taskEnd);
+            if (!preview.blocked.isEmpty()) {
+                throw new BadRequestException(firstBlockingReason(preview));
+            }
+        } else {
+            List<String> dateIssues = collectDateIssues(taskStart, taskEnd);
+            if (!dateIssues.isEmpty()) {
+                throw new BadRequestException(dateIssues.get(0));
+            }
+        }
+
+        task.setTitle(req.getTitle());
+        task.setDescription(req.getDescription());
+        task.setPriority(req.getPriority());
+        task.setStartDate(taskStart);
+        task.setDueDate(taskEnd);
+        task.setUpdatedAt(LocalDateTime.now());
+        taskRepository.save(task);
+        notifyAssigneeOfTaskUpdate(task, leaderKeycloakId);
+        logger.info("Task '{}' updated in project '{}'", task.getTitle(), task.getProject().getName());
+        return mapTask(task);
+    }
+
+    @Transactional
     public Map<String, Object> deleteTask(String leaderKeycloakId, Long taskId) {
         Team team = getTeamByLeader(leaderKeycloakId);
-        Task task = taskRepository.findById(taskId)
-                .orElseThrow(() -> new ResourceNotFoundException("Task not found: " + taskId));
-        if (!task.getProject().getTeam().getId().equals(team.getId()))
-            throw new UnauthorizedException("Task does not belong to your team.");
+        Task task = getTaskInTeam(taskId, team);
         taskRepository.delete(task);
         Map<String, Object> res = new HashMap<>();
         res.put("success", true);
@@ -197,6 +261,9 @@ public class TaskService {
         TaskStatus current = task.getStatus();
         if (current == TaskStatus.DONE) {
             throw new BadRequestException("Task is already completed and cannot be changed.");
+        }
+        if (current == TaskStatus.TODO && newStatus == TaskStatus.DONE) {
+            throw new BadRequestException("Task must be started before it can be completed.");
         }
         if (current == TaskStatus.IN_PROGRESS && newStatus == TaskStatus.TODO) {
             throw new BadRequestException("Cannot move a task back to TODO once it is in progress.");
@@ -282,6 +349,45 @@ public class TaskService {
                 .orElseThrow(() -> new ResourceNotFoundException("User not found: " + identifier));
     }
 
+    private Project getProjectInTeam(Long projectId, Team team) {
+        Project project = projectRepository.findById(projectId)
+                .orElseThrow(() -> new ResourceNotFoundException("Project not found: " + projectId));
+        if (project.getTeam() == null || !project.getTeam().getId().equals(team.getId())) {
+            throw new UnauthorizedException("This project does not belong to your team.");
+        }
+        return project;
+    }
+
+    private Task getTaskInTeam(Long taskId, Team team) {
+        Task task = taskRepository.findById(taskId)
+                .orElseThrow(() -> new ResourceNotFoundException("Task not found: " + taskId));
+        if (task.getProject() == null
+                || task.getProject().getTeam() == null
+                || !task.getProject().getTeam().getId().equals(team.getId())) {
+            throw new UnauthorizedException("Task does not belong to your team.");
+        }
+        return task;
+    }
+
+    private String normalizeProjectName(String name) {
+        if (name == null || name.trim().isEmpty()) {
+            throw new BadRequestException("Project name is required");
+        }
+        return name.trim();
+    }
+
+    @SuppressWarnings("unchecked")
+    private String firstBlockingReason(AssignmentPreview preview) {
+        if (preview.blocked.isEmpty()) {
+            return "Task cannot be updated because assignment availability is blocked.";
+        }
+        Object reasons = preview.blocked.get(0).get("reasons");
+        if (reasons instanceof List<?> list && !list.isEmpty()) {
+            return String.valueOf(list.get(0));
+        }
+        return "Task cannot be updated because assignment availability is blocked.";
+    }
+
     private void notifyAssigneeOfTaskAssignment(Task task, User assignee, String leaderKeycloakId) {
         String assigneeKeycloakId = assignee.getKeycloakId();
         String leaderName = resolveLeaderName(leaderKeycloakId);
@@ -336,8 +442,8 @@ public class TaskService {
                         assignee.getPerson().getFirstName(),
                         assignee.getPerson().getLastName(),
                         task.getTitle(),
-                        task.getProject().getName(),
                         task.getDescription(),
+                        task.getProject().getName(),
                         task.getPriority().name(),
                         task.getStartDate(),
                         task.getDueDate(),
@@ -351,6 +457,60 @@ public class TaskService {
             }
         } catch (Exception e) {
             logger.error("Failed to send task assignment email for taskId={}", task.getId(), e);
+        }
+    }
+
+    private void notifyAssigneeOfTaskUpdate(Task task, String leaderKeycloakId) {
+        User assignee = task.getAssignee();
+        if (assignee == null) {
+            return;
+        }
+
+        String assigneeKeycloakId = assignee.getKeycloakId();
+        String leaderName = resolveLeaderName(leaderKeycloakId);
+        String notificationMessage = "Task updated: " + task.getTitle();
+
+        try {
+            notificationEventProducer.publish(
+                    new NotificationEvent(
+                            assigneeKeycloakId,
+                            notificationMessage,
+                            "TASK_UPDATED",
+                            "TASK",
+                            task.getId(),
+                            "/employee/tasks?taskId=" + task.getId()
+                    )
+            );
+            logger.info("Task update notification enqueued for taskId={} to userId={}",
+                    task.getId(), assigneeKeycloakId);
+        } catch (Exception e) {
+            logger.warn("Failed to enqueue task update notification for taskId={}",
+                    task.getId(), e);
+        }
+
+        try {
+            if (assignee.getPerson() != null && assignee.getPerson().getEmail() != null
+                    && !assignee.getPerson().getEmail().isBlank()) {
+                hrEmailService.sendTaskUpdated(
+                        assignee.getPerson().getEmail(),
+                        assignee.getPerson().getFirstName(),
+                        assignee.getPerson().getLastName(),
+                        task.getTitle(),
+                        task.getDescription(),
+                        task.getProject() != null ? task.getProject().getName() : null,
+                        task.getPriority() != null ? task.getPriority().name() : null,
+                        task.getStartDate(),
+                        task.getDueDate(),
+                        leaderName
+                );
+                logger.info("Task update email sent for taskId={} to {}",
+                        task.getId(), assignee.getPerson().getEmail());
+            } else {
+                logger.warn("Task update email skipped (missing assignee email) for taskId={}",
+                        task.getId());
+            }
+        } catch (Exception e) {
+            logger.warn("Failed to send task update email for taskId={}", task.getId(), e);
         }
     }
 
@@ -375,6 +535,10 @@ public class TaskService {
 
         LocalDate taskStart = req.getStartDate() != null ? req.getStartDate() : req.getDueDate();
         LocalDate taskEnd = req.getDueDate() != null ? req.getDueDate() : req.getStartDate();
+        List<String> pastDateIssues = collectPastDateIssues(req.getStartDate(), req.getDueDate());
+        if (!pastDateIssues.isEmpty()) {
+            throw new BadRequestException(pastDateIssues.get(0));
+        }
         if (taskStart != null && taskEnd != null && taskEnd.isBefore(taskStart)) {
             throw new BadRequestException("Due date cannot be before start date.");
         }
@@ -445,6 +609,9 @@ public class TaskService {
     private AssignmentPreview previewAssignments(List<User> assignees, LocalDate taskStart, LocalDate taskEnd) {
         AssignmentPreview preview = new AssignmentPreview();
         List<String> dateIssues = collectDateIssues(taskStart, taskEnd);
+        int totalTaskWorkingDays = (taskStart != null && taskEnd != null)
+                ? workingDayService.countWorkingDays(taskStart, taskEnd)
+                : 0;
 
         for (User assignee : assignees) {
             Map<String, Object> summary = assigneeSummary(assignee);
@@ -467,14 +634,16 @@ public class TaskService {
                     List.of(LeaveStatus.APPROVED, LeaveStatus.PENDING)
             );
 
-            List<String> blockingReasons = overlaps.stream()
+            Set<LocalDate> approvedLeaveWorkingDates = new LinkedHashSet<>();
+            boolean hasApprovedLeaveOverlap = overlaps.stream()
                     .filter(leave -> leave.getStatus() == LeaveStatus.APPROVED)
-                    .sorted(Comparator.comparing(LeaveRequest::getStartDate))
-                    .map(leave -> String.format("Approved leave overlaps %s to %s", leave.getStartDate(), leave.getEndDate()))
-                    .collect(Collectors.toList());
+                    .peek(leave -> approvedLeaveWorkingDates.addAll(workingDatesInOverlap(taskStart, taskEnd, leave)))
+                    .findAny()
+                    .isPresent();
 
-            if (!blockingReasons.isEmpty()) {
-                preview.blocked.add(withReasons(summary, blockingReasons));
+            int availableWorkingDays = totalTaskWorkingDays - approvedLeaveWorkingDates.size();
+            if (hasApprovedLeaveOverlap && approvedLeaveWorkingDates.size() > 0 && availableWorkingDays <= 0) {
+                preview.blocked.add(withReasons(summary, List.of("Employee has no available working days during this task period.")));
                 continue;
             }
 
@@ -483,6 +652,25 @@ public class TaskService {
                     .sorted(Comparator.comparing(LeaveRequest::getStartDate))
                     .map(leave -> String.format("Pending leave overlaps %s to %s", leave.getStartDate(), leave.getEndDate()))
                     .collect(Collectors.toList());
+
+            if (hasApprovedLeaveOverlap && approvedLeaveWorkingDates.size() > 0) {
+                warningReasons.add(0, String.format(
+                        "Approved leave overlaps part of this task period. Employee still has %d available working day(s).",
+                        availableWorkingDays
+                ));
+            }
+
+            List<AuthorizationRequest> shortAbsences = authorizationRequestRepository
+                    .findByUserAndAuthorizationTypeAndStatusAndAbsenceDateBetweenOrderByAbsenceDateAscFromTimeAsc(
+                            assignee,
+                            AuthorizationType.TIME_PERMISSION,
+                            RequestStatus.APPROVED,
+                            taskStart,
+                            taskEnd
+                    );
+            warningReasons.addAll(shortAbsences.stream()
+                    .map(this::shortAbsenceWarning)
+                    .collect(Collectors.toList()));
 
             if (!warningReasons.isEmpty()) {
                 preview.warned.add(withReasons(summary, warningReasons));
@@ -500,8 +688,36 @@ public class TaskService {
         return preview;
     }
 
+    private Set<LocalDate> workingDatesInOverlap(LocalDate taskStart, LocalDate taskEnd, LeaveRequest leave) {
+        Set<LocalDate> dates = new LinkedHashSet<>();
+        if (taskStart == null || taskEnd == null || leave.getStartDate() == null || leave.getEndDate() == null) {
+            return dates;
+        }
+
+        LocalDate overlapStart = taskStart.isAfter(leave.getStartDate()) ? taskStart : leave.getStartDate();
+        LocalDate overlapEnd = taskEnd.isBefore(leave.getEndDate()) ? taskEnd : leave.getEndDate();
+        LocalDate current = overlapStart;
+        while (!current.isAfter(overlapEnd)) {
+            if (workingDayService.isWorkingDay(current)) {
+                dates.add(current);
+            }
+            current = current.plusDays(1);
+        }
+        return dates;
+    }
+
+    private String shortAbsenceWarning(AuthorizationRequest request) {
+        return String.format(
+                "Approved short absence on %s from %s to %s.",
+                request.getAbsenceDate(),
+                request.getFromTime() != null ? request.getFromTime().format(TIME_FORMATTER) : "time not specified",
+                request.getToTime() != null ? request.getToTime().format(TIME_FORMATTER) : "time not specified"
+        );
+    }
+
     private List<String> collectDateIssues(LocalDate startDate, LocalDate endDate) {
         Set<String> issues = new LinkedHashSet<>();
+        issues.addAll(collectPastDateIssues(startDate, endDate));
         if (startDate != null && !workingDayService.isWorkingDay(startDate)) {
             issues.add(dateIssueLabel("Start date", startDate));
         }
@@ -509,6 +725,18 @@ public class TaskService {
             issues.add(dateIssueLabel("Due date", endDate));
         }
         return new ArrayList<>(issues);
+    }
+
+    private List<String> collectPastDateIssues(LocalDate startDate, LocalDate endDate) {
+        List<String> issues = new ArrayList<>();
+        LocalDate today = LocalDate.now();
+        if (startDate != null && startDate.isBefore(today)) {
+            issues.add("Start date cannot be in the past.");
+        }
+        if (endDate != null && endDate.isBefore(today)) {
+            issues.add("Due date cannot be in the past.");
+        }
+        return issues;
     }
 
     private String dateIssueLabel(String label, LocalDate date) {
@@ -558,6 +786,7 @@ public class TaskService {
     }
 
     private Map<String, Object> mapTask(Task t) {
+        Project project = t.getProject();
         Map<String, Object> m = new HashMap<>();
         m.put("id",           t.getId());
         m.put("title",        t.getTitle());
@@ -566,8 +795,9 @@ public class TaskService {
         m.put("priority",     t.getPriority().name());
         m.put("startDate",   t.getStartDate());
         m.put("dueDate",      t.getDueDate());
-        m.put("projectId",    t.getProject().getId());
-        m.put("projectName",  t.getProject().getName());
+        m.put("projectId",    project != null ? project.getId() : null);
+        m.put("projectName",  project != null ? project.getName() : null);
+        m.put("projectDescription", project != null ? project.getDescription() : null);
         m.put("assigneeId",   t.getAssignee() != null ? t.getAssignee().getId() : null);
         m.put("assigneeName", t.getAssigneeFullName());
         m.put("createdAt",    t.getCreatedAt());
