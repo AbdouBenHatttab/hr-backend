@@ -94,6 +94,8 @@ public class EmployeeLeaveService {
 
         User user = resolveUser(userIdentifier);
 
+        validateTeamSetupForLeaveSubmission(user);
+
         int requestedWorkingDays = validateLeaveRequestDates(dto.getStartDate(), dto.getEndDate());
         validateNoOverlappingLeave(user, dto.getStartDate(), dto.getEndDate());
         validateSickLeaveCreationRules(dto);
@@ -215,6 +217,20 @@ public class EmployeeLeaveService {
         return userRepository.findByKeycloakId(identifier)
                 .or(() -> userRepository.findByUsername(identifier))
                 .orElseThrow(() -> new ResourceNotFoundException("User not found: " + identifier));
+    }
+
+    private void validateTeamSetupForLeaveSubmission(User user) {
+        if (user == null || user.getRole() != TypeRole.EMPLOYEE) {
+            return;
+        }
+
+        if (user.getTeam() == null) {
+            throw new BadRequestException("You must be assigned to a team before submitting a leave request.");
+        }
+
+        if (user.getTeam().getTeamLeader() == null) {
+            throw new BadRequestException("Your team has no Team Leader assigned. Ask HR to complete team setup before submitting leave.");
+        }
     }
 
     @CacheEvict(value = "calendarLeaves", allEntries = true)

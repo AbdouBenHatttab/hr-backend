@@ -12,6 +12,7 @@ import tn.isetbizerte.pfe.hrbackend.infrastructure.kafka.producer.KafkaEventProd
 import tn.isetbizerte.pfe.hrbackend.modules.hr.dto.AssignRoleResponse;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.entity.StoredEmployeeDocument;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.repository.StoredEmployeeDocumentRepository;
+import tn.isetbizerte.pfe.hrbackend.modules.team.repository.TeamRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.Person;
 import tn.isetbizerte.pfe.hrbackend.modules.user.service.UserService;
@@ -33,14 +34,17 @@ public class HRService {
     private final KeycloakAdminService keycloakAdminService;
     private final KafkaEventProducer kafkaEventProducer;
     private final StoredEmployeeDocumentRepository storedDocumentRepository;
+    private final TeamRepository teamRepository;
     public HRService(UserService userService,
                      KeycloakAdminService keycloakAdminService,
                      KafkaEventProducer kafkaEventProducer,
-                     StoredEmployeeDocumentRepository storedDocumentRepository) {
+                     StoredEmployeeDocumentRepository storedDocumentRepository,
+                     TeamRepository teamRepository) {
         this.userService = userService;
         this.keycloakAdminService = keycloakAdminService;
         this.kafkaEventProducer = kafkaEventProducer;
         this.storedDocumentRepository = storedDocumentRepository;
+        this.teamRepository = teamRepository;
     }
 
     /**
@@ -205,11 +209,18 @@ public class HRService {
         User user = userService.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + userId));
 
-        if (assignedBy != null && user.getUsername() != null && user.getUsername().equalsIgnoreCase(assignedBy)) {
+        if (isSameActor(user, null, assignedBy)) {
             throw new BadRequestException("You cannot change your own role.");
         }
 
         TypeRole oldRole = user.getRole();
+
+        if (oldRole == TypeRole.TEAM_LEADER
+                && newRole != TypeRole.TEAM_LEADER
+                && teamRepository.existsByTeamLeader(user)) {
+            throw new BadRequestException(
+                    "This Team Leader currently leads a team. Reassign or remove team leadership before changing their role.");
+        }
 
         // Validate Keycloak ID exists
         String keycloakUserId = user.getKeycloakId();
@@ -309,11 +320,15 @@ public class HRService {
      * - An already deactivated account returns a clear message.
      */
     public Map<String, Object> deactivateUser(Long userId, String deactivatedBy) {
+        return deactivateUser(userId, null, deactivatedBy);
+    }
+
+    public Map<String, Object> deactivateUser(Long userId, String deactivatedByKeycloakId, String deactivatedByUsername) {
         User user = userService.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + userId));
 
-        if (user.getUsername().equals(deactivatedBy)) {
-            throw new BadRequestException("You cannot deactivate your own account.");
+        if (isSameActor(user, deactivatedByKeycloakId, deactivatedByUsername)) {
+            throw new BadRequestException("You cannot change your own account activation status.");
         }
 
         if (Boolean.FALSE.equals(user.getActive())) {
@@ -332,7 +347,7 @@ public class HRService {
 
         user.setActive(false);
         userService.saveUser(user);
-        logger.info("User '{}' deactivated by '{}'", user.getUsername(), deactivatedBy);
+        logger.info("User '{}' deactivated by '{}'", user.getUsername(), actorLabel(deactivatedByKeycloakId, deactivatedByUsername));
 
         Map<String, Object> response = new HashMap<>();
         response.put("success", true);
@@ -340,7 +355,7 @@ public class HRService {
         response.put("userId", userId);
         response.put("username", user.getUsername());
         response.put("active", false);
-        response.put("deactivatedBy", deactivatedBy);
+        response.put("deactivatedBy", actorLabel(deactivatedByKeycloakId, deactivatedByUsername));
         return response;
     }
 
@@ -348,8 +363,16 @@ public class HRService {
      * Reactivate a previously deactivated user account.
      */
     public Map<String, Object> activateUser(Long userId, String activatedBy) {
+        return activateUser(userId, null, activatedBy);
+    }
+
+    public Map<String, Object> activateUser(Long userId, String activatedByKeycloakId, String activatedByUsername) {
         User user = userService.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + userId));
+
+        if (isSameActor(user, activatedByKeycloakId, activatedByUsername)) {
+            throw new BadRequestException("You cannot change your own account activation status.");
+        }
 
         if (Boolean.TRUE.equals(user.getActive())) {
             throw new BadRequestException("User '" + user.getUsername() + "' is already active.");
@@ -367,7 +390,7 @@ public class HRService {
 
         user.setActive(true);
         userService.saveUser(user);
-        logger.info("User '{}' reactivated by '{}'", user.getUsername(), activatedBy);
+        logger.info("User '{}' reactivated by '{}'", user.getUsername(), actorLabel(activatedByKeycloakId, activatedByUsername));
 
         Map<String, Object> response = new HashMap<>();
         response.put("success", true);
@@ -375,8 +398,25 @@ public class HRService {
         response.put("userId", userId);
         response.put("username", user.getUsername());
         response.put("active", true);
-        response.put("activatedBy", activatedBy);
+        response.put("activatedBy", actorLabel(activatedByKeycloakId, activatedByUsername));
         return response;
+    }
+
+    private boolean isSameActor(User target, String actorKeycloakId, String actorUsername) {
+        if (target == null) {
+            return false;
+        }
+        if (actorKeycloakId != null && !actorKeycloakId.isBlank()
+                && target.getKeycloakId() != null && target.getKeycloakId().equals(actorKeycloakId)) {
+            return true;
+        }
+        return actorUsername != null && !actorUsername.isBlank()
+                && target.getUsername() != null
+                && target.getUsername().equalsIgnoreCase(actorUsername);
+    }
+
+    private String actorLabel(String actorKeycloakId, String actorUsername) {
+        return actorUsername != null && !actorUsername.isBlank() ? actorUsername : actorKeycloakId;
     }
 
     private Map<String, Object> mapUserToDetails(User user) {

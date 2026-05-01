@@ -34,6 +34,12 @@ public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, Long
     List<LeaveRequest> findByStatus(LeaveStatus status);
     List<LeaveRequest> findByUserAndStatus(User user, LeaveStatus status);
 
+    @Query("SELECT COUNT(lr) > 0 FROM LeaveRequest lr " +
+           "WHERE lr.user.id = :userId " +
+           "AND lr.status = 'PENDING' " +
+           "AND lr.teamLeaderDecision = 'PENDING'")
+    boolean existsPendingTeamLeaderApprovalByUserId(@Param("userId") Long userId);
+
     /**
      * Get all pending leave requests for employees in a specific team.
      * Used by Team Leader to see only their team's requests.

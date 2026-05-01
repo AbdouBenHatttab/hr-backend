@@ -6,6 +6,8 @@ import tn.isetbizerte.pfe.hrbackend.common.enums.TypeRole;
 import tn.isetbizerte.pfe.hrbackend.common.exception.BadRequestException;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.kafka.producer.KafkaEventProducer;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.repository.StoredEmployeeDocumentRepository;
+import tn.isetbizerte.pfe.hrbackend.modules.team.entity.Team;
+import tn.isetbizerte.pfe.hrbackend.modules.team.repository.TeamRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
 import tn.isetbizerte.pfe.hrbackend.modules.user.service.UserService;
 
@@ -20,17 +22,20 @@ class HRServiceAccountActivationTest {
 
     private UserService userService;
     private KeycloakAdminService keycloakAdminService;
+    private TeamRepository teamRepository;
     private HRService service;
 
     @BeforeEach
     void setUp() {
         userService = mock(UserService.class);
         keycloakAdminService = mock(KeycloakAdminService.class);
+        teamRepository = mock(TeamRepository.class);
         service = new HRService(
                 userService,
                 keycloakAdminService,
                 mock(KafkaEventProducer.class),
-                mock(StoredEmployeeDocumentRepository.class)
+                mock(StoredEmployeeDocumentRepository.class),
+                teamRepository
         );
     }
 
@@ -41,7 +46,20 @@ class HRServiceAccountActivationTest {
 
         assertThatThrownBy(() -> service.deactivateUser(1L, "hr"))
                 .isInstanceOf(BadRequestException.class)
-                .hasMessage("You cannot deactivate your own account.");
+                .hasMessage("You cannot change your own account activation status.");
+
+        verify(keycloakAdminService, never()).setUserEnabled(anyString(), anyBoolean());
+        verify(userService, never()).saveUser(any());
+    }
+
+    @Test
+    void activateUser_blocksHrManagerFromReactivatingOwnAccount() {
+        User hr = user(1L, "hr", TypeRole.HR_MANAGER, false);
+        when(userService.findById(1L)).thenReturn(Optional.of(hr));
+
+        assertThatThrownBy(() -> service.activateUser(1L, "kc-hr", "hr"))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("You cannot change your own account activation status.");
 
         verify(keycloakAdminService, never()).setUserEnabled(anyString(), anyBoolean());
         verify(userService, never()).saveUser(any());
@@ -67,6 +85,78 @@ class HRServiceAccountActivationTest {
         verify(keycloakAdminService).setUserEnabled("kc-employee", false);
         verify(keycloakAdminService).setUserEnabled("kc-employee", true);
         verify(userService, times(2)).saveUser(employee);
+    }
+
+    @Test
+    void assignRole_rejectsLeadingTeamLeaderDemotionToEmployee() {
+        assertLeadingTeamLeaderDemotionRejected(TypeRole.EMPLOYEE);
+    }
+
+    @Test
+    void assignRole_rejectsLeadingTeamLeaderDemotionToHrManager() {
+        assertLeadingTeamLeaderDemotionRejected(TypeRole.HR_MANAGER);
+    }
+
+    @Test
+    void assignRole_rejectsLeadingTeamLeaderDemotionToNewUser() {
+        assertLeadingTeamLeaderDemotionRejected(TypeRole.NEW_USER);
+    }
+
+    @Test
+    void assignRole_allowsNonLeadingTeamLeaderRoleChange() {
+        User leader = user(3L, "leader", TypeRole.TEAM_LEADER, true);
+        when(userService.findById(3L)).thenReturn(Optional.of(leader));
+        when(teamRepository.existsByTeamLeader(leader)).thenReturn(false);
+        when(keycloakAdminService.assignRoleToUser("kc-leader", "EMPLOYEE")).thenReturn(true);
+
+        service.assignRoleToUser(3L, "EMPLOYEE", "hr");
+
+        assertThat(leader.getRole()).isEqualTo(TypeRole.EMPLOYEE);
+        verify(keycloakAdminService).assignRoleToUser("kc-leader", "EMPLOYEE");
+        verify(userService).saveUser(leader);
+    }
+
+    @Test
+    void assignRole_rejectsSelfRoleChange() {
+        User hr = user(1L, "hr", TypeRole.HR_MANAGER, true);
+        when(userService.findById(1L)).thenReturn(Optional.of(hr));
+
+        assertThatThrownBy(() -> service.assignRoleToUser(1L, "EMPLOYEE", "hr"))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("You cannot change your own role.");
+
+        verify(keycloakAdminService, never()).assignRoleToUser(anyString(), anyString());
+        verify(userService, never()).saveUser(any());
+    }
+
+    @Test
+    void assignRole_allowsHrManagerWithoutTeam() {
+        User employee = user(4L, "employee", TypeRole.EMPLOYEE, true);
+        when(userService.findById(4L)).thenReturn(Optional.of(employee));
+        when(keycloakAdminService.assignRoleToUser("kc-employee", "HR_MANAGER")).thenReturn(true);
+
+        service.assignRoleToUser(4L, "HR_MANAGER", "hr");
+
+        assertThat(employee.getRole()).isEqualTo(TypeRole.HR_MANAGER);
+        verify(teamRepository, never()).existsByTeamLeader(employee);
+        verify(userService).saveUser(employee);
+    }
+
+    private void assertLeadingTeamLeaderDemotionRejected(TypeRole newRole) {
+        User leader = user(3L, "leader", TypeRole.TEAM_LEADER, true);
+        Team team = new Team();
+        team.setId(11L);
+        team.setTeamLeader(leader);
+
+        when(userService.findById(3L)).thenReturn(Optional.of(leader));
+        when(teamRepository.existsByTeamLeader(leader)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.assignRoleToUser(3L, newRole.name(), "hr"))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("This Team Leader currently leads a team. Reassign or remove team leadership before changing their role.");
+
+        verify(keycloakAdminService, never()).assignRoleToUser(anyString(), anyString());
+        verify(userService, never()).saveUser(any());
     }
 
     private User user(Long id, String username, TypeRole role, boolean active) {

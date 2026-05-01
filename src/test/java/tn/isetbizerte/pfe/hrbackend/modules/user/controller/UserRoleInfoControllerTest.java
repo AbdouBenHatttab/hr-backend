@@ -99,7 +99,7 @@ class UserRoleInfoControllerTest {
         request.setDepartmentId(5L);
         request.setJobTitleId(8L);
 
-        Map<String, Object> response = controller.updateEmployment(1L, request);
+        Map<String, Object> response = controller.updateEmployment(1L, request, jwt("hr"));
 
         assertThat(response).containsEntry("success", true);
         assertThat(user.getPerson().getDepartment()).isEqualTo("Engineering");
@@ -109,6 +109,22 @@ class UserRoleInfoControllerTest {
         assertThat(user.getPerson().getSalary()).isEqualTo(new BigDecimal("2500"));
         verify(employmentSalaryService).resolveEffectiveSalary(user.getRole());
         verify(personRepository).save(user.getPerson());
+    }
+
+    @Test
+    void updateEmployment_rejectsSelfHrManagedEmploymentUpdate() {
+        User hr = userWithPerson("hr");
+        when(userRepository.findById(1L)).thenReturn(Optional.of(hr));
+
+        UpdateEmploymentRequest request = new UpdateEmploymentRequest();
+        request.setHireDate(LocalDate.of(2026, 4, 1));
+
+        assertThatThrownBy(() -> controller.updateEmployment(1L, request, jwt("hr")))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("You cannot update your own HR-managed employment details.");
+
+        verify(personRepository, never()).save(any());
+        verify(employmentSalaryService, never()).resolveEffectiveSalary(any());
     }
 
     private User userWithPerson(String username) {

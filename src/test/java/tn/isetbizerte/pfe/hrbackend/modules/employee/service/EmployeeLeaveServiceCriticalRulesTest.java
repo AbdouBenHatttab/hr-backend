@@ -73,7 +73,39 @@ class EmployeeLeaveServiceCriticalRulesTest {
         employee.setId(10L);
         employee.setActive(true);
         employee.setRole(TypeRole.EMPLOYEE);
+        employee.setTeam(team(1L, teamLeader("kc-default-leader")));
         lenient().when(userRepository.findByUsername("employee")).thenReturn(Optional.of(employee));
+    }
+
+    @Test
+    void createLeaveRequest_rejectsEmployeeWithoutTeam() {
+        employee.setTeam(null);
+        LocalDate start = LocalDate.now().plusDays(10);
+
+        assertThatThrownBy(() -> service.createLeaveRequest("employee", dto(LeaveType.SICK, start, 1)))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("You must be assigned to a team before submitting a leave request.");
+
+        verifyNoInteractions(workingDayService);
+        verifyNoInteractions(leaveBalanceService);
+        verify(leaveRequestRepository, never()).save(any());
+    }
+
+    @Test
+    void createLeaveRequest_rejectsEmployeeWhenTeamHasNoLeader() {
+        Team team = new Team();
+        team.setId(2L);
+        team.setName("No Leader Team");
+        employee.setTeam(team);
+        LocalDate start = LocalDate.now().plusDays(10);
+
+        assertThatThrownBy(() -> service.createLeaveRequest("employee", dto(LeaveType.SICK, start, 1)))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Your team has no Team Leader assigned. Ask HR to complete team setup before submitting leave.");
+
+        verifyNoInteractions(workingDayService);
+        verifyNoInteractions(leaveBalanceService);
+        verify(leaveRequestRepository, never()).save(any());
     }
 
     @Test
@@ -190,6 +222,49 @@ class EmployeeLeaveServiceCriticalRulesTest {
 
         verify(leaveBalanceService).reserveForRequest(employee, LeaveType.ANNUAL, start, 5);
         verify(leaveRequestRepository).save(argThat(leave -> leave.getNumberOfDays() == 5));
+    }
+
+    @Test
+    void createLeaveRequest_allowsEmployeeWithTeamAndLeader() {
+        LocalDate start = LocalDate.now().plusDays(6);
+        when(workingDayService.isWorkingDay(start)).thenReturn(true);
+        when(workingDayService.countWorkingDays(start, start)).thenReturn(1);
+        when(leaveRequestRepository.findByUserAndDateRangeAndStatusIn(eq(employee), eq(start), eq(start), anyList()))
+                .thenReturn(List.of());
+        when(leaveRequestRepository.save(any(LeaveRequest.class))).thenAnswer(invocation -> {
+            LeaveRequest saved = invocation.getArgument(0);
+            saved.setId(6L);
+            return saved;
+        });
+
+        LeaveRequestResponseDto response = service.createLeaveRequest("employee", dto(LeaveType.SICK, start, 1));
+
+        assertThat(response.getTeamLeaderDecision()).isEqualTo(ApprovalDecision.PENDING);
+        assertThat(response.getApprovalStage()).isEqualTo("PENDING_TL");
+        verify(leaveBalanceService).reserveForRequest(employee, LeaveType.SICK, start, 1);
+        verify(leaveRequestRepository).save(any(LeaveRequest.class));
+    }
+
+    @Test
+    void createLeaveRequest_teamLeaderOwnLeaveStillBypassesTeamLeaderStep() {
+        User leader = teamLeader("kc-leader");
+        when(userRepository.findByUsername("leader")).thenReturn(Optional.of(leader));
+        LocalDate start = LocalDate.now().plusDays(6);
+        when(workingDayService.isWorkingDay(start)).thenReturn(true);
+        when(workingDayService.countWorkingDays(start, start)).thenReturn(1);
+        when(leaveRequestRepository.findByUserAndDateRangeAndStatusIn(eq(leader), eq(start), eq(start), anyList()))
+                .thenReturn(List.of());
+        when(leaveRequestRepository.save(any(LeaveRequest.class))).thenAnswer(invocation -> {
+            LeaveRequest saved = invocation.getArgument(0);
+            saved.setId(7L);
+            return saved;
+        });
+
+        LeaveRequestResponseDto response = service.createLeaveRequest("leader", dto(LeaveType.SICK, start, 1));
+
+        assertThat(response.getTeamLeaderDecision()).isEqualTo(ApprovalDecision.APPROVED);
+        assertThat(response.getApprovalStage()).isEqualTo("PENDING_HR");
+        verify(leaveBalanceService).reserveForRequest(leader, LeaveType.SICK, start, 1);
     }
 
     @Test

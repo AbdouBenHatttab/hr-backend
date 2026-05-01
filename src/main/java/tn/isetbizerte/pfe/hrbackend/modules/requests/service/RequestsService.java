@@ -345,6 +345,9 @@ public class RequestsService {
                                                             byte[] bytes) {
         User employee = userRepository.findById(employeeUserId)
                 .orElseThrow(() -> new ResourceNotFoundException("Employee user not found: " + employeeUserId));
+        if (isSameKeycloakUser(employee, uploadedByKeycloakId)) {
+            throw new BadRequestException("You cannot upload or replace your own HR-managed contract copy.");
+        }
         DocumentType type;
         try {
             type = DocumentType.valueOf(documentType);
@@ -1232,6 +1235,14 @@ public class RequestsService {
         if (ownerKeycloakId == null || !ownerKeycloakId.equals(requesterKeycloakId)) {
             throw new AccessDeniedException("Only the owner can cancel this request.");
         }
+    }
+
+    private boolean isSameKeycloakUser(User targetUser, String actorKeycloakId) {
+        return targetUser != null
+                && actorKeycloakId != null
+                && !actorKeycloakId.isBlank()
+                && targetUser.getKeycloakId() != null
+                && targetUser.getKeycloakId().equals(actorKeycloakId);
     }
 
     private String fmt(String enumName) {

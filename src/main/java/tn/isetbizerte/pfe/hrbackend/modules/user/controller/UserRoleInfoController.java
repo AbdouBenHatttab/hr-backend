@@ -152,7 +152,8 @@ public class UserRoleInfoController {
     @PatchMapping("/api/hr/users/{userId}/employment")
     public Map<String, Object> updateEmployment(
             @PathVariable Long userId,
-            @RequestBody UpdateEmploymentRequest body) {
+            @RequestBody UpdateEmploymentRequest body,
+            @AuthenticationPrincipal Jwt jwt) {
 
         Optional<User> userOpt = userRepository.findById(userId);
         Map<String, Object> response = new HashMap<>();
@@ -161,7 +162,12 @@ public class UserRoleInfoController {
             response.put("message", "User not found");
             return response;
         }
-        Person p = userOpt.get().getPerson();
+        User targetUser = userOpt.get();
+        if (isSameAuthenticatedUser(targetUser, jwt)) {
+            throw new BadRequestException("You cannot update your own HR-managed employment details.");
+        }
+
+        Person p = targetUser.getPerson();
         if (body.getHireDate() != null) {
             p.setHireDate(body.getHireDate());
         }
@@ -184,11 +190,27 @@ public class UserRoleInfoController {
             p.setJobTitleRef(null);
         }
         // Salary stays system-controlled and is derived only from role.
-        p.setSalary(employmentSalaryService.resolveEffectiveSalary(userOpt.get().getRole()));
+        p.setSalary(employmentSalaryService.resolveEffectiveSalary(targetUser.getRole()));
         personRepository.save(p);
         response.put("success", true);
         response.put("message", "Employment details updated.");
         return response;
+    }
+
+    private boolean isSameAuthenticatedUser(User targetUser, Jwt jwt) {
+        if (targetUser == null || jwt == null) {
+            return false;
+        }
+        String actorKeycloakId = jwt.getSubject();
+        if (actorKeycloakId != null && !actorKeycloakId.isBlank()
+                && targetUser.getKeycloakId() != null
+                && targetUser.getKeycloakId().equals(actorKeycloakId)) {
+            return true;
+        }
+        String actorUsername = jwt.getClaimAsString("preferred_username");
+        return actorUsername != null && !actorUsername.isBlank()
+                && targetUser.getUsername() != null
+                && targetUser.getUsername().equalsIgnoreCase(actorUsername);
     }
 
     @GetMapping("/api/new-user/waiting")

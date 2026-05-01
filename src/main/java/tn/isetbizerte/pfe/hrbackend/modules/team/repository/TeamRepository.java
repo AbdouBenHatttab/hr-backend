@@ -17,6 +17,10 @@ public interface TeamRepository extends JpaRepository<Team, Long> {
 
     boolean existsByName(String name);
 
+    boolean existsByNameIgnoreCase(String name);
+
+    boolean existsByTeamLeader(User teamLeader);
+
     /**
      * Load a team with its leader AND leader's person in one query.
      * Does NOT fetch members — use findByIdWithMembers separately.

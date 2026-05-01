@@ -5,10 +5,15 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tn.isetbizerte.pfe.hrbackend.common.enums.TypeRole;
+import tn.isetbizerte.pfe.hrbackend.common.event.NotificationEvent;
 import tn.isetbizerte.pfe.hrbackend.common.exception.BadRequestException;
 import tn.isetbizerte.pfe.hrbackend.common.exception.ResourceNotFoundException;
+import tn.isetbizerte.pfe.hrbackend.infrastructure.email.HREmailService;
+import tn.isetbizerte.pfe.hrbackend.infrastructure.kafka.producer.NotificationEventProducer;
+import tn.isetbizerte.pfe.hrbackend.modules.employee.repository.LeaveRequestRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.team.entity.Team;
 import tn.isetbizerte.pfe.hrbackend.modules.team.repository.TeamRepository;
+import tn.isetbizerte.pfe.hrbackend.modules.user.entity.Person;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
 import tn.isetbizerte.pfe.hrbackend.modules.user.repository.UserRepository;
 
@@ -29,10 +34,20 @@ public class TeamService {
 
     private final TeamRepository teamRepository;
     private final UserRepository userRepository;
+    private final LeaveRequestRepository leaveRequestRepository;
+    private final NotificationEventProducer notificationEventProducer;
+    private final HREmailService emailService;
 
-    public TeamService(TeamRepository teamRepository, UserRepository userRepository) {
+    public TeamService(TeamRepository teamRepository,
+                       UserRepository userRepository,
+                       LeaveRequestRepository leaveRequestRepository,
+                       NotificationEventProducer notificationEventProducer,
+                       HREmailService emailService) {
         this.teamRepository = teamRepository;
         this.userRepository = userRepository;
+        this.leaveRequestRepository = leaveRequestRepository;
+        this.notificationEventProducer = notificationEventProducer;
+        this.emailService = emailService;
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -41,8 +56,14 @@ public class TeamService {
 
     @Transactional
     public Map<String, Object> createTeam(String name, String description, Long teamLeaderId) {
-        if (teamRepository.existsByName(name))
-            throw new BadRequestException("A team with the name '" + name + "' already exists.");
+        String normalizedName = name != null ? name.trim() : "";
+        String normalizedDescription = description != null ? description.trim() : null;
+
+        if (normalizedName.isBlank())
+            throw new BadRequestException("Team name is required");
+
+        if (teamRepository.existsByNameIgnoreCase(normalizedName))
+            throw new BadRequestException("A team with this name already exists.");
 
         User leader = userRepository.findById(teamLeaderId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + teamLeaderId));
@@ -54,15 +75,131 @@ public class TeamService {
             throw new BadRequestException("This Team Leader is already assigned to another team.");
 
         Team team = new Team();
-        team.setName(name);
-        team.setDescription(description);
+        team.setName(normalizedName);
+        team.setDescription(normalizedDescription);
         team.setTeamLeader(leader);
         teamRepository.save(team);
-        logger.info("Team '{}' created with leader '{}'", name, leader.getUsername());
+        logger.info("Team '{}' created with leader '{}'", normalizedName, leader.getUsername());
 
         // Build response directly from known data — no lazy loading
         return buildTeamResponse(team.getId(), team.getName(), team.getDescription(),
                 team.getCreatedAt(), leader, List.of());
+    }
+
+    @Transactional
+    public Map<String, Object> changeTeamLeader(Long teamId, Long newLeaderId) {
+        Team team = teamRepository.findByIdWithDetails(teamId)
+                .orElseThrow(() -> new ResourceNotFoundException("Team not found: " + teamId));
+        Team withMembers = teamRepository.findByIdWithMembers(teamId).orElse(team);
+        List<User> members = withMembers.getMembers() != null ? withMembers.getMembers() : List.of();
+
+        User oldLeader = team.getTeamLeader();
+        User newLeader = userRepository.findById(newLeaderId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + newLeaderId));
+
+        if (oldLeader != null && Objects.equals(oldLeader.getId(), newLeader.getId())) {
+            return buildTeamResponse(team.getId(), team.getName(), team.getDescription(),
+                    team.getCreatedAt(), oldLeader, members);
+        }
+
+        if (!Boolean.TRUE.equals(newLeader.getActive()))
+            throw new BadRequestException("New Team Leader must be active.");
+
+        if (newLeader.getRole() != TypeRole.TEAM_LEADER)
+            throw new BadRequestException("User is not a TEAM_LEADER. Assign the TEAM_LEADER role first.");
+
+        teamRepository.findByTeamLeader(newLeader)
+                .filter(existing -> !Objects.equals(existing.getId(), teamId))
+                .ifPresent(existing -> {
+                    throw new BadRequestException("This Team Leader is already assigned to another team.");
+                });
+
+        if (newLeader.getTeam() != null)
+            throw new BadRequestException("This Team Leader is already a regular member of another team.");
+
+        team.setTeamLeader(newLeader);
+        touchTeam(team);
+        logger.info("Team '{}' leader changed from '{}' to '{}'",
+                team.getName(),
+                oldLeader != null ? oldLeader.getUsername() : "none",
+                newLeader.getUsername());
+
+        publishLeaderNotification(newLeader, "TEAM_LEADER_ASSIGNED", team.getId(),
+                "You have been assigned as Team Leader of " + team.getName() + ".");
+        sendTeamLeaderAssignedEmail(newLeader, team.getName());
+
+        if (oldLeader != null && !Objects.equals(oldLeader.getId(), newLeader.getId())) {
+            publishLeaderNotification(oldLeader, "TEAM_LEADER_REMOVED", team.getId(),
+                    "You are no longer Team Leader of " + team.getName() + ".");
+            sendTeamLeaderRemovedEmail(oldLeader, team.getName());
+        }
+
+        return buildTeamResponse(team.getId(), team.getName(), team.getDescription(),
+                team.getCreatedAt(), newLeader, members);
+    }
+
+    @Transactional
+    public Map<String, Object> assignEmployeeToTeam(Long userId, Long teamId) {
+        User employee = loadActiveEmployee(userId);
+        if (employee.getTeam() != null)
+            throw new BadRequestException("This employee is already assigned to a team.");
+
+        Team targetTeam = loadTeamForMembership(teamId);
+
+        employee.setTeam(targetTeam);
+        userRepository.save(employee);
+        touchTeam(targetTeam);
+
+        publishTeamNotification(employee, "TEAM_ASSIGNED", targetTeam.getId(),
+                "You have been assigned to the team: " + targetTeam.getName() + ".");
+        sendTeamAssignedEmail(employee, targetTeam.getName());
+
+        return buildMembershipResponse("Employee assigned to team successfully", employee, targetTeam, null);
+    }
+
+    @Transactional
+    public Map<String, Object> moveEmployeeToTeam(Long userId, Long targetTeamId) {
+        User employee = loadActiveEmployee(userId);
+        Team currentTeam = employee.getTeam();
+        if (currentTeam == null)
+            throw new BadRequestException("This employee is not assigned to a team.");
+
+        Team targetTeam = loadTeamForMembership(targetTeamId);
+        if (currentTeam.getId().equals(targetTeam.getId()))
+            throw new BadRequestException("Employee is already assigned to this team.");
+
+        validateNoPendingTeamLeaderLeave(employee.getId());
+
+        employee.setTeam(targetTeam);
+        userRepository.save(employee);
+        touchTeam(currentTeam);
+        touchTeam(targetTeam);
+
+        publishTeamNotification(employee, "TEAM_CHANGED", targetTeam.getId(),
+                "Your team assignment changed from " + currentTeam.getName() + " to " + targetTeam.getName() + ".");
+        sendTeamChangedEmail(employee, currentTeam.getName(), targetTeam.getName());
+
+        return buildMembershipResponse("Employee moved to team successfully", employee, targetTeam, currentTeam);
+    }
+
+    @Transactional
+    public Map<String, Object> removeEmployeeFromTeam(Long userId) {
+        User employee = loadActiveEmployee(userId);
+        Team currentTeam = employee.getTeam();
+        if (currentTeam == null)
+            throw new BadRequestException("This employee is not assigned to a team.");
+
+        validateNoPendingTeamLeaderLeave(employee.getId());
+
+        employee.setTeam(null);
+        userRepository.save(employee);
+        touchTeam(currentTeam);
+
+        publishTeamNotification(employee, "TEAM_REMOVED", currentTeam.getId(),
+                "You have been removed from the team: " + currentTeam.getName() + ".");
+        sendTeamRemovedEmail(employee, currentTeam.getName());
+
+        return buildMembershipResponse("Employee removed from team successfully", employee, null, currentTeam);
     }
 
     /** HR views all teams. Uses two separate queries per team to avoid MultipleBagFetchException. */
@@ -305,6 +442,134 @@ public class TeamService {
                         "No team found for this Team Leader. Ask HR to assign you a team."));
     }
 
+    private User loadActiveEmployee(Long userId) {
+        User employee = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + userId));
+
+        if (employee.getRole() != TypeRole.EMPLOYEE || !Boolean.TRUE.equals(employee.getActive()))
+            throw new BadRequestException("Only active employees can be assigned to a team.");
+
+        return employee;
+    }
+
+    private Team loadTeamForMembership(Long teamId) {
+        Team team = teamRepository.findByIdWithDetails(teamId)
+                .orElseThrow(() -> new ResourceNotFoundException("Team not found: " + teamId));
+
+        if (team.getTeamLeader() == null)
+            throw new BadRequestException("Target team must have a Team Leader before assigning members.");
+
+        return team;
+    }
+
+    private void validateNoPendingTeamLeaderLeave(Long userId) {
+        if (leaveRequestRepository.existsPendingTeamLeaderApprovalByUserId(userId)) {
+            throw new BadRequestException(
+                    "Employee has a leave request pending Team Leader approval. Resolve it before changing team assignment.");
+        }
+    }
+
+    private void touchTeam(Team team) {
+        if (team == null) return;
+        team.setUpdatedAt(LocalDateTime.now());
+        teamRepository.save(team);
+    }
+
+    private void publishTeamNotification(User employee, String type, Long teamId, String message) {
+        if (employee.getKeycloakId() == null || employee.getKeycloakId().isBlank()) return;
+        try {
+            notificationEventProducer.publish(new NotificationEvent(
+                    employee.getKeycloakId(),
+                    message,
+                    type,
+                    "TEAM",
+                    teamId,
+                    "/employee/profile"
+            ));
+        } catch (Exception e) {
+            logger.warn("Failed to enqueue {} notification for userId={}", type, employee.getId(), e);
+        }
+    }
+
+    private void publishLeaderNotification(User leader, String type, Long teamId, String message) {
+        if (leader == null || leader.getKeycloakId() == null || leader.getKeycloakId().isBlank()) return;
+        try {
+            notificationEventProducer.publish(new NotificationEvent(
+                    leader.getKeycloakId(),
+                    message,
+                    type,
+                    "TEAM",
+                    teamId,
+                    "/team/members"
+            ));
+        } catch (Exception e) {
+            logger.warn("Failed to enqueue {} notification for leader userId={}", type, leader.getId(), e);
+        }
+    }
+
+    private void sendTeamAssignedEmail(User employee, String teamName) {
+        Person person = employee.getPerson();
+        if (person == null || person.getEmail() == null || person.getEmail().isBlank()) return;
+        try {
+            emailService.sendTeamAssigned(person.getEmail(), person.getFirstName(), person.getLastName(), teamName);
+        } catch (Exception e) {
+            logger.warn("Could not send team assignment email to userId={}", employee.getId(), e);
+        }
+    }
+
+    private void sendTeamChangedEmail(User employee, String oldTeamName, String newTeamName) {
+        Person person = employee.getPerson();
+        if (person == null || person.getEmail() == null || person.getEmail().isBlank()) return;
+        try {
+            emailService.sendTeamChanged(person.getEmail(), person.getFirstName(), person.getLastName(), oldTeamName, newTeamName);
+        } catch (Exception e) {
+            logger.warn("Could not send team change email to userId={}", employee.getId(), e);
+        }
+    }
+
+    private void sendTeamRemovedEmail(User employee, String oldTeamName) {
+        Person person = employee.getPerson();
+        if (person == null || person.getEmail() == null || person.getEmail().isBlank()) return;
+        try {
+            emailService.sendTeamRemoved(person.getEmail(), person.getFirstName(), person.getLastName(), oldTeamName);
+        } catch (Exception e) {
+            logger.warn("Could not send team removal email to userId={}", employee.getId(), e);
+        }
+    }
+
+    private void sendTeamLeaderAssignedEmail(User leader, String teamName) {
+        Person person = leader.getPerson();
+        if (person == null || person.getEmail() == null || person.getEmail().isBlank()) return;
+        try {
+            emailService.sendTeamLeaderAssigned(person.getEmail(), person.getFirstName(), person.getLastName(), teamName);
+        } catch (Exception e) {
+            logger.warn("Could not send Team Leader assignment email to userId={}", leader.getId(), e);
+        }
+    }
+
+    private void sendTeamLeaderRemovedEmail(User leader, String teamName) {
+        Person person = leader.getPerson();
+        if (person == null || person.getEmail() == null || person.getEmail().isBlank()) return;
+        try {
+            emailService.sendTeamLeaderRemoved(person.getEmail(), person.getFirstName(), person.getLastName(), teamName);
+        } catch (Exception e) {
+            logger.warn("Could not send Team Leader removal email to userId={}", leader.getId(), e);
+        }
+    }
+
+    private Map<String, Object> buildMembershipResponse(String message, User employee, Team currentTeam, Team previousTeam) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("success", true);
+        response.put("message", message);
+        response.put("employeeId", employee.getId());
+        response.put("employeeUsername", employee.getUsername());
+        response.put("teamId", currentTeam != null ? currentTeam.getId() : null);
+        response.put("teamName", currentTeam != null ? currentTeam.getName() : null);
+        response.put("previousTeamId", previousTeam != null ? previousTeam.getId() : null);
+        response.put("previousTeamName", previousTeam != null ? previousTeam.getName() : null);
+        return response;
+    }
+
     /**
      * Builds the team response map from already-loaded, non-lazy data.
      * Never touches lazy associations — all data is passed explicitly.
@@ -358,8 +623,13 @@ public class TeamService {
                 })
                 .collect(Collectors.toList());
 
-        response.put("members",     memberList);
-        response.put("memberCount", memberList.size());
+        int employeeMemberCount = memberList.size();
+        int teamLeaderCount = leader != null ? 1 : 0;
+        response.put("members",             memberList);
+        response.put("memberCount",         employeeMemberCount);
+        response.put("employeeMemberCount", employeeMemberCount);
+        response.put("teamLeaderCount",     teamLeaderCount);
+        response.put("totalPeopleCount",    employeeMemberCount + teamLeaderCount);
         return response;
     }
 

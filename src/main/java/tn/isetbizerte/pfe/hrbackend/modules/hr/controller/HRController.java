@@ -142,8 +142,11 @@ public class HRController {
             @PathVariable Long userId,
             @AuthenticationPrincipal Jwt jwt) {
 
-        String deactivatedBy = jwt.getClaimAsString("preferred_username");
-        Map<String, Object> response = hrService.deactivateUser(userId, deactivatedBy);
+        Map<String, Object> response = hrService.deactivateUser(
+                userId,
+                jwt.getSubject(),
+                jwt.getClaimAsString("preferred_username")
+        );
         return ResponseEntity.ok(response);
     }
 
@@ -156,8 +159,11 @@ public class HRController {
             @PathVariable Long userId,
             @AuthenticationPrincipal Jwt jwt) {
 
-        String activatedBy = jwt.getClaimAsString("preferred_username");
-        Map<String, Object> response = hrService.activateUser(userId, activatedBy);
+        Map<String, Object> response = hrService.activateUser(
+                userId,
+                jwt.getSubject(),
+                jwt.getClaimAsString("preferred_username")
+        );
         return ResponseEntity.ok(response);
     }
 }

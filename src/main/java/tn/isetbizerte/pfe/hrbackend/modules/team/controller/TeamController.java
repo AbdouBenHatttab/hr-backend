@@ -11,6 +11,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import tn.isetbizerte.pfe.hrbackend.modules.team.dto.AddMemberRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.team.dto.CreateTeamRequest;
+import tn.isetbizerte.pfe.hrbackend.modules.team.dto.UpdateTeamLeaderRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.team.service.TeamService;
 
 import java.util.HashMap;
@@ -88,6 +89,57 @@ public class TeamController {
         response.put("success", true);
         response.put("data", teamService.getTeamById(teamId));
         return ResponseEntity.ok(response);
+    }
+
+    /**
+     * HR changes the Team Leader of an existing team.
+     * PATCH /api/hr/teams/{teamId}/leader
+     * Body: { "teamLeaderId": 2 }
+     */
+    @PreAuthorize("hasRole('HR_MANAGER')")
+    @PatchMapping("/api/hr/teams/{teamId}/leader")
+    public ResponseEntity<Map<String, Object>> changeTeamLeader(
+            @PathVariable Long teamId,
+            @Valid @RequestBody UpdateTeamLeaderRequest request) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("success", true);
+        response.put("message", "Team Leader updated successfully");
+        response.put("data", teamService.changeTeamLeader(teamId, request.getTeamLeaderId()));
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * HR assigns an unassigned employee to a team.
+     * POST /api/hr/teams/{teamId}/members/{userId}
+     */
+    @PreAuthorize("hasRole('HR_MANAGER')")
+    @PostMapping("/api/hr/teams/{teamId}/members/{userId}")
+    public ResponseEntity<Map<String, Object>> assignEmployeeToTeam(
+            @PathVariable Long teamId,
+            @PathVariable Long userId) {
+        return ResponseEntity.ok(teamService.assignEmployeeToTeam(userId, teamId));
+    }
+
+    /**
+     * HR moves an employee from their current team to another team.
+     * PATCH /api/hr/teams/{targetTeamId}/members/{userId}/move
+     */
+    @PreAuthorize("hasRole('HR_MANAGER')")
+    @PatchMapping("/api/hr/teams/{targetTeamId}/members/{userId}/move")
+    public ResponseEntity<Map<String, Object>> moveEmployeeToTeam(
+            @PathVariable Long targetTeamId,
+            @PathVariable Long userId) {
+        return ResponseEntity.ok(teamService.moveEmployeeToTeam(userId, targetTeamId));
+    }
+
+    /**
+     * HR removes an employee from their current team.
+     * DELETE /api/hr/teams/members/{userId}
+     */
+    @PreAuthorize("hasRole('HR_MANAGER')")
+    @DeleteMapping("/api/hr/teams/members/{userId}")
+    public ResponseEntity<Map<String, Object>> removeEmployeeFromTeam(@PathVariable Long userId) {
+        return ResponseEntity.ok(teamService.removeEmployeeFromTeam(userId));
     }
 
     // ─────────────────────────────────────────────────────────────
