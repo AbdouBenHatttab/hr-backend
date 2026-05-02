@@ -6,13 +6,16 @@ import tn.isetbizerte.pfe.hrbackend.common.enums.DocumentType;
 import tn.isetbizerte.pfe.hrbackend.common.enums.TypeRole;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.kafka.producer.KafkaEventProducer;
 import tn.isetbizerte.pfe.hrbackend.modules.department.entity.Department;
+import tn.isetbizerte.pfe.hrbackend.modules.department.service.DepartmentService;
 import tn.isetbizerte.pfe.hrbackend.modules.jobtitle.entity.JobTitle;
+import tn.isetbizerte.pfe.hrbackend.modules.jobtitle.service.JobTitleService;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.entity.StoredEmployeeDocument;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.repository.StoredEmployeeDocumentRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.team.entity.Team;
 import tn.isetbizerte.pfe.hrbackend.modules.team.repository.TeamRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.Person;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
+import tn.isetbizerte.pfe.hrbackend.modules.user.service.EmploymentSalaryService;
 import tn.isetbizerte.pfe.hrbackend.modules.user.service.UserService;
 
 import java.time.LocalDate;
@@ -41,7 +44,10 @@ class HRServiceUserReadinessTest {
                 mock(KeycloakAdminService.class),
                 mock(KafkaEventProducer.class),
                 storedDocumentRepository,
-                teamRepository
+                teamRepository,
+                mock(DepartmentService.class),
+                mock(JobTitleService.class),
+                mock(EmploymentSalaryService.class)
         );
     }
 

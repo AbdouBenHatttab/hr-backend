@@ -2,6 +2,7 @@ package tn.isetbizerte.pfe.hrbackend.modules.hr.service;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.transaction.annotation.Transactional;
 import tn.isetbizerte.pfe.hrbackend.common.enums.DocumentType;
 import org.springframework.stereotype.Service;
 import tn.isetbizerte.pfe.hrbackend.common.enums.TypeRole;
@@ -10,12 +11,18 @@ import tn.isetbizerte.pfe.hrbackend.common.exception.BadRequestException;
 import tn.isetbizerte.pfe.hrbackend.common.exception.ResourceNotFoundException;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.kafka.producer.KafkaEventProducer;
 import tn.isetbizerte.pfe.hrbackend.modules.hr.dto.AssignRoleResponse;
+import tn.isetbizerte.pfe.hrbackend.modules.hr.dto.CompleteUserSetupRequest;
+import tn.isetbizerte.pfe.hrbackend.modules.department.entity.Department;
+import tn.isetbizerte.pfe.hrbackend.modules.department.service.DepartmentService;
+import tn.isetbizerte.pfe.hrbackend.modules.jobtitle.entity.JobTitle;
+import tn.isetbizerte.pfe.hrbackend.modules.jobtitle.service.JobTitleService;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.entity.StoredEmployeeDocument;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.repository.StoredEmployeeDocumentRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.team.entity.Team;
 import tn.isetbizerte.pfe.hrbackend.modules.team.repository.TeamRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.Person;
+import tn.isetbizerte.pfe.hrbackend.modules.user.service.EmploymentSalaryService;
 import tn.isetbizerte.pfe.hrbackend.modules.user.service.UserService;
 
 import org.springframework.data.domain.Page;
@@ -36,16 +43,26 @@ public class HRService {
     private final KafkaEventProducer kafkaEventProducer;
     private final StoredEmployeeDocumentRepository storedDocumentRepository;
     private final TeamRepository teamRepository;
+    private final DepartmentService departmentService;
+    private final JobTitleService jobTitleService;
+    private final EmploymentSalaryService employmentSalaryService;
+
     public HRService(UserService userService,
                      KeycloakAdminService keycloakAdminService,
                      KafkaEventProducer kafkaEventProducer,
                      StoredEmployeeDocumentRepository storedDocumentRepository,
-                     TeamRepository teamRepository) {
+                     TeamRepository teamRepository,
+                     DepartmentService departmentService,
+                     JobTitleService jobTitleService,
+                     EmploymentSalaryService employmentSalaryService) {
         this.userService = userService;
         this.keycloakAdminService = keycloakAdminService;
         this.kafkaEventProducer = kafkaEventProducer;
         this.storedDocumentRepository = storedDocumentRepository;
         this.teamRepository = teamRepository;
+        this.departmentService = departmentService;
+        this.jobTitleService = jobTitleService;
+        this.employmentSalaryService = employmentSalaryService;
     }
 
     /**
@@ -182,6 +199,116 @@ public class HRService {
         return userService.saveUser(user);
     }
 
+    @Transactional
+    public Map<String, Object> completeUserSetup(Long userId,
+                                                 CompleteUserSetupRequest request,
+                                                 String actorKeycloakId,
+                                                 String actorUsername) {
+        if (request == null) {
+            throw new BadRequestException("Setup payload is required.");
+        }
+
+        TypeRole newRole = parseSetupRole(request.getRole());
+        User user = userService.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + userId));
+
+        if (user.getPerson() == null) {
+            throw new BadRequestException("User has no person profile. Cannot complete HR setup.");
+        }
+        if (isSameActor(user, actorKeycloakId, actorUsername)) {
+            throw new BadRequestException("You cannot change your own role or HR-managed setup.");
+        }
+
+        TypeRole oldRole = user.getRole();
+        String keycloakUserId = user.getKeycloakId();
+        if (keycloakUserId == null || keycloakUserId.isBlank()) {
+            throw new BadRequestException("User has no Keycloak ID associated. Cannot update role in Keycloak.");
+        }
+
+        Department department = requireSetupDepartment(request.getDepartmentId());
+        JobTitle jobTitle = requireSetupJobTitle(request.getJobTitleId());
+        if (request.getHireDate() == null) {
+            throw new BadRequestException("Hire date is required.");
+        }
+
+        validateRoleSpecificSetup(user, newRole, request);
+        Team employeeTeam = null;
+        Team ledTeam = null;
+        if (newRole == TypeRole.EMPLOYEE) {
+            employeeTeam = loadTeamRequiredForEmployee(request.getTeamId());
+        } else if (newRole == TypeRole.TEAM_LEADER) {
+            ledTeam = loadTeamRequiredForLeadership(request.getLedTeamId());
+            validateLeadershipTarget(user, ledTeam);
+        }
+
+        boolean keycloakUpdateSuccess = keycloakAdminService.assignRoleToUser(keycloakUserId, newRole.name());
+        if (!keycloakUpdateSuccess) {
+            throw new BadRequestException("Failed to update role in Keycloak. Please check Keycloak connection and logs.");
+        }
+
+        boolean pendingApproval = oldRole == TypeRole.NEW_USER && Boolean.FALSE.equals(user.getActive());
+        if (pendingApproval) {
+            boolean keycloakEnabled = keycloakAdminService.setUserEnabled(keycloakUserId, true);
+            if (!keycloakEnabled) {
+                keycloakAdminService.assignRoleToUser(keycloakUserId, oldRole.name());
+                throw new BadRequestException("Failed to enable user in Keycloak. Local setup was not changed.");
+            }
+        }
+
+        try {
+            user.setRole(newRole);
+            if (pendingApproval) {
+                user.setActive(true);
+            }
+
+            Person person = user.getPerson();
+            person.setDepartmentRef(department);
+            person.setJobTitleRef(jobTitle);
+            person.setHireDate(request.getHireDate());
+            person.setSalary(employmentSalaryService.resolveEffectiveSalary(newRole));
+
+            if (newRole == TypeRole.EMPLOYEE) {
+                user.setTeam(employeeTeam);
+                touchTeam(employeeTeam);
+            } else {
+                user.setTeam(null);
+            }
+
+            userService.saveUser(user);
+            userService.savePerson(person);
+
+            if (newRole == TypeRole.TEAM_LEADER) {
+                ledTeam.setTeamLeader(user);
+                touchTeam(ledTeam);
+            }
+
+            boolean eventPublished = publishRoleAssignedEvent(user, oldRole, newRole, actorUsername);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("message", "User setup completed successfully.");
+            response.put("userId", userId);
+            response.put("username", user.getUsername());
+            response.put("oldRole", oldRole != null ? oldRole.name() : "NONE");
+            response.put("newRole", newRole.name());
+            response.put("active", user.getActive());
+            response.put("departmentId", department.getId());
+            response.put("jobTitleId", jobTitle.getId());
+            response.put("hireDate", person.getHireDate());
+            response.put("teamId", employeeTeam != null ? employeeTeam.getId() : null);
+            response.put("ledTeamId", ledTeam != null ? ledTeam.getId() : null);
+            response.put("eventPublished", eventPublished);
+            response.put("note", "User must logout and login again to get the new role in their token");
+            return response;
+        } catch (RuntimeException ex) {
+            keycloakAdminService.assignRoleToUser(keycloakUserId, oldRole.name());
+            if (pendingApproval) {
+                keycloakAdminService.setUserEnabled(keycloakUserId, false);
+            }
+            throw ex;
+        }
+    }
+
     /**
      * Assign role to user by userId - contains all business logic.
      * Flow:
@@ -312,6 +439,103 @@ public class HRService {
                     user.getUsername(), e.getMessage());
             return false;
         }
+    }
+
+    private TypeRole parseSetupRole(String roleStr) {
+        TypeRole role;
+        try {
+            role = TypeRole.valueOf(String.valueOf(roleStr).toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            throw new BadRequestException("Invalid role. Valid setup roles are: EMPLOYEE, TEAM_LEADER, HR_MANAGER");
+        }
+        if (role == TypeRole.NEW_USER) {
+            throw new BadRequestException("NEW_USER is not a valid target role for setup.");
+        }
+        return role;
+    }
+
+    private Department requireSetupDepartment(Long departmentId) {
+        if (departmentId == null) {
+            throw new BadRequestException("Department is required.");
+        }
+        return departmentService.requireDepartmentForEmployment(departmentId);
+    }
+
+    private JobTitle requireSetupJobTitle(Long jobTitleId) {
+        if (jobTitleId == null) {
+            throw new BadRequestException("Job title is required.");
+        }
+        return jobTitleService.requireJobTitleForEmployment(jobTitleId);
+    }
+
+    private void validateRoleSpecificSetup(User user, TypeRole role, CompleteUserSetupRequest request) {
+        if (role == TypeRole.EMPLOYEE) {
+            if (request.getTeamId() == null) {
+                throw new BadRequestException("Team is required for EMPLOYEE setup.");
+            }
+            if (request.getLedTeamId() != null) {
+                throw new BadRequestException("EMPLOYEE setup must not include ledTeamId.");
+            }
+            if (teamRepository.existsByTeamLeader(user)) {
+                throw new BadRequestException("This user currently leads a team. Reassign or remove team leadership before assigning EMPLOYEE.");
+            }
+            return;
+        }
+
+        if (role == TypeRole.TEAM_LEADER) {
+            if (request.getLedTeamId() == null) {
+                throw new BadRequestException("Led team is required for TEAM_LEADER setup.");
+            }
+            if (request.getTeamId() != null) {
+                throw new BadRequestException("TEAM_LEADER setup must not include teamId.");
+            }
+            if (user.getTeam() != null) {
+                throw new BadRequestException("This user is a regular team member. Remove team membership before assigning TEAM_LEADER.");
+            }
+            return;
+        }
+
+        if (role == TypeRole.HR_MANAGER) {
+            if (request.getTeamId() != null || request.getLedTeamId() != null) {
+                throw new BadRequestException("HR_MANAGER setup must not include teamId or ledTeamId.");
+            }
+            if (teamRepository.existsByTeamLeader(user)) {
+                throw new BadRequestException("This user currently leads a team. Reassign or remove team leadership before assigning HR_MANAGER.");
+            }
+            if (user.getTeam() != null) {
+                throw new BadRequestException("This user is a regular team member. Remove team membership before assigning HR_MANAGER.");
+            }
+        }
+    }
+
+    private Team loadTeamRequiredForEmployee(Long teamId) {
+        Team team = teamRepository.findByIdWithDetails(teamId)
+                .orElseThrow(() -> new ResourceNotFoundException("Team not found: " + teamId));
+        if (team.getTeamLeader() == null) {
+            throw new BadRequestException("Target team must have a Team Leader before assigning members.");
+        }
+        return team;
+    }
+
+    private Team loadTeamRequiredForLeadership(Long teamId) {
+        return teamRepository.findByIdWithDetails(teamId)
+                .orElseThrow(() -> new ResourceNotFoundException("Team not found: " + teamId));
+    }
+
+    private void validateLeadershipTarget(User user, Team ledTeam) {
+        teamRepository.findByTeamLeader(user)
+                .filter(existing -> !Objects.equals(existing.getId(), ledTeam.getId()))
+                .ifPresent(existing -> {
+                    throw new BadRequestException("This Team Leader is already assigned to another team.");
+                });
+    }
+
+    private void touchTeam(Team team) {
+        if (team == null) {
+            return;
+        }
+        team.setUpdatedAt(LocalDateTime.now());
+        teamRepository.save(team);
     }
 
     /**

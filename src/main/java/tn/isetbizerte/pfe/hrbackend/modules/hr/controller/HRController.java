@@ -9,6 +9,7 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 import tn.isetbizerte.pfe.hrbackend.modules.hr.dto.AssignRoleRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.hr.dto.AssignRoleResponse;
+import tn.isetbizerte.pfe.hrbackend.modules.hr.dto.CompleteUserSetupRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.hr.service.DashboardRequestSummaryService;
 import tn.isetbizerte.pfe.hrbackend.modules.hr.service.HRService;
 
@@ -132,6 +133,27 @@ public class HRController {
                 request.getUserId(),
                 request.getRole(),
                 assignedBy
+        );
+
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Complete HR-managed user setup in one operation.
+     *
+     * POST /api/hr/users/{userId}/setup
+     */
+    @PostMapping("/users/{userId}/setup")
+    public ResponseEntity<Map<String, Object>> completeUserSetup(
+            @PathVariable Long userId,
+            @RequestBody CompleteUserSetupRequest request,
+            @AuthenticationPrincipal Jwt jwt) {
+
+        Map<String, Object> response = hrService.completeUserSetup(
+                userId,
+                request,
+                jwt.getSubject(),
+                jwt.getClaimAsString("preferred_username")
         );
 
         return ResponseEntity.ok(response);

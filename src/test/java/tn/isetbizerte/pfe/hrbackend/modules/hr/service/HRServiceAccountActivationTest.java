@@ -5,9 +5,12 @@ import org.junit.jupiter.api.Test;
 import tn.isetbizerte.pfe.hrbackend.common.enums.TypeRole;
 import tn.isetbizerte.pfe.hrbackend.common.exception.BadRequestException;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.kafka.producer.KafkaEventProducer;
+import tn.isetbizerte.pfe.hrbackend.modules.department.service.DepartmentService;
+import tn.isetbizerte.pfe.hrbackend.modules.jobtitle.service.JobTitleService;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.repository.StoredEmployeeDocumentRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.team.entity.Team;
 import tn.isetbizerte.pfe.hrbackend.modules.team.repository.TeamRepository;
+import tn.isetbizerte.pfe.hrbackend.modules.user.service.EmploymentSalaryService;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
 import tn.isetbizerte.pfe.hrbackend.modules.user.service.UserService;
 
@@ -35,7 +38,10 @@ class HRServiceAccountActivationTest {
                 keycloakAdminService,
                 mock(KafkaEventProducer.class),
                 mock(StoredEmployeeDocumentRepository.class),
-                teamRepository
+                teamRepository,
+                mock(DepartmentService.class),
+                mock(JobTitleService.class),
+                mock(EmploymentSalaryService.class)
         );
     }
 

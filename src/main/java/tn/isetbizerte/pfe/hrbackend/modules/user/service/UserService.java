@@ -173,9 +173,6 @@ public class UserService {
         person.setAddress(registerRequest.getAddress());
         person.setMaritalStatus(registerRequest.getMaritalStatus());
         person.setNumberOfChildren(registerRequest.getNumberOfChildren());
-        if (registerRequest.getDepartmentId() != null) {
-            person.setDepartmentRef(departmentService.requireDepartmentForEmployment(registerRequest.getDepartmentId()));
-        }
 
         User user = new User(keycloakUserId, registerRequest.getUsername());
         user.setEmailVerified(true);
