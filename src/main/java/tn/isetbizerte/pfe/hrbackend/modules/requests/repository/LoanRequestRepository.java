@@ -23,6 +23,12 @@ public interface LoanRequestRepository extends JpaRepository<LoanRequest, Long> 
     List<LoanRequest> findAllByOrderByRequestedAtDesc();
     Page<LoanRequest> findAllByOrderByRequestedAtDesc(Pageable pageable);
     Optional<LoanRequest> findByVerificationToken(String token);
+    long countByStatus(RequestStatus status);
+    long countByUserAndStatus(User user, RequestStatus status);
+    long countByStatusAndAttachmentStoragePathIsNull(RequestStatus status);
+    long countByStatusAndAttachmentStoragePath(RequestStatus status, String attachmentStoragePath);
+    long countByUserAndStatusAndAttachmentStoragePathIsNull(User user, RequestStatus status);
+    long countByUserAndStatusAndAttachmentStoragePath(User user, RequestStatus status, String attachmentStoragePath);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select l from LoanRequest l where l.id = :id")

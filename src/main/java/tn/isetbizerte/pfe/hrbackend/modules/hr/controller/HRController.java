@@ -9,6 +9,7 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 import tn.isetbizerte.pfe.hrbackend.modules.hr.dto.AssignRoleRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.hr.dto.AssignRoleResponse;
+import tn.isetbizerte.pfe.hrbackend.modules.hr.service.DashboardRequestSummaryService;
 import tn.isetbizerte.pfe.hrbackend.modules.hr.service.HRService;
 
 import java.util.*;
@@ -18,9 +19,11 @@ import java.util.*;
 public class HRController {
 
     private final HRService hrService;
+    private final DashboardRequestSummaryService dashboardRequestSummaryService;
 
-    public HRController(HRService hrService) {
+    public HRController(HRService hrService, DashboardRequestSummaryService dashboardRequestSummaryService) {
         this.hrService = hrService;
+        this.dashboardRequestSummaryService = dashboardRequestSummaryService;
     }
 
     /**
@@ -33,6 +36,7 @@ public class HRController {
         response.put("message", "HR Manager Dashboard");
         response.put("hrManagerUsername", jwt.getClaimAsString("preferred_username"));
         response.put("statistics", hrService.getDashboardStatistics());
+        response.put("requestActionSummary", dashboardRequestSummaryService.getHrRequestActionSummary());
 
         return response;
     }

@@ -157,8 +157,8 @@ class TaskServiceSafetyTest {
 
     @Test
     void createTask_sendsAssignmentEmailWithDescriptionBeforeProjectName() {
-        LocalDate start = LocalDate.of(2026, 5, 4);
-        LocalDate due = LocalDate.of(2026, 5, 7);
+        LocalDate start = futureWorkingDay(0);
+        LocalDate due = futureWorkingDay(3);
         CreateTaskRequest request = taskRequest(start, due);
 
         service.createTask("kc-leader", 500L, request);
@@ -266,8 +266,8 @@ class TaskServiceSafetyTest {
                 "Updated task",
                 "Updated description",
                 TaskPriority.LOW,
-                LocalDate.of(2026, 5, 5),
-                LocalDate.of(2026, 5, 8)
+                futureWorkingDay(1),
+                futureWorkingDay(4)
         ));
 
         assertThat(updated.get("title")).isEqualTo("Updated task");
@@ -304,8 +304,8 @@ class TaskServiceSafetyTest {
                 "Updated task",
                 "Updated description",
                 TaskPriority.LOW,
-                LocalDate.of(2026, 5, 5),
-                LocalDate.of(2026, 5, 8)
+                futureWorkingDay(1),
+                futureWorkingDay(4)
         ));
 
         ArgumentCaptor<NotificationEvent> eventCaptor = ArgumentCaptor.forClass(NotificationEvent.class);
@@ -323,8 +323,8 @@ class TaskServiceSafetyTest {
     @Test
     void updateTask_sendsTaskUpdatedEmailForAssignedTaskWithEmail() {
         Task task = task(TaskStatus.IN_PROGRESS);
-        LocalDate start = LocalDate.of(2026, 5, 5);
-        LocalDate due = LocalDate.of(2026, 5, 8);
+        LocalDate start = futureWorkingDay(1);
+        LocalDate due = futureWorkingDay(4);
         when(taskRepository.findById(900L)).thenReturn(Optional.of(task));
 
         service.updateTask("kc-leader", 900L, taskUpdate(
@@ -359,8 +359,8 @@ class TaskServiceSafetyTest {
                 "Updated task",
                 "Updated description",
                 TaskPriority.MEDIUM,
-                LocalDate.of(2026, 5, 4),
-                LocalDate.of(2026, 5, 7)
+                futureWorkingDay(0),
+                futureWorkingDay(3)
         ));
 
         assertThat(updated.get("assigneeId")).isNull();
@@ -418,8 +418,8 @@ class TaskServiceSafetyTest {
                 "Updated task",
                 "Updated description",
                 TaskPriority.MEDIUM,
-                LocalDate.of(2026, 5, 4),
-                LocalDate.of(2026, 5, 7)
+                futureWorkingDay(0),
+                futureWorkingDay(3)
         )))
                 .isInstanceOf(UnauthorizedException.class)
                 .hasMessage("Task does not belong to your team.");
@@ -434,8 +434,8 @@ class TaskServiceSafetyTest {
                 "Updated task",
                 "Updated description",
                 TaskPriority.MEDIUM,
-                LocalDate.of(2026, 5, 7),
-                LocalDate.of(2026, 5, 4)
+                futureWorkingDay(3),
+                futureWorkingDay(0)
         )))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessage("Due date cannot be before start date.");
@@ -447,14 +447,15 @@ class TaskServiceSafetyTest {
     @Test
     void updateTask_rejectsWeekendTaskDate() {
         Task task = task(TaskStatus.TODO);
+        LocalDate weekend = futureSaturday();
         when(taskRepository.findById(900L)).thenReturn(Optional.of(task));
 
         assertThatThrownBy(() -> service.updateTask("kc-leader", 900L, taskUpdate(
                 "Updated task",
                 "Updated description",
                 TaskPriority.MEDIUM,
-                LocalDate.of(2026, 5, 2),
-                LocalDate.of(2026, 5, 7)
+                weekend,
+                weekend.plusDays(5)
         )))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessage("Start date falls on a weekend.");
@@ -463,7 +464,7 @@ class TaskServiceSafetyTest {
     @Test
     void updateTask_rejectsPublicHolidayTaskDate() {
         Task task = task(TaskStatus.TODO);
-        LocalDate holiday = LocalDate.of(2026, 5, 6);
+        LocalDate holiday = futureWorkingDay(2);
         when(taskRepository.findById(900L)).thenReturn(Optional.of(task));
         when(workingDayService.isWorkingDay(holiday)).thenReturn(false);
         when(workingDayService.isPublicHoliday(holiday)).thenReturn(true);
@@ -472,7 +473,7 @@ class TaskServiceSafetyTest {
                 "Updated task",
                 "Updated description",
                 TaskPriority.MEDIUM,
-                LocalDate.of(2026, 5, 4),
+                futureWorkingDay(0),
                 holiday
         )))
                 .isInstanceOf(BadRequestException.class)
@@ -482,8 +483,8 @@ class TaskServiceSafetyTest {
     @Test
     void updateTask_blocksWhenCurrentAssigneeHasNoAvailableWorkingDays() {
         Task task = task(TaskStatus.TODO);
-        LocalDate start = LocalDate.of(2026, 5, 4);
-        LocalDate end = LocalDate.of(2026, 5, 8);
+        LocalDate start = futureWorkingDay(0);
+        LocalDate end = futureWorkingDay(4);
         when(taskRepository.findById(900L)).thenReturn(Optional.of(task));
         when(leaveRequestRepository.findByUserIdAndDateRangeAndStatusIn(eq(20L), eq(start), eq(end), anyList()))
                 .thenReturn(List.of(leave(tn.isetbizerte.pfe.hrbackend.common.enums.LeaveStatus.APPROVED, start, end)));
@@ -502,13 +503,15 @@ class TaskServiceSafetyTest {
     @Test
     void updateTask_allowsWarningsWhenAvailabilityIsNotFullyBlocked() {
         Task task = task(TaskStatus.TODO);
-        LocalDate start = LocalDate.of(2026, 5, 1);
-        LocalDate end = LocalDate.of(2026, 5, 7);
+        LocalDate start = futureFridayTaskStart();
+        LocalDate end = start.plusDays(6);
+        LocalDate approvedLeave = start.plusDays(3);
+        LocalDate pendingLeave = start.plusDays(5);
         when(taskRepository.findById(900L)).thenReturn(Optional.of(task));
         when(leaveRequestRepository.findByUserIdAndDateRangeAndStatusIn(eq(20L), eq(start), eq(end), anyList()))
                 .thenReturn(List.of(
-                        leave(tn.isetbizerte.pfe.hrbackend.common.enums.LeaveStatus.APPROVED, LocalDate.of(2026, 5, 4), LocalDate.of(2026, 5, 4)),
-                        leave(tn.isetbizerte.pfe.hrbackend.common.enums.LeaveStatus.PENDING, LocalDate.of(2026, 5, 6), LocalDate.of(2026, 5, 6))
+                        leave(tn.isetbizerte.pfe.hrbackend.common.enums.LeaveStatus.APPROVED, approvedLeave, approvedLeave),
+                        leave(tn.isetbizerte.pfe.hrbackend.common.enums.LeaveStatus.PENDING, pendingLeave, pendingLeave)
                 ));
 
         Map<String, Object> updated = service.updateTask("kc-leader", 900L, taskUpdate(
@@ -647,8 +650,35 @@ class TaskServiceSafetyTest {
     }
 
     private LocalDate nextWorkingDay() {
+        return futureWorkingDay(0);
+    }
+
+    private LocalDate futureWorkingDay(int offset) {
         LocalDate date = LocalDate.now().plusDays(1);
+        int remaining = offset;
         while (date.getDayOfWeek() == DayOfWeek.SATURDAY || date.getDayOfWeek() == DayOfWeek.SUNDAY) {
+            date = date.plusDays(1);
+        }
+        while (remaining > 0) {
+            date = date.plusDays(1);
+            if (date.getDayOfWeek() != DayOfWeek.SATURDAY && date.getDayOfWeek() != DayOfWeek.SUNDAY) {
+                remaining--;
+            }
+        }
+        return date;
+    }
+
+    private LocalDate futureFridayTaskStart() {
+        LocalDate date = futureWorkingDay(0);
+        while (date.getDayOfWeek() != DayOfWeek.FRIDAY) {
+            date = date.plusDays(1);
+        }
+        return date;
+    }
+
+    private LocalDate futureSaturday() {
+        LocalDate date = LocalDate.now().plusDays(1);
+        while (date.getDayOfWeek() != DayOfWeek.SATURDAY) {
             date = date.plusDays(1);
         }
         return date;
@@ -661,8 +691,8 @@ class TaskServiceSafetyTest {
         task.setDescription("Prepare payroll release notes");
         task.setPriority(TaskPriority.HIGH);
         task.setStatus(status);
-        task.setStartDate(LocalDate.of(2026, 5, 4));
-        task.setDueDate(LocalDate.of(2026, 5, 7));
+        task.setStartDate(futureWorkingDay(0));
+        task.setDueDate(futureWorkingDay(3));
         task.setProject(project);
         task.setAssignee(assignee);
         return task;

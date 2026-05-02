@@ -109,8 +109,8 @@ class TaskServiceAssignmentAvailabilityTest {
 
     @Test
     void previewTaskAssignment_blocksApprovedLeaveWhenNoWorkingDaysRemain() {
-        LocalDate start = LocalDate.of(2026, 5, 1);
-        LocalDate end = LocalDate.of(2026, 5, 7);
+        LocalDate start = futureFridayTaskStart();
+        LocalDate end = start.plusDays(6);
         when(leaveRequestRepository.findByUserIdAndDateRangeAndStatusIn(eq(20L), eq(start), eq(end), anyList()))
                 .thenReturn(List.of(leave(LeaveStatus.APPROVED, start, end)));
 
@@ -125,10 +125,12 @@ class TaskServiceAssignmentAvailabilityTest {
 
     @Test
     void previewTaskAssignment_warnsApprovedLeaveWhenSomeWorkingDaysRemain() {
-        LocalDate start = LocalDate.of(2026, 5, 1);
-        LocalDate end = LocalDate.of(2026, 5, 7);
+        LocalDate start = futureFridayTaskStart();
+        LocalDate end = start.plusDays(6);
+        LocalDate approvedLeaveStart = start.plusDays(2);
+        LocalDate approvedLeaveEnd = start.plusDays(3);
         when(leaveRequestRepository.findByUserIdAndDateRangeAndStatusIn(eq(20L), eq(start), eq(end), anyList()))
-                .thenReturn(List.of(leave(LeaveStatus.APPROVED, LocalDate.of(2026, 5, 3), LocalDate.of(2026, 5, 4))));
+                .thenReturn(List.of(leave(LeaveStatus.APPROVED, approvedLeaveStart, approvedLeaveEnd)));
 
         Map<String, Object> preview = service.previewTaskAssignment("kc-leader", 500L, task(start, end));
 
@@ -141,10 +143,10 @@ class TaskServiceAssignmentAvailabilityTest {
 
     @Test
     void previewTaskAssignment_doesNotWarnWhenApprovedLeaveOnlyCoversWeekendDates() {
-        LocalDate start = LocalDate.of(2026, 5, 1);
-        LocalDate end = LocalDate.of(2026, 5, 7);
+        LocalDate start = futureFridayTaskStart();
+        LocalDate end = start.plusDays(6);
         when(leaveRequestRepository.findByUserIdAndDateRangeAndStatusIn(eq(20L), eq(start), eq(end), anyList()))
-                .thenReturn(List.of(leave(LeaveStatus.APPROVED, LocalDate.of(2026, 5, 2), LocalDate.of(2026, 5, 3))));
+                .thenReturn(List.of(leave(LeaveStatus.APPROVED, start.plusDays(1), start.plusDays(2))));
 
         Map<String, Object> preview = service.previewTaskAssignment("kc-leader", 500L, task(start, end));
 
@@ -156,27 +158,31 @@ class TaskServiceAssignmentAvailabilityTest {
 
     @Test
     void previewTaskAssignment_warnsPendingLeaveAndKeepsAssigneeCreatable() {
-        LocalDate start = LocalDate.of(2026, 5, 1);
-        LocalDate end = LocalDate.of(2026, 5, 7);
+        LocalDate start = futureFridayTaskStart();
+        LocalDate end = start.plusDays(6);
+        LocalDate pendingLeaveStart = start.plusDays(3);
+        LocalDate pendingLeaveEnd = start.plusDays(4);
         when(leaveRequestRepository.findByUserIdAndDateRangeAndStatusIn(eq(20L), eq(start), eq(end), anyList()))
-                .thenReturn(List.of(leave(LeaveStatus.PENDING, LocalDate.of(2026, 5, 4), LocalDate.of(2026, 5, 5))));
+                .thenReturn(List.of(leave(LeaveStatus.PENDING, pendingLeaveStart, pendingLeaveEnd)));
 
         Map<String, Object> preview = service.previewTaskAssignment("kc-leader", 500L, task(start, end));
 
         assertThat(preview.get("canCreate")).isEqualTo(true);
         assertThat(preview.get("warnedCount")).isEqualTo(1);
         assertThat(reasons(preview, "warnedAssignees"))
-                .containsExactly("Pending leave overlaps 2026-05-04 to 2026-05-05");
+                .containsExactly("Pending leave overlaps " + pendingLeaveStart + " to " + pendingLeaveEnd);
     }
 
     @Test
     void previewTaskAssignment_warnsApprovedPartialAndPendingLeaveTogether() {
-        LocalDate start = LocalDate.of(2026, 5, 1);
-        LocalDate end = LocalDate.of(2026, 5, 7);
+        LocalDate start = futureFridayTaskStart();
+        LocalDate end = start.plusDays(6);
+        LocalDate approvedLeave = start.plusDays(3);
+        LocalDate pendingLeave = start.plusDays(5);
         when(leaveRequestRepository.findByUserIdAndDateRangeAndStatusIn(eq(20L), eq(start), eq(end), anyList()))
                 .thenReturn(List.of(
-                        leave(LeaveStatus.APPROVED, LocalDate.of(2026, 5, 4), LocalDate.of(2026, 5, 4)),
-                        leave(LeaveStatus.PENDING, LocalDate.of(2026, 5, 6), LocalDate.of(2026, 5, 6))
+                        leave(LeaveStatus.APPROVED, approvedLeave, approvedLeave),
+                        leave(LeaveStatus.PENDING, pendingLeave, pendingLeave)
                 ));
 
         Map<String, Object> preview = service.previewTaskAssignment("kc-leader", 500L, task(start, end));
@@ -186,14 +192,14 @@ class TaskServiceAssignmentAvailabilityTest {
         assertThat(reasons(preview, "warnedAssignees"))
                 .containsExactly(
                         "Approved leave overlaps part of this task period. Employee still has 4 available working day(s).",
-                        "Pending leave overlaps 2026-05-06 to 2026-05-06"
+                        "Pending leave overlaps " + pendingLeave + " to " + pendingLeave
                 );
     }
 
     @Test
     void createTask_throwsExistingNoEligibleAssigneesMessageWhenAllSelectedAreUnavailable() {
-        LocalDate start = LocalDate.of(2026, 5, 1);
-        LocalDate end = LocalDate.of(2026, 5, 7);
+        LocalDate start = futureFridayTaskStart();
+        LocalDate end = start.plusDays(6);
         when(leaveRequestRepository.findByUserIdAndDateRangeAndStatusIn(eq(20L), eq(start), eq(end), anyList()))
                 .thenReturn(List.of(leave(LeaveStatus.APPROVED, start, end)));
 
@@ -206,8 +212,8 @@ class TaskServiceAssignmentAvailabilityTest {
 
     @Test
     void previewTaskAssignment_keepsWeekendStartValidationAsBlockedDateIssue() {
-        LocalDate start = LocalDate.of(2026, 5, 2);
-        LocalDate end = LocalDate.of(2026, 5, 7);
+        LocalDate start = futureSaturday();
+        LocalDate end = start.plusDays(5);
 
         Map<String, Object> preview = service.previewTaskAssignment("kc-leader", 500L, task(start, end));
 
@@ -219,8 +225,9 @@ class TaskServiceAssignmentAvailabilityTest {
 
     @Test
     void previewTaskAssignment_warnsApprovedShortAbsenceInsideTaskRangeAndKeepsAssigneeCreatable() {
-        LocalDate start = LocalDate.of(2026, 5, 1);
-        LocalDate end = LocalDate.of(2026, 5, 7);
+        LocalDate start = futureFridayTaskStart();
+        LocalDate end = start.plusDays(6);
+        LocalDate absenceDate = start.plusDays(3);
         when(leaveRequestRepository.findByUserIdAndDateRangeAndStatusIn(eq(20L), eq(start), eq(end), anyList()))
                 .thenReturn(List.of());
         when(authorizationRequestRepository.findByUserAndAuthorizationTypeAndStatusAndAbsenceDateBetweenOrderByAbsenceDateAscFromTimeAsc(
@@ -229,7 +236,7 @@ class TaskServiceAssignmentAvailabilityTest {
                 eq(RequestStatus.APPROVED),
                 eq(start),
                 eq(end)
-        )).thenReturn(List.of(shortAbsence(LocalDate.of(2026, 5, 4), LocalTime.of(10, 0), LocalTime.of(12, 0))));
+        )).thenReturn(List.of(shortAbsence(absenceDate, LocalTime.of(10, 0), LocalTime.of(12, 0))));
 
         Map<String, Object> preview = service.previewTaskAssignment("kc-leader", 500L, task(start, end));
 
@@ -237,13 +244,13 @@ class TaskServiceAssignmentAvailabilityTest {
         assertThat(preview.get("blockedCount")).isEqualTo(0);
         assertThat(preview.get("warnedCount")).isEqualTo(1);
         assertThat(reasons(preview, "warnedAssignees"))
-                .containsExactly("Approved short absence on 2026-05-04 from 10:00 to 12:00.");
+                .containsExactly("Approved short absence on " + absenceDate + " from 10:00 to 12:00.");
     }
 
     @Test
     void previewTaskAssignment_doesNotWarnWhenApprovedShortAbsenceIsOutsideTaskRange() {
-        LocalDate start = LocalDate.of(2026, 5, 1);
-        LocalDate end = LocalDate.of(2026, 5, 7);
+        LocalDate start = futureFridayTaskStart();
+        LocalDate end = start.plusDays(6);
         when(leaveRequestRepository.findByUserIdAndDateRangeAndStatusIn(eq(20L), eq(start), eq(end), anyList()))
                 .thenReturn(List.of());
         when(authorizationRequestRepository.findByUserAndAuthorizationTypeAndStatusAndAbsenceDateBetweenOrderByAbsenceDateAscFromTimeAsc(
@@ -264,12 +271,15 @@ class TaskServiceAssignmentAvailabilityTest {
 
     @Test
     void previewTaskAssignment_combinesShortAbsenceWithApprovedPartialAndPendingLeaveWarnings() {
-        LocalDate start = LocalDate.of(2026, 5, 1);
-        LocalDate end = LocalDate.of(2026, 5, 7);
+        LocalDate start = futureFridayTaskStart();
+        LocalDate end = start.plusDays(6);
+        LocalDate approvedLeave = start.plusDays(3);
+        LocalDate shortAbsenceDate = start.plusDays(4);
+        LocalDate pendingLeave = start.plusDays(5);
         when(leaveRequestRepository.findByUserIdAndDateRangeAndStatusIn(eq(20L), eq(start), eq(end), anyList()))
                 .thenReturn(List.of(
-                        leave(LeaveStatus.APPROVED, LocalDate.of(2026, 5, 4), LocalDate.of(2026, 5, 4)),
-                        leave(LeaveStatus.PENDING, LocalDate.of(2026, 5, 6), LocalDate.of(2026, 5, 6))
+                        leave(LeaveStatus.APPROVED, approvedLeave, approvedLeave),
+                        leave(LeaveStatus.PENDING, pendingLeave, pendingLeave)
                 ));
         when(authorizationRequestRepository.findByUserAndAuthorizationTypeAndStatusAndAbsenceDateBetweenOrderByAbsenceDateAscFromTimeAsc(
                 eq(assignee),
@@ -277,7 +287,7 @@ class TaskServiceAssignmentAvailabilityTest {
                 eq(RequestStatus.APPROVED),
                 eq(start),
                 eq(end)
-        )).thenReturn(List.of(shortAbsence(LocalDate.of(2026, 5, 5), LocalTime.of(9, 30), LocalTime.of(11, 15))));
+        )).thenReturn(List.of(shortAbsence(shortAbsenceDate, LocalTime.of(9, 30), LocalTime.of(11, 15))));
 
         Map<String, Object> preview = service.previewTaskAssignment("kc-leader", 500L, task(start, end));
 
@@ -286,15 +296,15 @@ class TaskServiceAssignmentAvailabilityTest {
         assertThat(reasons(preview, "warnedAssignees"))
                 .containsExactly(
                         "Approved leave overlaps part of this task period. Employee still has 4 available working day(s).",
-                        "Pending leave overlaps 2026-05-06 to 2026-05-06",
-                        "Approved short absence on 2026-05-05 from 09:30 to 11:15."
+                        "Pending leave overlaps " + pendingLeave + " to " + pendingLeave,
+                        "Approved short absence on " + shortAbsenceDate + " from 09:30 to 11:15."
                 );
     }
 
     @Test
     void previewTaskAssignment_keepsFullApprovedLeaveBlockedEvenWhenShortAbsenceExists() {
-        LocalDate start = LocalDate.of(2026, 5, 1);
-        LocalDate end = LocalDate.of(2026, 5, 7);
+        LocalDate start = futureFridayTaskStart();
+        LocalDate end = start.plusDays(6);
         when(leaveRequestRepository.findByUserIdAndDateRangeAndStatusIn(eq(20L), eq(start), eq(end), anyList()))
                 .thenReturn(List.of(leave(LeaveStatus.APPROVED, start, end)));
 
@@ -313,8 +323,9 @@ class TaskServiceAssignmentAvailabilityTest {
 
     @Test
     void createTask_createsTaskWhenOnlyShortAbsenceWarningExists() {
-        LocalDate start = LocalDate.of(2026, 5, 1);
-        LocalDate end = LocalDate.of(2026, 5, 7);
+        LocalDate start = futureFridayTaskStart();
+        LocalDate end = start.plusDays(6);
+        LocalDate absenceDate = start.plusDays(3);
         when(leaveRequestRepository.findByUserIdAndDateRangeAndStatusIn(eq(20L), eq(start), eq(end), anyList()))
                 .thenReturn(List.of());
         when(authorizationRequestRepository.findByUserAndAuthorizationTypeAndStatusAndAbsenceDateBetweenOrderByAbsenceDateAscFromTimeAsc(
@@ -323,7 +334,7 @@ class TaskServiceAssignmentAvailabilityTest {
                 eq(RequestStatus.APPROVED),
                 eq(start),
                 eq(end)
-        )).thenReturn(List.of(shortAbsence(LocalDate.of(2026, 5, 4), LocalTime.of(10, 0), LocalTime.of(12, 0))));
+        )).thenReturn(List.of(shortAbsence(absenceDate, LocalTime.of(10, 0), LocalTime.of(12, 0))));
 
         Map<String, Object> result = service.createTask("kc-leader", 500L, task(start, end));
 
@@ -357,6 +368,36 @@ class TaskServiceAssignmentAvailabilityTest {
         });
         lenient().when(workingDayService.isPublicHoliday(any(LocalDate.class)))
                 .thenAnswer(invocation -> holidays.contains(invocation.getArgument(0)));
+    }
+
+    private LocalDate futureWorkingDay(int offset) {
+        LocalDate date = LocalDate.now().plusDays(1);
+        int remaining = offset;
+        while (true) {
+            if (date.getDayOfWeek() != DayOfWeek.SATURDAY && date.getDayOfWeek() != DayOfWeek.SUNDAY) {
+                if (remaining == 0) {
+                    return date;
+                }
+                remaining--;
+            }
+            date = date.plusDays(1);
+        }
+    }
+
+    private LocalDate futureFridayTaskStart() {
+        LocalDate date = futureWorkingDay(0);
+        while (date.getDayOfWeek() != DayOfWeek.FRIDAY) {
+            date = date.plusDays(1);
+        }
+        return date;
+    }
+
+    private LocalDate futureSaturday() {
+        LocalDate date = LocalDate.now().plusDays(1);
+        while (date.getDayOfWeek() != DayOfWeek.SATURDAY) {
+            date = date.plusDays(1);
+        }
+        return date;
     }
 
     private User user(Long id, String keycloakId, String username, TypeRole role) {

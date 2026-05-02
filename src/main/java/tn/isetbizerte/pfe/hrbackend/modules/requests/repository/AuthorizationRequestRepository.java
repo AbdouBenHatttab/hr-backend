@@ -25,6 +25,8 @@ public interface AuthorizationRequestRepository extends JpaRepository<Authorizat
     List<AuthorizationRequest> findAllByOrderByRequestedAtDesc();
     Page<AuthorizationRequest> findAllByOrderByRequestedAtDesc(Pageable pageable);
     Optional<AuthorizationRequest> findByVerificationToken(String token);
+    long countByStatus(RequestStatus status);
+    long countByUserAndStatus(User user, RequestStatus status);
 
     List<AuthorizationRequest> findByUserAndAuthorizationTypeAndStatusAndAbsenceDateBetweenOrderByAbsenceDateAscFromTimeAsc(
             User user,

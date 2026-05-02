@@ -6,6 +6,7 @@ import org.springframework.web.bind.annotation.*;
 import tn.isetbizerte.pfe.hrbackend.common.dto.LoginRequest;
 import tn.isetbizerte.pfe.hrbackend.common.dto.LoginResponse;
 import tn.isetbizerte.pfe.hrbackend.common.dto.RegisterRequest;
+import tn.isetbizerte.pfe.hrbackend.modules.auth.dto.LogoutRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.auth.dto.RefreshTokenRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.auth.service.AuthService;
 
@@ -72,6 +73,12 @@ public class AuthController {
             LoginResponse errorResponse = new LoginResponse("Token refresh failed due to a server error. Please login again.");
             return ResponseEntity.status(500).body(errorResponse);
         }
+    }
+
+    @PostMapping("/logout")
+    public ResponseEntity<Map<String, Object>> logout(@RequestBody(required = false) LogoutRequest request) {
+        String refreshToken = request != null ? request.getRefreshToken() : null;
+        return ResponseEntity.ok(authService.logoutUser(refreshToken));
     }
 
     /**

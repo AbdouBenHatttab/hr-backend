@@ -396,6 +396,52 @@ public class AuthService {
         return new LoginResponse("Token refresh failed");
     }
 
+    /**
+     * Best-effort logout with Keycloak. Frontend cleanup should still proceed
+     * even when the remote logout endpoint is temporarily unavailable.
+     */
+    public Map<String, Object> logoutUser(String refreshToken) {
+        Map<String, Object> result = new HashMap<>();
+        result.put("success", true);
+
+        if (refreshToken == null || refreshToken.isBlank()) {
+            result.put("message", "Logout completed locally");
+            result.put("remoteLogout", false);
+            return result;
+        }
+
+        String logoutUrl = keycloakServerUrl + "/realms/" + realm + "/protocol/openid-connect/logout";
+
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+
+            MultiValueMap<String, String> body = new LinkedMultiValueMap<>();
+            body.add("client_id", clientId);
+            if (clientSecret != null && !clientSecret.isEmpty()) {
+                body.add("client_secret", clientSecret);
+            }
+            body.add("refresh_token", refreshToken);
+
+            HttpEntity<MultiValueMap<String, String>> request = new HttpEntity<>(body, headers);
+            restTemplate.postForEntity(logoutUrl, request, Void.class);
+
+            result.put("message", "Logout completed");
+            result.put("remoteLogout", true);
+            return result;
+        } catch (RestClientResponseException e) {
+            logger.warn("Keycloak logout rejected with status {}", e.getStatusCode().value());
+        } catch (RestClientException e) {
+            logger.warn("Keycloak logout request failed: {}", e.getMessage());
+        } catch (Exception e) {
+            logger.warn("Unexpected error during Keycloak logout", e);
+        }
+
+        result.put("message", "Logout completed locally");
+        result.put("remoteLogout", false);
+        return result;
+    }
+
     private String mapKeycloakLoginError(RestClientResponseException e) {
         HttpStatus status = HttpStatus.resolve(e.getStatusCode().value());
         String body = e.getResponseBodyAsString();

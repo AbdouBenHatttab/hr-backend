@@ -12,6 +12,7 @@ import tn.isetbizerte.pfe.hrbackend.infrastructure.kafka.producer.KafkaEventProd
 import tn.isetbizerte.pfe.hrbackend.modules.hr.dto.AssignRoleResponse;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.entity.StoredEmployeeDocument;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.repository.StoredEmployeeDocumentRepository;
+import tn.isetbizerte.pfe.hrbackend.modules.team.entity.Team;
 import tn.isetbizerte.pfe.hrbackend.modules.team.repository.TeamRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.Person;
@@ -456,9 +457,113 @@ public class HRService {
             userInfo.put("personalInfo", personalInfo);
         }
 
-        userInfo.put("requiredDocuments", buildRequiredDocuments(user));
+        Map<String, Object> requiredDocuments = buildRequiredDocuments(user);
+        Map<String, Object> teamInfo = buildTeamInfo(user);
+        List<String> setupIssues = buildSetupIssues(user, requiredDocuments, teamInfo);
+
+        userInfo.put("teamInfo", teamInfo);
+        userInfo.put("requiredDocuments", requiredDocuments);
+        userInfo.put("setupStatus", resolveSetupStatus(user, setupIssues));
+        userInfo.put("setupIssues", setupIssues);
 
         return userInfo;
+    }
+
+    private Map<String, Object> buildTeamInfo(User user) {
+        if (user == null) {
+            return null;
+        }
+
+        if (user.getRole() == TypeRole.TEAM_LEADER) {
+            Optional<Team> ledTeam = teamRepository.findByTeamLeader(user);
+            if (ledTeam.isPresent()) {
+                return buildTeamInfoMap(ledTeam.get(), "Team Leader", user);
+            }
+        }
+
+        if (user.getRole() == TypeRole.EMPLOYEE && user.getTeam() != null) {
+            return buildTeamInfoMap(user.getTeam(), "Member", user.getTeam().getTeamLeader());
+        }
+
+        return null;
+    }
+
+    private Map<String, Object> buildTeamInfoMap(Team team, String teamRole, User leader) {
+        Map<String, Object> teamInfo = new HashMap<>();
+        teamInfo.put("teamId", team.getId());
+        teamInfo.put("teamName", team.getName());
+        teamInfo.put("teamRole", teamRole);
+        if (leader != null) {
+            teamInfo.put("teamLeaderId", leader.getId());
+            teamInfo.put("teamLeaderName", displayName(leader));
+        }
+        return teamInfo;
+    }
+
+    private String displayName(User user) {
+        if (user == null) {
+            return "";
+        }
+        Person person = user.getPerson();
+        if (person != null) {
+            String firstName = person.getFirstName() != null ? person.getFirstName().trim() : "";
+            String lastName = person.getLastName() != null ? person.getLastName().trim() : "";
+            String fullName = (firstName + " " + lastName).trim();
+            if (!fullName.isBlank()) {
+                return fullName;
+            }
+        }
+        return user.getUsername();
+    }
+
+    private List<String> buildSetupIssues(User user, Map<String, Object> requiredDocuments, Map<String, Object> teamInfo) {
+        if (user == null || user.getRole() == TypeRole.NEW_USER) {
+            return List.of();
+        }
+
+        List<String> issues = new ArrayList<>();
+        Person person = user.getPerson();
+
+        if (person == null || person.getDepartmentId() == null) {
+            issues.add("MISSING_DEPARTMENT");
+        }
+        if (person == null || person.getJobTitleId() == null) {
+            issues.add("MISSING_JOB_TITLE");
+        }
+        if (person == null || person.getHireDate() == null) {
+            issues.add("MISSING_HIRE_DATE");
+        }
+
+        if (user.getRole() == TypeRole.EMPLOYEE && teamInfo == null) {
+            issues.add("MISSING_TEAM");
+        }
+        if (user.getRole() == TypeRole.TEAM_LEADER
+                && (teamInfo == null || !"Team Leader".equals(teamInfo.get("teamRole")))) {
+            issues.add("MISSING_LED_TEAM");
+        }
+        if ((user.getRole() == TypeRole.EMPLOYEE || user.getRole() == TypeRole.TEAM_LEADER)
+                && isMissingRequiredContractCopy(requiredDocuments)) {
+            issues.add("MISSING_CONTRACT_COPY");
+        }
+
+        return issues;
+    }
+
+    @SuppressWarnings("unchecked")
+    private boolean isMissingRequiredContractCopy(Map<String, Object> requiredDocuments) {
+        Object contractCopyValue = requiredDocuments.get("contractCopy");
+        if (!(contractCopyValue instanceof Map<?, ?> contractCopy)) {
+            return false;
+        }
+        return Boolean.TRUE.equals(contractCopy.get("required"))
+                && !Boolean.TRUE.equals(contractCopy.get("uploaded"));
+    }
+
+    private String resolveSetupStatus(User user, List<String> setupIssues) {
+        if (user != null && user.getRole() == TypeRole.NEW_USER) {
+            return "PENDING_ROLE";
+        }
+        return setupIssues.isEmpty() ? "COMPLETE" : "INCOMPLETE";
     }
 
     private Map<String, Object> buildRequiredDocuments(User user) {

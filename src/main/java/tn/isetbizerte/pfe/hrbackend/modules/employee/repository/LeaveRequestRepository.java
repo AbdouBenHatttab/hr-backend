@@ -34,6 +34,14 @@ public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, Long
     List<LeaveRequest> findByStatus(LeaveStatus status);
     List<LeaveRequest> findByUserAndStatus(User user, LeaveStatus status);
 
+    long countByStatusAndTeamLeaderDecisionAndHrDecision(
+            LeaveStatus status,
+            tn.isetbizerte.pfe.hrbackend.common.enums.ApprovalDecision teamLeaderDecision,
+            tn.isetbizerte.pfe.hrbackend.common.enums.ApprovalDecision hrDecision
+    );
+
+    long countByUserAndStatus(User user, LeaveStatus status);
+
     @Query("SELECT COUNT(lr) > 0 FROM LeaveRequest lr " +
            "WHERE lr.user.id = :userId " +
            "AND lr.status = 'PENDING' " +

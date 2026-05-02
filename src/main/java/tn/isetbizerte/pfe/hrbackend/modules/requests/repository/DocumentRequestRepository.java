@@ -4,6 +4,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Repository;
+import tn.isetbizerte.pfe.hrbackend.common.enums.RequestStatus;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.entity.DocumentRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
 
@@ -17,4 +18,26 @@ public interface DocumentRequestRepository extends JpaRepository<DocumentRequest
     List<DocumentRequest> findAllByOrderByRequestedAtDesc();
     Page<DocumentRequest> findAllByOrderByRequestedAtDesc(Pageable pageable);
     Optional<DocumentRequest> findByVerificationToken(String token);
+    long countByStatus(RequestStatus status);
+    long countByUserAndStatus(User user, RequestStatus status);
+    long countByStatusAndDocumentTypeNotAndAttachmentStoragePathIsNull(
+            RequestStatus status,
+            tn.isetbizerte.pfe.hrbackend.common.enums.DocumentType documentType
+    );
+    long countByStatusAndDocumentTypeNotAndAttachmentStoragePath(
+            RequestStatus status,
+            tn.isetbizerte.pfe.hrbackend.common.enums.DocumentType documentType,
+            String attachmentStoragePath
+    );
+    long countByUserAndStatusAndDocumentTypeNotAndAttachmentStoragePathIsNull(
+            User user,
+            RequestStatus status,
+            tn.isetbizerte.pfe.hrbackend.common.enums.DocumentType documentType
+    );
+    long countByUserAndStatusAndDocumentTypeNotAndAttachmentStoragePath(
+            User user,
+            RequestStatus status,
+            tn.isetbizerte.pfe.hrbackend.common.enums.DocumentType documentType,
+            String attachmentStoragePath
+    );
 }
