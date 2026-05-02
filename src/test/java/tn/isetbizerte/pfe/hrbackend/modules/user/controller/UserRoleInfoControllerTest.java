@@ -9,6 +9,7 @@ import tn.isetbizerte.pfe.hrbackend.modules.department.service.DepartmentService
 import tn.isetbizerte.pfe.hrbackend.modules.jobtitle.entity.JobTitle;
 import tn.isetbizerte.pfe.hrbackend.modules.jobtitle.service.JobTitleService;
 import tn.isetbizerte.pfe.hrbackend.modules.user.dto.UpdateEmploymentRequest;
+import tn.isetbizerte.pfe.hrbackend.modules.user.dto.UpdateMyProfileRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.Person;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
 import tn.isetbizerte.pfe.hrbackend.modules.user.repository.PersonRepository;
@@ -58,7 +59,10 @@ class UserRoleInfoControllerTest {
         User user = userWithPerson("alice");
         when(authenticatedUserResolver.resolve(any())).thenReturn(Optional.of(user));
 
-        assertThatThrownBy(() -> controller.updateMyProfile(Map.of("departmentId", 3), jwt("alice")))
+        UpdateMyProfileRequest request = new UpdateMyProfileRequest();
+        request.captureUnknownField("departmentId", 3);
+
+        assertThatThrownBy(() -> controller.updateMyProfile(request, jwt("alice")))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessage("Department is HR-managed employment data and cannot be changed from self-service.");
 

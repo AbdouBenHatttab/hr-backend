@@ -37,6 +37,8 @@ import java.util.stream.Collectors;
 public class HRService {
 
     private static final Logger logger = LoggerFactory.getLogger(HRService.class);
+    private static final String SETUP_FLOW_REQUIRED_MESSAGE =
+            "Use the HR setup flow to assign or change roles with required employment and team setup.";
 
     private final UserService userService;
     private final KeycloakAdminService keycloakAdminService;
@@ -332,6 +334,11 @@ public class HRService {
         } catch (IllegalArgumentException e) {
             throw new BadRequestException("Invalid role. Valid roles are: EMPLOYEE, TEAM_LEADER, HR_MANAGER, NEW_USER");
         }
+        // Compatibility-only endpoint: normal active role assignment must go through
+        // completeUserSetup so employment and team invariants are validated atomically.
+        if (newRole != TypeRole.NEW_USER) {
+            throw new BadRequestException(SETUP_FLOW_REQUIRED_MESSAGE);
+        }
 
         // Find user
         User user = userService.findById(userId)
@@ -523,6 +530,11 @@ public class HRService {
     }
 
     private void validateLeadershipTarget(User user, Team ledTeam) {
+        User currentLeader = ledTeam.getTeamLeader();
+        if (currentLeader != null && !Objects.equals(currentLeader.getId(), user.getId())) {
+            throw new BadRequestException("This team already has a Team Leader. Use Team Management to change the leader.");
+        }
+
         teamRepository.findByTeamLeader(user)
                 .filter(existing -> !Objects.equals(existing.getId(), ledTeam.getId()))
                 .ifPresent(existing -> {

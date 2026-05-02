@@ -23,6 +23,9 @@ import static org.mockito.Mockito.*;
 
 class HRServiceAccountActivationTest {
 
+    private static final String SETUP_FLOW_REQUIRED_MESSAGE =
+            "Use the HR setup flow to assign or change roles with required employment and team setup.";
+
     private UserService userService;
     private KeycloakAdminService keycloakAdminService;
     private TeamRepository teamRepository;
@@ -94,13 +97,18 @@ class HRServiceAccountActivationTest {
     }
 
     @Test
-    void assignRole_rejectsLeadingTeamLeaderDemotionToEmployee() {
-        assertLeadingTeamLeaderDemotionRejected(TypeRole.EMPLOYEE);
+    void assignRole_rejectsEmployeeRoleThroughLegacyEndpointBeforeKeycloak() {
+        assertLegacyRoleChangeRejected(TypeRole.EMPLOYEE);
     }
 
     @Test
-    void assignRole_rejectsLeadingTeamLeaderDemotionToHrManager() {
-        assertLeadingTeamLeaderDemotionRejected(TypeRole.HR_MANAGER);
+    void assignRole_rejectsTeamLeaderRoleThroughLegacyEndpointBeforeKeycloak() {
+        assertLegacyRoleChangeRejected(TypeRole.TEAM_LEADER);
+    }
+
+    @Test
+    void assignRole_rejectsHrManagerRoleThroughLegacyEndpointBeforeKeycloak() {
+        assertLegacyRoleChangeRejected(TypeRole.HR_MANAGER);
     }
 
     @Test
@@ -109,17 +117,16 @@ class HRServiceAccountActivationTest {
     }
 
     @Test
-    void assignRole_allowsNonLeadingTeamLeaderRoleChange() {
+    void assignRole_rejectsNonLeadingTeamLeaderNormalRoleChange() {
         User leader = user(3L, "leader", TypeRole.TEAM_LEADER, true);
-        when(userService.findById(3L)).thenReturn(Optional.of(leader));
-        when(teamRepository.existsByTeamLeader(leader)).thenReturn(false);
-        when(keycloakAdminService.assignRoleToUser("kc-leader", "EMPLOYEE")).thenReturn(true);
 
-        service.assignRoleToUser(3L, "EMPLOYEE", "hr");
+        assertThatThrownBy(() -> service.assignRoleToUser(3L, "EMPLOYEE", "hr"))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage(SETUP_FLOW_REQUIRED_MESSAGE);
 
-        assertThat(leader.getRole()).isEqualTo(TypeRole.EMPLOYEE);
-        verify(keycloakAdminService).assignRoleToUser("kc-leader", "EMPLOYEE");
-        verify(userService).saveUser(leader);
+        assertThat(leader.getRole()).isEqualTo(TypeRole.TEAM_LEADER);
+        verify(keycloakAdminService, never()).assignRoleToUser(anyString(), anyString());
+        verify(userService, never()).saveUser(any());
     }
 
     @Test
@@ -127,7 +134,7 @@ class HRServiceAccountActivationTest {
         User hr = user(1L, "hr", TypeRole.HR_MANAGER, true);
         when(userService.findById(1L)).thenReturn(Optional.of(hr));
 
-        assertThatThrownBy(() -> service.assignRoleToUser(1L, "EMPLOYEE", "hr"))
+        assertThatThrownBy(() -> service.assignRoleToUser(1L, "NEW_USER", "hr"))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessage("You cannot change your own role.");
 
@@ -136,16 +143,27 @@ class HRServiceAccountActivationTest {
     }
 
     @Test
-    void assignRole_allowsHrManagerWithoutTeam() {
+    void assignRole_rejectsHrManagerNormalRoleChange() {
         User employee = user(4L, "employee", TypeRole.EMPLOYEE, true);
-        when(userService.findById(4L)).thenReturn(Optional.of(employee));
-        when(keycloakAdminService.assignRoleToUser("kc-employee", "HR_MANAGER")).thenReturn(true);
 
-        service.assignRoleToUser(4L, "HR_MANAGER", "hr");
+        assertThatThrownBy(() -> service.assignRoleToUser(4L, "HR_MANAGER", "hr"))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage(SETUP_FLOW_REQUIRED_MESSAGE);
 
-        assertThat(employee.getRole()).isEqualTo(TypeRole.HR_MANAGER);
+        assertThat(employee.getRole()).isEqualTo(TypeRole.EMPLOYEE);
         verify(teamRepository, never()).existsByTeamLeader(employee);
-        verify(userService).saveUser(employee);
+        verify(keycloakAdminService, never()).assignRoleToUser(anyString(), anyString());
+        verify(userService, never()).saveUser(any());
+    }
+
+    private void assertLegacyRoleChangeRejected(TypeRole newRole) {
+        assertThatThrownBy(() -> service.assignRoleToUser(3L, newRole.name(), "hr"))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage(SETUP_FLOW_REQUIRED_MESSAGE);
+
+        verify(userService, never()).findById(anyLong());
+        verify(keycloakAdminService, never()).assignRoleToUser(anyString(), anyString());
+        verify(userService, never()).saveUser(any());
     }
 
     private void assertLeadingTeamLeaderDemotionRejected(TypeRole newRole) {

@@ -114,6 +114,39 @@ class HRServiceCompleteUserSetupTest {
     }
 
     @Test
+    void teamLeaderSetup_allowsSameCurrentLeaderNoOp() {
+        User user = user(18L, "existing-leader", TypeRole.TEAM_LEADER, true);
+        Team ledTeam = team(4L, "Platform", user);
+        when(userService.findById(18L)).thenReturn(Optional.of(user));
+        when(teamRepository.findByTeamLeader(user)).thenReturn(Optional.of(ledTeam));
+        when(teamRepository.findByIdWithDetails(4L)).thenReturn(Optional.of(ledTeam));
+
+        service.completeUserSetup(18L, request("TEAM_LEADER", null, 4L), "kc-hr", "hr");
+
+        assertThat(user.getRole()).isEqualTo(TypeRole.TEAM_LEADER);
+        assertThat(user.getTeam()).isNull();
+        assertThat(ledTeam.getTeamLeader()).isSameAs(user);
+        verify(keycloakAdminService).assignRoleToUser("kc-existing-leader", "TEAM_LEADER");
+    }
+
+    @Test
+    void teamLeaderSetup_rejectsTeamWithDifferentExistingLeaderBeforeKeycloak() {
+        User target = user(19L, "target-leader", TypeRole.NEW_USER, false);
+        User existingLeader = user(20L, "current-leader", TypeRole.TEAM_LEADER, true);
+        Team ledTeam = team(4L, "Platform", existingLeader);
+        when(userService.findById(19L)).thenReturn(Optional.of(target));
+        when(teamRepository.findByIdWithDetails(4L)).thenReturn(Optional.of(ledTeam));
+
+        assertThatThrownBy(() -> service.completeUserSetup(19L, request("TEAM_LEADER", null, 4L), "kc-hr", "hr"))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("This team already has a Team Leader. Use Team Management to change the leader.");
+
+        assertThat(ledTeam.getTeamLeader()).isSameAs(existingLeader);
+        verify(keycloakAdminService, never()).assignRoleToUser(anyString(), anyString());
+        verify(userService, never()).saveUser(any());
+    }
+
+    @Test
     void hrManagerSetup_savesRoleEmploymentAndRequiresNoTeam() {
         User user = user(12L, "new-hr", TypeRole.NEW_USER, false);
         when(userService.findById(12L)).thenReturn(Optional.of(user));

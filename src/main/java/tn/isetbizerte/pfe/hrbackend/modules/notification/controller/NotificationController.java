@@ -4,6 +4,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
+import tn.isetbizerte.pfe.hrbackend.modules.notification.dto.NotificationBatchReadRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.notification.service.NotificationService;
 
 import java.util.HashMap;
@@ -65,11 +66,11 @@ public class NotificationController {
 
     @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")
     @PatchMapping("/read-batch")
-    public Map<String, Object> markBatchRead(@RequestBody Map<String, Object> body, @AuthenticationPrincipal Jwt jwt) {
+    public Map<String, Object> markBatchRead(@RequestBody NotificationBatchReadRequest body, @AuthenticationPrincipal Jwt jwt) {
         String keycloakId = jwt.getSubject();
-        Object idsObj = body.get("ids");
-        List<Long> ids = idsObj instanceof List
-                ? ((List<?>) idsObj).stream()
+        List<Object> idsObj = body != null ? body.getIds() : null;
+        List<Long> ids = idsObj != null
+                ? idsObj.stream()
                     .filter(Number.class::isInstance)
                     .map(v -> ((Number) v).longValue())
                     .collect(Collectors.toList())

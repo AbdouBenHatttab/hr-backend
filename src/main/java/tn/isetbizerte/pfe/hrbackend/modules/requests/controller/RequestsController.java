@@ -15,6 +15,8 @@ import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.ApproveLoanRequestDto;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.CreateAuthorizationRequestDto;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.CreateDocumentRequestDto;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.CreateLoanRequestDto;
+import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.HrDecisionNoteDto;
+import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.RejectLoanRequestDto;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.ScheduleLoanMeetingDto;
 import tn.isetbizerte.pfe.hrbackend.modules.history.service.RequestHistoryService;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.service.RequestsService;
@@ -83,18 +85,18 @@ public class RequestsController {
     @PreAuthorize("hasRole('HR_MANAGER')")
     @PostMapping(RequestApiRoutes.HR_DOCUMENTS_APPROVE)
     public ResponseEntity<Map<String, Object>> approveDocument(@PathVariable Long id,
-                                                                @RequestBody(required = false) Map<String, Object> body,
+                                                                @RequestBody(required = false) HrDecisionNoteDto body,
                                                                 @AuthenticationPrincipal Jwt jwt) {
-        String note = body != null ? (String) body.getOrDefault("hrNote", "") : "";
+        String note = body != null ? body.resolveHrNote() : "";
         return ok("Document request approved.", service.decideDocument(id, true, note, jwt.getSubject()));
     }
 
     @PreAuthorize("hasRole('HR_MANAGER')")
     @PostMapping(RequestApiRoutes.HR_DOCUMENTS_REJECT)
     public ResponseEntity<Map<String, Object>> rejectDocument(@PathVariable Long id,
-                                                               @RequestBody(required = false) Map<String, Object> body,
+                                                               @RequestBody(required = false) HrDecisionNoteDto body,
                                                                @AuthenticationPrincipal Jwt jwt) {
-        String note = body != null ? (String) body.getOrDefault("hrNote", "") : "";
+        String note = body != null ? body.resolveHrNote() : "";
         return ok("Document request rejected.", service.decideDocument(id, false, note, jwt.getSubject()));
     }
 
@@ -260,14 +262,9 @@ public class RequestsController {
     @PreAuthorize("hasRole('HR_MANAGER')")
     @PostMapping(RequestApiRoutes.HR_LOANS_REJECT)
     public ResponseEntity<Map<String, Object>> rejectLoan(@PathVariable Long id,
-                                                           @RequestBody(required = false) Map<String, Object> body,
+                                                           @RequestBody(required = false) RejectLoanRequestDto body,
                                                            @AuthenticationPrincipal Jwt jwt) {
-        String note = "";
-        if (body != null) {
-            Object value = body.getOrDefault("hrDecisionReason",
-                    body.getOrDefault("reason", body.getOrDefault("hrNote", "")));
-            note = value != null ? value.toString() : "";
-        }
+        String note = body != null ? body.resolveNote() : "";
         return ok("Loan rejected.", service.decideLoan(id, false, note, null, null, null, jwt.getSubject()));
     }
 
@@ -378,18 +375,18 @@ public class RequestsController {
     @PreAuthorize("hasRole('HR_MANAGER')")
     @PostMapping(RequestApiRoutes.HR_AUTHORIZATIONS_APPROVE)
     public ResponseEntity<Map<String, Object>> approveAuth(@PathVariable Long id,
-                                                            @RequestBody(required = false) Map<String, Object> body,
+                                                            @RequestBody(required = false) HrDecisionNoteDto body,
                                                             @AuthenticationPrincipal Jwt jwt) {
-        String note = body != null ? (String) body.getOrDefault("hrNote", "") : "";
+        String note = body != null ? body.resolveHrNote() : "";
         return ok("Authorization approved.", service.decideAuth(id, true, note, jwt.getSubject()));
     }
 
     @PreAuthorize("hasRole('HR_MANAGER')")
     @PostMapping(RequestApiRoutes.HR_AUTHORIZATIONS_REJECT)
     public ResponseEntity<Map<String, Object>> rejectAuth(@PathVariable Long id,
-                                                           @RequestBody(required = false) Map<String, Object> body,
+                                                           @RequestBody(required = false) HrDecisionNoteDto body,
                                                            @AuthenticationPrincipal Jwt jwt) {
-        String note = body != null ? (String) body.getOrDefault("hrNote", "") : "";
+        String note = body != null ? body.resolveHrNote() : "";
         return ok("Authorization rejected.", service.decideAuth(id, false, note, jwt.getSubject()));
     }
 

@@ -11,6 +11,7 @@ import tn.isetbizerte.pfe.hrbackend.modules.jobtitle.service.JobTitleService;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.Person;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
 import tn.isetbizerte.pfe.hrbackend.modules.user.dto.UpdateEmploymentRequest;
+import tn.isetbizerte.pfe.hrbackend.modules.user.dto.UpdateMyProfileRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.user.repository.PersonRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.user.repository.UserRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.user.service.AuthenticatedUserResolver;
@@ -101,7 +102,7 @@ public class UserRoleInfoController {
     @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")
     @PatchMapping("/api/me")
     public Map<String, Object> updateMyProfile(
-            @RequestBody Map<String, Object> body,
+            @RequestBody UpdateMyProfileRequest body,
             @AuthenticationPrincipal Jwt jwt) {
 
         Map<String, Object> response = new HashMap<>();
@@ -111,30 +112,29 @@ public class UserRoleInfoController {
             throw new ResourceNotFoundException("Profile not found");
         }
 
-        if (body.containsKey("department") || body.containsKey("departmentId")) {
+        if (body.hasField("department") || body.hasField("departmentId")) {
             throw new BadRequestException("Department is HR-managed employment data and cannot be changed from self-service.");
         }
 
         Person p = user.getPerson();
 
-        if (body.containsKey("phone")) {
-            p.setPhone((String) body.get("phone"));
+        if (body.hasField("phone")) {
+            p.setPhone(body.getPhone());
         }
-        if (body.containsKey("address")) {
-            p.setAddress((String) body.get("address"));
+        if (body.hasField("address")) {
+            p.setAddress(body.getAddress());
         }
-        if (body.containsKey("maritalStatus")) {
-            p.setMaritalStatus((String) body.get("maritalStatus"));
+        if (body.hasField("maritalStatus")) {
+            p.setMaritalStatus(body.getMaritalStatus());
         }
-        if (body.containsKey("numberOfChildren") && body.get("numberOfChildren") != null) {
-            Object value = body.get("numberOfChildren");
-            p.setNumberOfChildren(value instanceof Integer ? (Integer) value : Integer.parseInt(value.toString()));
+        if (body.hasField("numberOfChildren") && body.getNumberOfChildren() != null) {
+            p.setNumberOfChildren(body.getNumberOfChildren());
         }
-        if (body.containsKey("avatarPhoto")) {
-            p.setAvatarPhoto((String) body.get("avatarPhoto"));
+        if (body.hasField("avatarPhoto")) {
+            p.setAvatarPhoto(body.getAvatarPhoto());
         }
-        if (body.containsKey("avatarColor")) {
-            p.setAvatarColor((String) body.get("avatarColor"));
+        if (body.hasField("avatarColor")) {
+            p.setAvatarColor(body.getAvatarColor());
         }
 
         personRepository.save(p);
