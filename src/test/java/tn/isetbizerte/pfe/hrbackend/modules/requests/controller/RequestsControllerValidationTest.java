@@ -12,6 +12,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.validation.beanvalidation.LocalValidatorFactoryBean;
 import tn.isetbizerte.pfe.hrbackend.common.exception.GlobalExceptionHandler;
+import tn.isetbizerte.pfe.hrbackend.modules.history.service.RequestHistoryService;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.service.RequestsService;
 
 import java.util.List;
@@ -30,11 +31,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class RequestsControllerValidationTest {
 
     private RequestsService requestsService;
+    private RequestHistoryService requestHistoryService;
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
         requestsService = mock(RequestsService.class);
+        requestHistoryService = mock(RequestHistoryService.class);
 
         LocalValidatorFactoryBean validator = new LocalValidatorFactoryBean();
         validator.afterPropertiesSet();
@@ -42,7 +45,7 @@ class RequestsControllerValidationTest {
         ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
 
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new RequestsController(requestsService))
+                .standaloneSetup(new RequestsController(requestsService, requestHistoryService))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .setValidator(validator)
                 .setMessageConverters(new MappingJackson2HttpMessageConverter(objectMapper))

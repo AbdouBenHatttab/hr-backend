@@ -10,5 +10,7 @@ import java.util.List;
 public interface RequestHistoryRepository extends JpaRepository<RequestHistory, Long> {
     List<RequestHistory> findByRequestIdOrderByTimestampDesc(Long requestId);
 
+    List<RequestHistory> findByTypeAndRequestIdOrderByTimestampDesc(String type, Long requestId);
+
     boolean existsByRequestIdAndTypeAndActionAndActorId(Long requestId, String type, String action, String actorId);
 }

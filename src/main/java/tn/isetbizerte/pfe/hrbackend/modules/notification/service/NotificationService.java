@@ -191,6 +191,9 @@ public class NotificationService {
 
         List<Map<String, Object>> fields = new java.util.ArrayList<>();
         fields.add(field("Authorization Type", typeLabel));
+        if (request.getEquipmentType() != null && !request.getEquipmentType().isBlank()) {
+            fields.add(field("Equipment Type", request.getEquipmentType()));
+        }
         fields.add(field("Submitted Date", request.getRequestedAt()));
         fields.add(field("Processed Date", request.getProcessedAt()));
         fields.add(field("Requested Period", period));

@@ -1,6 +1,7 @@
 package tn.isetbizerte.pfe.hrbackend.modules.requests.controller;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 
@@ -29,6 +30,13 @@ class RequestsControllerRouteContractTest {
         assertHasGetMapping(RequestApiRoutes.EMPLOYEE_AUTHORIZATIONS);
         assertHasPostMapping(RequestApiRoutes.EMPLOYEE_AUTHORIZATIONS);
         assertHasPostMapping(RequestApiRoutes.EMPLOYEE_AUTHORIZATIONS_CANCEL);
+
+        assertHasGetMapping(RequestApiRoutes.HR_DOCUMENTS_HISTORY);
+        assertHasGetMapping(RequestApiRoutes.HR_LOANS_HISTORY);
+        assertHasGetMapping(RequestApiRoutes.HR_AUTHORIZATIONS_HISTORY);
+        assertHasHrManagerPreAuthorize(RequestApiRoutes.HR_DOCUMENTS_HISTORY);
+        assertHasHrManagerPreAuthorize(RequestApiRoutes.HR_LOANS_HISTORY);
+        assertHasHrManagerPreAuthorize(RequestApiRoutes.HR_AUTHORIZATIONS_HISTORY);
     }
 
     private void assertHasGetMapping(String expectedPath) {
@@ -56,5 +64,16 @@ class RequestsControllerRouteContractTest {
         }
 
         return false;
+    }
+
+    private void assertHasHrManagerPreAuthorize(String expectedPath) {
+        Method method = Arrays.stream(RequestsController.class.getDeclaredMethods())
+                .filter(candidate -> mappingMatches(candidate, expectedPath, GetMapping.class))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("Missing @GetMapping for " + expectedPath));
+
+        PreAuthorize preAuthorize = method.getAnnotation(PreAuthorize.class);
+        assertTrue(preAuthorize != null && preAuthorize.value().contains("hasRole('HR_MANAGER')"),
+                () -> "Missing HR_MANAGER @PreAuthorize for " + expectedPath);
     }
 }

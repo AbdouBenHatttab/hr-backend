@@ -15,8 +15,10 @@ public class CreateAuthorizationRequestDto {
     @JsonAlias("type")
     private AuthorizationType authorizationType;
 
+    @JsonAlias("neededFrom")
     private LocalDate startDate;
 
+    @JsonAlias("expectedReturnDate")
     private LocalDate endDate;
 
     @JsonAlias("date")
@@ -29,9 +31,12 @@ public class CreateAuthorizationRequestDto {
     @Size(max = 1000, message = "Reason must not exceed 1000 characters")
     private String reason;
 
+    private String equipmentType;
+
     @AssertTrue(message = "End date must be on or after start date")
     public boolean isDateRangeValid() {
-        if (authorizationType == AuthorizationType.TIME_PERMISSION) return true;
+        if (authorizationType == AuthorizationType.TIME_PERMISSION
+                || authorizationType == AuthorizationType.EQUIPMENT_REQUEST) return true;
         return startDate == null || endDate == null || !endDate.isBefore(startDate);
     }
 
@@ -105,5 +110,13 @@ public class CreateAuthorizationRequestDto {
 
     public void setReason(String reason) {
         this.reason = reason;
+    }
+
+    public String getEquipmentType() {
+        return equipmentType;
+    }
+
+    public void setEquipmentType(String equipmentType) {
+        this.equipmentType = equipmentType;
     }
 }

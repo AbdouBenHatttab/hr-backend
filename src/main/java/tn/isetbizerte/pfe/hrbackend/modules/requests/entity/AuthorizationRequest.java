@@ -36,6 +36,8 @@ public class AuthorizationRequest {
     @Column(length = 1000)
     private String reason;
 
+    private String equipmentType;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private RequestStatus status = RequestStatus.PENDING;
@@ -84,6 +86,9 @@ public class AuthorizationRequest {
 
     public String getReason() { return reason; }
     public void setReason(String reason) { this.reason = reason; }
+
+    public String getEquipmentType() { return equipmentType; }
+    public void setEquipmentType(String equipmentType) { this.equipmentType = equipmentType; }
 
     public RequestStatus getStatus() { return status; }
     public void setStatus(RequestStatus status) { this.status = status; }

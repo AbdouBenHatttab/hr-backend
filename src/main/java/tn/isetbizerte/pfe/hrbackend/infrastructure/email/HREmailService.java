@@ -14,6 +14,8 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * ArabSoft Human Resources Management System (HRMS)
@@ -370,6 +372,7 @@ public class HREmailService {
                                              String authorizationType, LocalDate startDate,
                                              LocalDate endDate, LocalDate absenceDate,
                                              LocalTime fromTime, LocalTime toTime,
+                                             String equipmentType,
                                              LocalDateTime processedAt,
                                              boolean approved, String decisionNote,
                                              String referenceId) {
@@ -385,7 +388,7 @@ public class HREmailService {
                     subject,
                     buildAuthorizationDecisionBody(name, authorizationType, startDate, endDate,
                             absenceDate, fromTime, toTime,
-                            processedAt, approved, decisionNote, referenceId));
+                            equipmentType, processedAt, approved, decisionNote, referenceId));
             log.info("HREmailService.sendAuthorizationDecision result: recipientEmail={} requestId={} subject={} result={}",
                     email, requestId, subject, result);
             return result;
@@ -1010,6 +1013,7 @@ public class HREmailService {
                                                   LocalDate startDate, LocalDate endDate,
                                                   LocalDate absenceDate, LocalTime fromTime,
                                                   LocalTime toTime,
+                                                  String equipmentType,
                                                   LocalDateTime processedAt,
                                                   boolean approved, String decisionNote,
                                                   String refId) {
@@ -1021,6 +1025,15 @@ public class HREmailService {
                     ? "Approved according to the current HR workflow."
                     : "Does not meet current approval requirements.";
         String noteTitle = approved ? "HR Note" : "Decision Reason";
+        List<String[]> detailRows = new ArrayList<>();
+        detailRows.add(new String[]{"Reference ID", refId});
+        detailRows.add(new String[]{"Authorization Type", formatAuthorizationType(authorizationType)});
+        if (equipmentType != null && !equipmentType.isBlank()) {
+            detailRows.add(new String[]{"Equipment Type", equipmentType});
+        }
+        detailRows.add(new String[]{"Requested Period", formatAuthorizationPeriod(authorizationType, startDate, endDate, absenceDate, fromTime, toTime)});
+        detailRows.add(new String[]{"Status", approved ? "Approved" : "Rejected"});
+        detailRows.add(new String[]{"Processed Date", formatDateTimeOrDash(processedAt)});
 
         return wrap(approved ? "Authorization Approved" : "Authorization Not Approved",
                 "Reference: " + refId, """
@@ -1043,13 +1056,7 @@ public class HREmailService {
             </p>
             %s
             """.formatted(name, statusColor, statusText,
-                infoGrid(new String[][]{
-                    {"Reference ID", refId},
-                    {"Authorization Type", formatAuthorizationType(authorizationType)},
-                    {"Requested Period", formatAuthorizationPeriod(authorizationType, startDate, endDate, absenceDate, fromTime, toTime)},
-                    {"Status", approved ? "Approved" : "Rejected"},
-                    {"Processed Date", formatDateTimeOrDash(processedAt)},
-                }),
+                infoGrid(detailRows.toArray(new String[0][])),
                 approved ? "#F0FDF4" : "#FEF2F2",
                 approved ? "#22C55E" : "#EF4444",
                 noteTitle,

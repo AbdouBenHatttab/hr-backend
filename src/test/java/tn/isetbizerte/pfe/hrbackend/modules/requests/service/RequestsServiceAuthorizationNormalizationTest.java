@@ -69,7 +69,8 @@ class RequestsServiceAuthorizationNormalizationTest {
         assertThat(AuthorizationType.values()).containsExactly(
                 AuthorizationType.BUSINESS_TRIP,
                 AuthorizationType.TRAINING,
-                AuthorizationType.TIME_PERMISSION
+                AuthorizationType.TIME_PERMISSION,
+                AuthorizationType.EQUIPMENT_REQUEST
         );
     }
 

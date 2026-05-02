@@ -16,6 +16,7 @@ import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.CreateAuthorizationRequ
 import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.CreateDocumentRequestDto;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.CreateLoanRequestDto;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.ScheduleLoanMeetingDto;
+import tn.isetbizerte.pfe.hrbackend.modules.history.service.RequestHistoryService;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.service.RequestsService;
 
 import java.util.HashMap;
@@ -25,9 +26,11 @@ import java.util.Map;
 public class RequestsController {
 
     private final RequestsService service;
+    private final RequestHistoryService historyService;
 
-    public RequestsController(RequestsService service) {
+    public RequestsController(RequestsService service, RequestHistoryService historyService) {
         this.service = service;
+        this.historyService = historyService;
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -69,6 +72,12 @@ public class RequestsController {
             @RequestParam(defaultValue = "10") int size) {
         Pageable pageable = PageRequest.of(page, size);
         return okPage("All document requests.", service.getAllDocumentRequests(pageable), page, size);
+    }
+
+    @PreAuthorize("hasRole('HR_MANAGER')")
+    @GetMapping(RequestApiRoutes.HR_DOCUMENTS_HISTORY)
+    public ResponseEntity<Map<String, Object>> getDocumentHistory(@PathVariable Long id) {
+        return ok("Document request history.", historyService.getHistory("DOCUMENT", id));
     }
 
     @PreAuthorize("hasRole('HR_MANAGER')")
@@ -226,6 +235,12 @@ public class RequestsController {
     }
 
     @PreAuthorize("hasRole('HR_MANAGER')")
+    @GetMapping(RequestApiRoutes.HR_LOANS_HISTORY)
+    public ResponseEntity<Map<String, Object>> getLoanHistory(@PathVariable Long id) {
+        return ok("Loan request history.", historyService.getHistory("LOAN", id));
+    }
+
+    @PreAuthorize("hasRole('HR_MANAGER')")
     @PostMapping(RequestApiRoutes.HR_LOANS_APPROVE)
     public ResponseEntity<Map<String, Object>> approveLoan(@PathVariable Long id,
                                                              @RequestBody(required = false) ApproveLoanRequestDto body,
@@ -352,6 +367,12 @@ public class RequestsController {
             @RequestParam(defaultValue = "10") int size) {
         Pageable pageable = PageRequest.of(page, size);
         return okPage("All authorization requests.", service.getAllAuthRequests(pageable), page, size);
+    }
+
+    @PreAuthorize("hasRole('HR_MANAGER')")
+    @GetMapping(RequestApiRoutes.HR_AUTHORIZATIONS_HISTORY)
+    public ResponseEntity<Map<String, Object>> getAuthorizationHistory(@PathVariable Long id) {
+        return ok("Authorization request history.", historyService.getHistory("AUTH", id));
     }
 
     @PreAuthorize("hasRole('HR_MANAGER')")

@@ -1009,6 +1009,7 @@ public class RequestsService {
     @Transactional
     public Map<String, Object> createAuthRequest(Jwt jwt, CreateAuthorizationRequestDto body) {
         User user = authenticatedUserResolver.require(jwt);
+        validateAuthorizationCreation(body);
         AuthorizationRequest req = new AuthorizationRequest();
         req.setUser(user);
         req.setAuthorizationType(body.getAuthorizationType());
@@ -1024,8 +1025,11 @@ public class RequestsService {
         } else {
             req.setStartDate(body.getStartDate());
             req.setEndDate(body.getEndDate());
+            if (body.getAuthorizationType() == AuthorizationType.EQUIPMENT_REQUEST) {
+                req.setEquipmentType(body.getEquipmentType().trim());
+            }
         }
-        req.setReason(body.getReason());
+        req.setReason(body.getReason() != null ? body.getReason().trim() : null);
         authRepo.save(req);
         historyService.record(
                 "AUTH",
@@ -1049,6 +1053,34 @@ public class RequestsService {
             log.warn("Failed to enqueue AUTH_SUBMITTED request event for requestId={}", req.getId(), e);
         }
         return mapAuth(req);
+    }
+
+    private void validateAuthorizationCreation(CreateAuthorizationRequestDto body) {
+        AuthorizationType type = body.getAuthorizationType();
+        if (type == AuthorizationType.BUSINESS_TRIP || type == AuthorizationType.TRAINING) {
+            throw new BadRequestException("This authorization type is no longer available for new requests.");
+        }
+        if (type == AuthorizationType.EQUIPMENT_REQUEST) {
+            validateEquipmentRequest(body);
+        }
+    }
+
+    private void validateEquipmentRequest(CreateAuthorizationRequestDto body) {
+        if (body.getEquipmentType() == null || body.getEquipmentType().trim().isBlank()) {
+            throw new BadRequestException("Equipment type is required.");
+        }
+        if (body.getReason() == null || body.getReason().trim().isBlank()) {
+            throw new BadRequestException("Reason is required.");
+        }
+        if (body.getStartDate() == null) {
+            throw new BadRequestException("Needed from date is required.");
+        }
+        if (body.getStartDate().isBefore(LocalDate.now())) {
+            throw new BadRequestException("Needed from date cannot be in the past.");
+        }
+        if (body.getEndDate() != null && body.getEndDate().isBefore(body.getStartDate())) {
+            throw new BadRequestException("Expected return date must be on or after needed from date.");
+        }
     }
 
     private void validateShortAbsenceAvailability(User user, LocalDate date) {
@@ -1279,9 +1311,18 @@ public class RequestsService {
         m.put("hasAttachment", hasAttachment);
         m.put("attachmentFileName", r.getAttachmentFileName());
         m.put("attachmentUploadedAt", r.getAttachmentUploadedAt());
+        m.put("attachmentSizeBytes", r.getAttachmentSizeBytes());
         m.put("employeeName", r.getEmployeeFullName());
         if (r.getUser() != null) {
+            m.put("employeeId", r.getUser().getId());
             m.put("employeeUsername", r.getUser().getUsername());
+            m.put("employeeRole", r.getUser().getRole() != null ? r.getUser().getRole().name() : null);
+            if (r.getUser().getPerson() != null) {
+                var person = r.getUser().getPerson();
+                m.put("employeeEmail", person.getEmail());
+                m.put("employeeDepartment", person.getDepartment());
+                m.put("employeeJobTitle", person.getJobTitle());
+            }
         }
         return m;
     }
@@ -1450,6 +1491,7 @@ public class RequestsService {
         m.put("absenceDate",       r.getAbsenceDate());
         m.put("fromTime",          r.getFromTime());
         m.put("toTime",            r.getToTime());
+        m.put("equipmentType",     r.getEquipmentType());
         m.put("periodLabel",       authorizationPeriodLabel(r));
         m.put("reason",            r.getReason());
         m.put("status",            r.getStatus().name());
@@ -1464,7 +1506,15 @@ public class RequestsService {
         m.put("confirmationChannel", "IN_APP_NOTIFICATION_AND_EMAIL");
         m.put("employeeName",      r.getEmployeeFullName());
         if (r.getUser() != null) {
+            m.put("employeeId", r.getUser().getId());
             m.put("employeeUsername", r.getUser().getUsername());
+            m.put("employeeRole", r.getUser().getRole() != null ? r.getUser().getRole().name() : null);
+            if (r.getUser().getPerson() != null) {
+                var person = r.getUser().getPerson();
+                m.put("employeeEmail", person.getEmail());
+                m.put("employeeDepartment", person.getDepartment());
+                m.put("employeeJobTitle", person.getJobTitle());
+            }
         }
         return m;
     }

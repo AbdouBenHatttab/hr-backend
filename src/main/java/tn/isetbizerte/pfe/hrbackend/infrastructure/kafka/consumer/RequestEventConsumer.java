@@ -351,6 +351,7 @@ public class RequestEventConsumer {
                 request.getAbsenceDate(),
                 request.getFromTime(),
                 request.getToTime(),
+                request.getEquipmentType(),
                 request.getProcessedAt(),
                 approved,
                 request.getHrNote(),

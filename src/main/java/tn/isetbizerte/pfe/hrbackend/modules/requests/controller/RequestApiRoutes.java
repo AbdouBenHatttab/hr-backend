@@ -23,6 +23,7 @@ public final class RequestApiRoutes {
     public static final String HR_DOCUMENTS_APPROVE = HR_DOCUMENTS + "/{id}/approve";
     public static final String HR_DOCUMENTS_REJECT = HR_DOCUMENTS + "/{id}/reject";
     public static final String HR_DOCUMENTS_ATTACHMENT = HR_DOCUMENTS + "/{id}/attachment";
+    public static final String HR_DOCUMENTS_HISTORY = HR_DOCUMENTS + "/{id}/history";
     public static final String HR_USER_DOCUMENTS = "/api/hr/users/{userId}/documents";
     public static final String HR_USER_DOCUMENTS_LIST = "/api/hr/users/{userId}/documents";
 
@@ -32,8 +33,10 @@ public final class RequestApiRoutes {
     public static final String HR_LOANS_SCHEDULE_MEETING = HR_LOANS + "/{id}/schedule-meeting";
     public static final String HR_LOANS_CANCEL_AFTER_MEETING = HR_LOANS + "/{id}/cancel-after-meeting";
     public static final String HR_LOANS_ATTACHMENT = HR_LOANS + "/{id}/attachment";
+    public static final String HR_LOANS_HISTORY = HR_LOANS + "/{id}/history";
 
     public static final String HR_AUTHORIZATIONS = "/api/hr/authorizations";
     public static final String HR_AUTHORIZATIONS_APPROVE = HR_AUTHORIZATIONS + "/{id}/approve";
     public static final String HR_AUTHORIZATIONS_REJECT = HR_AUTHORIZATIONS + "/{id}/reject";
+    public static final String HR_AUTHORIZATIONS_HISTORY = HR_AUTHORIZATIONS + "/{id}/history";
 }
