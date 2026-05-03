@@ -10,6 +10,7 @@ import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.email.template.DocumentEmailTemplate;
+import tn.isetbizerte.pfe.hrbackend.infrastructure.email.template.LoanEmailTemplate;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.email.template.RoleEmailTemplate;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.email.template.TaskEmailTemplate;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.email.template.TeamEmailTemplate;
@@ -46,6 +47,7 @@ public class HREmailService {
 
     private final JavaMailSender mailSender;
     private final DocumentEmailTemplate documentEmailTemplate;
+    private final LoanEmailTemplate loanEmailTemplate;
     private final RoleEmailTemplate roleEmailTemplate;
     private final TaskEmailTemplate taskEmailTemplate;
     private final TeamEmailTemplate teamEmailTemplate;
@@ -65,6 +67,7 @@ public class HREmailService {
     public HREmailService(JavaMailSender mailSender) {
         this.mailSender = mailSender;
         this.documentEmailTemplate = new DocumentEmailTemplate();
+        this.loanEmailTemplate = new LoanEmailTemplate();
         this.roleEmailTemplate = new RoleEmailTemplate();
         this.taskEmailTemplate = new TaskEmailTemplate();
         this.teamEmailTemplate = new TeamEmailTemplate();
@@ -143,7 +146,7 @@ public class HREmailService {
             String name = firstName + " " + lastName;
             boolean result = send(email,
                 subject,
-                buildLoanApprovedBody(name, amount, months, monthlyInstallment, referenceId));
+                loanEmailTemplate.buildLoanApprovedBody(name, amount, months, monthlyInstallment, referenceId, fromDisplayName));
             log.info("HREmailService.sendLoanApproved result: recipientEmail={} requestId={} subject={} result={}",
                     email, requestId, subject, result);
             return result;
@@ -168,7 +171,7 @@ public class HREmailService {
             String name = firstName + " " + lastName;
             boolean result = send(email,
                 subject,
-                buildLoanRejectedBody(name, amount, reason, referenceId));
+                loanEmailTemplate.buildLoanRejectedBody(name, amount, reason, referenceId, fromDisplayName));
             log.info("HREmailService.sendLoanRejected result: recipientEmail={} requestId={} subject={} result={}",
                     email, requestId, subject, result);
             return result;
@@ -192,7 +195,7 @@ public class HREmailService {
             String name = firstName + " " + lastName;
             boolean result = send(email,
                     subject,
-                    buildLoanMeetingNotificationBody(name, meetingAt, updated, referenceId));
+                    loanEmailTemplate.buildLoanMeetingNotificationBody(name, formatDateTimeOrDash(meetingAt), updated, referenceId, frontendUrl, fromDisplayName));
             log.info("HREmailService.sendLoanMeetingNotification result: recipientEmail={} requestId={} subject={} result={}",
                     email, requestId, subject, result);
             return result;
@@ -213,7 +216,7 @@ public class HREmailService {
             String name = firstName + " " + lastName;
             boolean result = send(email,
                     subject,
-                    buildLoanFinalFileReadyBody(name, referenceId));
+                    loanEmailTemplate.buildLoanFinalFileReadyBody(name, referenceId, frontendUrl, fromDisplayName));
             log.info("HREmailService.sendLoanFinalFileReady result: recipientEmail={} requestId={} subject={} result={}",
                     email, requestId, subject, result);
             return result;
@@ -501,107 +504,6 @@ public class HREmailService {
                     {"End Date",      end.format(DATE_FMT)},
                 }),
                 reason != null ? reason : "Does not meet current company policy requirements."));
-    }
-
-    private String buildLoanApprovedBody(String name, double amount,
-                                          int months, double installment,
-                                          String refId) {
-        return wrap("Loan Request Approved ✓", "Reference: " + refId, """
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                Dear <strong>%s</strong>,
-            </p>
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                We are pleased to inform you that your loan request has been
-                <strong style="color:#16A34A;">approved</strong>.
-            </p>
-            %s
-            <p style="font-size:15px;color:#374151;line-height:1.8;margin-top:20px;">
-                The repayment will be scheduled automatically via monthly payroll deductions.
-                Please review your payslip for details each month.
-            </p>
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                If you have any questions regarding your loan or repayment schedule,
-                please contact the HR department.
-            </p>
-            """.formatted(name,
-                infoGrid(new String[][]{
-                    {"Reference ID",       refId},
-                    {"Approved Amount",    String.format("%.0f TND", amount)},
-                    {"Repayment Period",   months + " months"},
-                    {"Monthly Deduction",  String.format("%.0f TND / month", installment)},
-                })));
-    }
-
-    private String buildLoanRejectedBody(String name, double amount,
-                                          String reason, String refId) {
-        return wrap("Loan Request Not Approved", "Reference: " + refId, """
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                Dear <strong>%s</strong>,
-            </p>
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                We regret to inform you that your loan request for
-                <strong>%.0f TND</strong> has
-                <strong style="color:#DC2626;">not been approved</strong>.
-            </p>
-            %s
-            <div style="background:#FEF2F2;border-left:4px solid #EF4444;border-radius:8px;
-                        padding:16px 20px;margin:20px 0;">
-                <p style="margin:0;font-size:13px;color:#6B7280;font-weight:600;
-                           text-transform:uppercase;letter-spacing:0.05em;">Decision Reason</p>
-                <p style="margin:6px 0 0;font-size:15px;color:#7F1D1D;line-height:1.7;">%s</p>
-            </div>
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                You may contact the HR department for further clarification or to discuss
-                alternative options.
-            </p>
-            """.formatted(name, amount,
-                infoGrid(new String[][]{
-                    {"Reference ID",    refId},
-                    {"Requested Amount",String.format("%.0f TND", amount)},
-                }),
-                reason != null ? reason : "Does not meet current loan eligibility criteria."));
-    }
-
-    private String buildLoanMeetingNotificationBody(String name, LocalDateTime meetingAt,
-                                                    boolean updated, String refId) {
-        String action = updated ? "updated" : "scheduled";
-        return wrap(updated ? "Loan Meeting Updated" : "Loan Meeting Scheduled", "Reference: " + refId, """
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                Dear <strong>%s</strong>,
-            </p>
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                Your loan meeting has been %s. Please check your loan request details
-                for the date and time.
-            </p>
-            %s
-            %s
-            """.formatted(name, action,
-                infoGrid(new String[][]{
-                    {"Reference ID", refId},
-                    {"Meeting", formatDateTimeOrDash(meetingAt)},
-                    {"Status", updated ? "Updated" : "Scheduled"},
-                }),
-                actionButton("Open My Loans", frontendUrl + "/employee/loans", "#2563EB")));
-    }
-
-    private String buildLoanFinalFileReadyBody(String name, String refId) {
-        return wrap("Final Loan Document Ready", "Reference: " + refId, """
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                Dear <strong>%s</strong>,
-            </p>
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                Your final HR loan document is ready. You can download it from your
-                loan history.
-            </p>
-            %s
-            %s
-            """.formatted(name,
-                infoGrid(new String[][]{
-                    {"Reference ID", refId},
-                    {"Document", "Final HR loan document"},
-                    {"Status", "Ready for download"},
-                }),
-                actionButton("Open My Loans", frontendUrl + "/employee/loans", "#2563EB")));
     }
 
     private String buildPasswordResetBody(String name, String otpCode, String expiresAt) {
