@@ -11,6 +11,7 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.email.template.AuthorizationEmailTemplate;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.email.template.DocumentEmailTemplate;
+import tn.isetbizerte.pfe.hrbackend.infrastructure.email.template.LeaveEmailTemplate;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.email.template.LoanEmailTemplate;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.email.template.RoleEmailTemplate;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.email.template.TaskEmailTemplate;
@@ -38,7 +39,6 @@ import java.time.format.DateTimeFormatter;
 public class HREmailService {
 
     private static final Logger log = LoggerFactory.getLogger(HREmailService.class);
-    private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("dd/MM/yyyy");
     private static final DateTimeFormatter DATETIME_FMT = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
     private static final String SYSTEM_NAME = "ArabSoft Human Resources Management System";
     private static final String DEPARTMENT  = "Human Resources Department";
@@ -47,6 +47,7 @@ public class HREmailService {
     private final JavaMailSender mailSender;
     private final AuthorizationEmailTemplate authorizationEmailTemplate;
     private final DocumentEmailTemplate documentEmailTemplate;
+    private final LeaveEmailTemplate leaveEmailTemplate;
     private final LoanEmailTemplate loanEmailTemplate;
     private final RoleEmailTemplate roleEmailTemplate;
     private final TaskEmailTemplate taskEmailTemplate;
@@ -68,6 +69,7 @@ public class HREmailService {
         this.mailSender = mailSender;
         this.authorizationEmailTemplate = new AuthorizationEmailTemplate();
         this.documentEmailTemplate = new DocumentEmailTemplate();
+        this.leaveEmailTemplate = new LeaveEmailTemplate();
         this.loanEmailTemplate = new LoanEmailTemplate();
         this.roleEmailTemplate = new RoleEmailTemplate();
         this.taskEmailTemplate = new TaskEmailTemplate();
@@ -115,7 +117,7 @@ public class HREmailService {
         String name = firstName + " " + lastName;
         send(email,
             "Leave Request Approved – " + referenceId,
-            buildLeaveApprovedBody(name, leaveType, startDate, endDate, days, referenceId));
+            leaveEmailTemplate.buildLeaveApprovedBody(name, leaveType, startDate, endDate, days, referenceId, fromDisplayName));
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -129,7 +131,7 @@ public class HREmailService {
         String name = firstName + " " + lastName;
         send(email,
             "Leave Request Not Approved – " + referenceId,
-            buildLeaveRejectedBody(name, leaveType, startDate, endDate, reason, referenceId));
+            leaveEmailTemplate.buildLeaveRejectedBody(name, leaveType, startDate, endDate, reason, referenceId, fromDisplayName));
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -449,64 +451,6 @@ public class HREmailService {
     // ═══════════════════════════════════════════════════════════════════
     // HTML BUILDERS
     // ═══════════════════════════════════════════════════════════════════
-
-    private String buildLeaveApprovedBody(String name, String leaveType,
-                                           LocalDate start, LocalDate end,
-                                           int days, String refId) {
-        return wrap("Leave Request Approved ✓", "Reference: " + refId, """
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                Dear <strong>%s</strong>,
-            </p>
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                We are pleased to inform you that your leave request has been
-                <strong style="color:#16A34A;">approved</strong>.
-            </p>
-            %s
-            <p style="font-size:15px;color:#374151;line-height:1.8;margin-top:20px;">
-                Please ensure that all your responsibilities are managed accordingly
-                during your absence. If you have any questions, feel free to contact
-                the HR department.
-            </p>
-            """.formatted(name,
-                infoGrid(new String[][]{
-                    {"Reference ID",  refId},
-                    {"Leave Type",    leaveType},
-                    {"Start Date",    start.format(DATE_FMT)},
-                    {"End Date",      end.format(DATE_FMT)},
-                    {"Duration",      days + " working day" + (days > 1 ? "s" : "")},
-                })));
-    }
-
-    private String buildLeaveRejectedBody(String name, String leaveType,
-                                           LocalDate start, LocalDate end,
-                                           String reason, String refId) {
-        return wrap("Leave Request Not Approved", "Reference: " + refId, """
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                Dear <strong>%s</strong>,
-            </p>
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                We regret to inform you that your leave request has
-                <strong style="color:#DC2626;">not been approved</strong>.
-            </p>
-            %s
-            <div style="background:#FEF2F2;border-left:4px solid #EF4444;border-radius:8px;
-                        padding:16px 20px;margin:20px 0;">
-                <p style="margin:0;font-size:13px;color:#6B7280;font-weight:600;
-                           text-transform:uppercase;letter-spacing:0.05em;">Decision Reason</p>
-                <p style="margin:6px 0 0;font-size:15px;color:#7F1D1D;line-height:1.7;">%s</p>
-            </div>
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                You may contact your Team Leader or the HR department for further clarification.
-            </p>
-            """.formatted(name,
-                infoGrid(new String[][]{
-                    {"Reference ID",  refId},
-                    {"Leave Type",    leaveType},
-                    {"Start Date",    start.format(DATE_FMT)},
-                    {"End Date",      end.format(DATE_FMT)},
-                }),
-                reason != null ? reason : "Does not meet current company policy requirements."));
-    }
 
     private String buildPasswordResetBody(String name, String otpCode, String expiresAt) {
         return wrap("Password Reset Request", "Keep this code private", """
