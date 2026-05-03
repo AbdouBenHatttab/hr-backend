@@ -9,6 +9,7 @@ import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import tn.isetbizerte.pfe.hrbackend.infrastructure.email.template.TeamEmailTemplate;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -41,6 +42,7 @@ public class HREmailService {
     private static final String COMPANY     = "ArabSoft";
 
     private final JavaMailSender mailSender;
+    private final TeamEmailTemplate teamEmailTemplate;
 
     @Value("${spring.mail.username:noreply@arabsoft-hrms.com}")
     private String fromEmail;
@@ -56,6 +58,7 @@ public class HREmailService {
 
     public HREmailService(JavaMailSender mailSender) {
         this.mailSender = mailSender;
+        this.teamEmailTemplate = new TeamEmailTemplate();
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -253,7 +256,7 @@ public class HREmailService {
         String name = firstName + " " + lastName;
         send(email,
                 "Team Assignment Updated - " + COMPANY + " HRMS",
-                buildTeamAssignedBody(name, teamName));
+                teamEmailTemplate.buildTeamAssignedBody(name, teamName, frontendUrl, fromDisplayName));
     }
 
     @Async
@@ -262,7 +265,7 @@ public class HREmailService {
         String name = firstName + " " + lastName;
         send(email,
                 "Team Assignment Changed - " + COMPANY + " HRMS",
-                buildTeamChangedBody(name, oldTeamName, newTeamName));
+                teamEmailTemplate.buildTeamChangedBody(name, oldTeamName, newTeamName, frontendUrl, fromDisplayName));
     }
 
     @Async
@@ -270,7 +273,7 @@ public class HREmailService {
         String name = firstName + " " + lastName;
         send(email,
                 "Team Assignment Removed - " + COMPANY + " HRMS",
-                buildTeamRemovedBody(name, oldTeamName));
+                teamEmailTemplate.buildTeamRemovedBody(name, oldTeamName, frontendUrl, fromDisplayName));
     }
 
     @Async
@@ -278,7 +281,7 @@ public class HREmailService {
         String name = firstName + " " + lastName;
         send(email,
                 "Team Leader Assignment - " + COMPANY + " HRMS",
-                buildTeamLeaderAssignedBody(name, teamName));
+                teamEmailTemplate.buildTeamLeaderAssignedBody(name, teamName, frontendUrl, fromDisplayName));
     }
 
     @Async
@@ -286,7 +289,7 @@ public class HREmailService {
         String name = firstName + " " + lastName;
         send(email,
                 "Team Leader Assignment Updated - " + COMPANY + " HRMS",
-                buildTeamLeaderRemovedBody(name, teamName));
+                teamEmailTemplate.buildTeamLeaderRemovedBody(name, teamName, fromDisplayName));
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -800,109 +803,6 @@ public class HREmailService {
                     {"Assigned By", assignedByValue}
                 }),
                 actionButton("Open My Tasks", frontendUrl + "/employee/tasks", "#2563EB")));
-    }
-
-    private String buildTeamAssignedBody(String name, String teamName) {
-        return wrap("Team Assignment Updated", "You have been assigned to a team", """
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                Dear <strong>%s</strong>,
-            </p>
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                HR has assigned you to the team below.
-            </p>
-            %s
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                You can review your profile for the latest assignment details.
-            </p>
-            %s
-            """.formatted(name,
-                infoGrid(new String[][]{
-                    {"Team", teamName},
-                    {"Status", "Assigned"}
-                }),
-                actionButton("Open My Profile", frontendUrl + "/employee/profile", "#2563EB")));
-    }
-
-    private String buildTeamChangedBody(String name, String oldTeamName, String newTeamName) {
-        return wrap("Team Assignment Changed", "Your team assignment has changed", """
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                Dear <strong>%s</strong>,
-            </p>
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                HR has updated your team assignment.
-            </p>
-            %s
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                You can review your profile for the latest assignment details.
-            </p>
-            %s
-            """.formatted(name,
-                infoGrid(new String[][]{
-                    {"Previous Team", oldTeamName},
-                    {"New Team", newTeamName}
-                }),
-                actionButton("Open My Profile", frontendUrl + "/employee/profile", "#2563EB")));
-    }
-
-    private String buildTeamRemovedBody(String name, String oldTeamName) {
-        return wrap("Team Assignment Removed", "You have been removed from a team", """
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                Dear <strong>%s</strong>,
-            </p>
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                HR has removed you from the team below.
-            </p>
-            %s
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                Please contact HR if you believe this assignment is incorrect.
-            </p>
-            %s
-            """.formatted(name,
-                infoGrid(new String[][]{
-                    {"Previous Team", oldTeamName},
-                    {"Status", "Removed"}
-                }),
-                actionButton("Open My Profile", frontendUrl + "/employee/profile", "#2563EB")));
-    }
-
-    private String buildTeamLeaderAssignedBody(String name, String teamName) {
-        return wrap("Team Leader Assignment", "You have been assigned as Team Leader", """
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                Dear <strong>%s</strong>,
-            </p>
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                HR has assigned you as Team Leader for the team below.
-            </p>
-            %s
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                You can now manage this team's members, tasks, and Team Leader-stage requests from your Team Leader area.
-            </p>
-            %s
-            """.formatted(name,
-                infoGrid(new String[][]{
-                    {"Team", teamName},
-                    {"Role", "Team Leader"}
-                }),
-                actionButton("Open Team Members", frontendUrl + "/team/members", "#2563EB")));
-    }
-
-    private String buildTeamLeaderRemovedBody(String name, String teamName) {
-        return wrap("Team Leader Assignment Updated", "You are no longer Team Leader for this team", """
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                Dear <strong>%s</strong>,
-            </p>
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                HR has updated the Team Leader assignment for the team below.
-            </p>
-            %s
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                Your Team Leader role remains active, but this team is no longer assigned to you.
-            </p>
-            """.formatted(name,
-                infoGrid(new String[][]{
-                    {"Team", teamName},
-                    {"Status", "No longer Team Leader"}
-                })));
     }
 
     private String buildTaskUpdatedBody(String name, String taskTitle, String taskDescription, String projectName,
