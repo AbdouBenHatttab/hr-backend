@@ -9,6 +9,7 @@ import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import tn.isetbizerte.pfe.hrbackend.infrastructure.email.template.DocumentEmailTemplate;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.email.template.RoleEmailTemplate;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.email.template.TaskEmailTemplate;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.email.template.TeamEmailTemplate;
@@ -44,6 +45,7 @@ public class HREmailService {
     private static final String COMPANY     = "ArabSoft";
 
     private final JavaMailSender mailSender;
+    private final DocumentEmailTemplate documentEmailTemplate;
     private final RoleEmailTemplate roleEmailTemplate;
     private final TaskEmailTemplate taskEmailTemplate;
     private final TeamEmailTemplate teamEmailTemplate;
@@ -62,6 +64,7 @@ public class HREmailService {
 
     public HREmailService(JavaMailSender mailSender) {
         this.mailSender = mailSender;
+        this.documentEmailTemplate = new DocumentEmailTemplate();
         this.roleEmailTemplate = new RoleEmailTemplate();
         this.taskEmailTemplate = new TaskEmailTemplate();
         this.teamEmailTemplate = new TeamEmailTemplate();
@@ -339,7 +342,7 @@ public class HREmailService {
             String name = firstName + " " + lastName;
             boolean result = send(email,
                     subject,
-                    buildDocumentReadyBody(name, referenceId));
+                    documentEmailTemplate.buildDocumentReadyBody(name, referenceId, frontendUrl, fromDisplayName));
             log.info("HREmailService.sendDocumentReady result: recipientEmail={} requestId={} subject={} result={}",
                     email, requestId, subject, result);
             return result;
@@ -362,7 +365,7 @@ public class HREmailService {
             String name = firstName + " " + lastName;
             boolean result = send(email,
                     subject,
-                    buildRequiredDocumentUploadedBody(name, documentLabel, fileName, replaced));
+                    documentEmailTemplate.buildRequiredDocumentUploadedBody(name, documentLabel, fileName, replaced, frontendUrl, fromDisplayName));
             log.info("HREmailService.sendRequiredDocumentUploaded result: recipientEmail={} referenceId={} subject={} result={}",
                     email, referenceId, subject, result);
             return result;
@@ -672,53 +675,6 @@ public class HREmailService {
                 </p>
             </div>
             """.formatted(name, otpCode, expiresAt));
-    }
-
-    private String buildDocumentReadyBody(String name, String refId) {
-        return wrap("Document Ready", "Reference: " + refId, """
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                Dear <strong>%s</strong>,
-            </p>
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                Your document request has been completed by the Human Resources Department.
-                The final official file is now ready for access from the ArabSoft platform.
-            </p>
-            %s
-            <p style="font-size:15px;color:#374151;line-height:1.8;margin-top:20px;">
-                You can download or consult the file from your documents area.
-                Please quote the reference number below for any HR follow-up.
-            </p>
-            %s
-            """.formatted(name,
-                infoGrid(new String[][]{
-                    {"Reference ID", refId},
-                    {"Document", "HR document"},
-                    {"Status", "Ready for download"},
-                }),
-                actionButton("Open My Documents", frontendUrl + "/employee/documents", "#2563EB")));
-    }
-
-    private String buildRequiredDocumentUploadedBody(String name, String documentLabel, String fileName, boolean replaced) {
-        String document = documentLabel != null && !documentLabel.isBlank() ? documentLabel : "Required HR document";
-        String uploadedFile = fileName != null && !fileName.isBlank() ? fileName : "Uploaded file";
-        String actionText = replaced ? "updated" : "added";
-        return wrap(replaced ? "Required HR Document Updated" : "Required HR Document Added", document + " is available", """
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                Dear <strong>%s</strong>,
-            </p>
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                The Human Resources Department has %s your contract copy in your required HR documents.
-                You can access it from your documents area.
-            </p>
-            %s
-            %s
-            """.formatted(name, actionText,
-                infoGrid(new String[][]{
-                    {"Document", document},
-                    {"File", uploadedFile},
-                    {"Status", "Available for download"},
-                }),
-                actionButton("Open My Documents", frontendUrl + "/employee/documents", "#2563EB")));
     }
 
     private String buildAuthorizationDecisionBody(String name, String authorizationType,
