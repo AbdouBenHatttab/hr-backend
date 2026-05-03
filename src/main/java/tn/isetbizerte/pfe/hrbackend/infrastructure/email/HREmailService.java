@@ -9,6 +9,7 @@ import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import tn.isetbizerte.pfe.hrbackend.infrastructure.email.template.TaskEmailTemplate;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.email.template.TeamEmailTemplate;
 
 import java.time.LocalDate;
@@ -42,6 +43,7 @@ public class HREmailService {
     private static final String COMPANY     = "ArabSoft";
 
     private final JavaMailSender mailSender;
+    private final TaskEmailTemplate taskEmailTemplate;
     private final TeamEmailTemplate teamEmailTemplate;
 
     @Value("${spring.mail.username:noreply@arabsoft-hrms.com}")
@@ -58,6 +60,7 @@ public class HREmailService {
 
     public HREmailService(JavaMailSender mailSender) {
         this.mailSender = mailSender;
+        this.taskEmailTemplate = new TaskEmailTemplate();
         this.teamEmailTemplate = new TeamEmailTemplate();
     }
 
@@ -248,7 +251,7 @@ public class HREmailService {
         String name = firstName + " " + lastName;
         send(email,
             "New Task Assigned – " + COMPANY + " HRMS",
-            buildTaskAssignedBody(name, taskTitle, taskDescription, projectName, priority, startDate, dueDate, assignedBy));
+            taskEmailTemplate.buildTaskAssignedBody(name, taskTitle, taskDescription, projectName, priority, startDate, dueDate, assignedBy, frontendUrl, fromDisplayName));
     }
 
     @Async
@@ -303,7 +306,7 @@ public class HREmailService {
         String name = firstName + " " + lastName;
         send(email,
                 "Task Updated – " + COMPANY + " HRMS",
-                buildTaskUpdatedBody(name, taskTitle, taskDescription, projectName, priority, startDate, dueDate, updatedBy));
+                taskEmailTemplate.buildTaskUpdatedBody(name, taskTitle, taskDescription, projectName, priority, startDate, dueDate, updatedBy, frontendUrl, fromDisplayName));
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -316,7 +319,7 @@ public class HREmailService {
         String name = firstName + " " + lastName;
         send(email,
                 "Task Completed – " + COMPANY + " HRMS",
-                buildTaskCompletedBody(name, taskTitle, projectName, completedBy));
+                taskEmailTemplate.buildTaskCompletedBody(name, taskTitle, projectName, completedBy, frontendUrl, fromDisplayName));
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -769,97 +772,6 @@ public class HREmailService {
                 </p>
             </div>
             """.formatted(name, otpCode, expiresAt));
-    }
-
-    private String buildTaskAssignedBody(String name, String taskTitle, String taskDescription, String projectName,
-                                         String priority, LocalDate startDate, LocalDate dueDate, String assignedBy) {
-        String due = dueDate != null ? dueDate.format(DATE_FMT) : "No due date";
-        String start = startDate != null ? startDate.format(DATE_FMT) : "No start date";
-        String description = (taskDescription != null && !taskDescription.isBlank()) ? taskDescription : "No description provided";
-        String priorityLabel = priority != null ? priority.replace("_", " ") : "MEDIUM";
-        String assignedByValue = (assignedBy != null && !assignedBy.isBlank()) ? assignedBy : "Team Leader";
-
-        return wrap("New Task Assigned", "A task has been assigned to you", """
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                Dear <strong>%s</strong>,
-            </p>
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                A new task has been assigned to you. Please review the details below and
-                start working on it as soon as possible.
-            </p>
-            %s
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                If you need clarification, please contact your Team Leader.
-            </p>
-            %s
-            """.formatted(name,
-                infoGrid(new String[][]{
-                    {"Task Title", taskTitle},
-                    {"What to do", description},
-                    {"Project", projectName},
-                    {"Priority", priorityLabel},
-                    {"Start Date", start},
-                    {"Due Date", due},
-                    {"Assigned By", assignedByValue}
-                }),
-                actionButton("Open My Tasks", frontendUrl + "/employee/tasks", "#2563EB")));
-    }
-
-    private String buildTaskUpdatedBody(String name, String taskTitle, String taskDescription, String projectName,
-                                        String priority, LocalDate startDate, LocalDate dueDate, String updatedBy) {
-        String due = dueDate != null ? dueDate.format(DATE_FMT) : "No due date";
-        String start = startDate != null ? startDate.format(DATE_FMT) : "No start date";
-        String description = (taskDescription != null && !taskDescription.isBlank()) ? taskDescription : "No description provided";
-        String projectValue = (projectName != null && !projectName.isBlank()) ? projectName : "No project";
-        String priorityLabel = priority != null ? priority.replace("_", " ") : "MEDIUM";
-        String updatedByValue = (updatedBy != null && !updatedBy.isBlank()) ? updatedBy : "Team Leader";
-
-        return wrap("Task Updated", "A task assigned to you has been updated", """
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                Dear <strong>%s</strong>,
-            </p>
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                A task assigned to you has been updated. Please review the latest details below.
-            </p>
-            %s
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                If you need clarification, please contact your Team Leader.
-            </p>
-            %s
-            """.formatted(name,
-                infoGrid(new String[][]{
-                    {"Task Title", taskTitle},
-                    {"What to do", description},
-                    {"Project", projectValue},
-                    {"Priority", priorityLabel},
-                    {"Start Date", start},
-                    {"Due Date", due},
-                    {"Updated By", updatedByValue}
-                }),
-                actionButton("Open My Tasks", frontendUrl + "/employee/tasks", "#2563EB")));
-    }
-
-    private String buildTaskCompletedBody(String leaderName, String taskTitle, String projectName, String completedBy) {
-        String projectValue = (projectName != null && !projectName.isBlank()) ? projectName : "No project";
-        String completedByValue = (completedBy != null && !completedBy.isBlank()) ? completedBy : "Team member";
-        return wrap("Task Completed", "A team task was marked done", """
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                Dear <strong>%s</strong>,
-            </p>
-            <p style="font-size:15px;color:#374151;line-height:1.8;">
-                A task has been marked as <strong style="color:#16A34A;">DONE</strong>.
-            </p>
-            %s
-            %s
-            """.formatted(
-                leaderName,
-                infoGrid(new String[][]{
-                    {"Task Title", taskTitle},
-                    {"Project", projectValue},
-                    {"Completed By", completedByValue}
-                }),
-                actionButton("Open Team Tasks", frontendUrl + "/team/tasks", "#16A34A")
-            ));
     }
 
     private String buildDocumentReadyBody(String name, String refId) {
