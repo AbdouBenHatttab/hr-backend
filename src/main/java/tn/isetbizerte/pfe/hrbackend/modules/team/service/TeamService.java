@@ -2,10 +2,10 @@ package tn.isetbizerte.pfe.hrbackend.modules.team.service;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tn.isetbizerte.pfe.hrbackend.common.enums.TypeRole;
-import tn.isetbizerte.pfe.hrbackend.common.event.NotificationEvent;
 import tn.isetbizerte.pfe.hrbackend.common.exception.BadRequestException;
 import tn.isetbizerte.pfe.hrbackend.common.exception.ResourceNotFoundException;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.email.HREmailService;
@@ -13,7 +13,6 @@ import tn.isetbizerte.pfe.hrbackend.infrastructure.kafka.producer.NotificationEv
 import tn.isetbizerte.pfe.hrbackend.modules.employee.repository.LeaveRequestRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.team.entity.Team;
 import tn.isetbizerte.pfe.hrbackend.modules.team.repository.TeamRepository;
-import tn.isetbizerte.pfe.hrbackend.modules.user.entity.Person;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
 import tn.isetbizerte.pfe.hrbackend.modules.user.repository.UserRepository;
 
@@ -35,19 +34,30 @@ public class TeamService {
     private final TeamRepository teamRepository;
     private final UserRepository userRepository;
     private final LeaveRequestRepository leaveRequestRepository;
-    private final NotificationEventProducer notificationEventProducer;
-    private final HREmailService emailService;
+    private final TeamNotificationService teamNotificationService;
+
+    @Autowired
+    public TeamService(TeamRepository teamRepository,
+                       UserRepository userRepository,
+                       LeaveRequestRepository leaveRequestRepository,
+                       TeamNotificationService teamNotificationService) {
+        this.teamRepository = teamRepository;
+        this.userRepository = userRepository;
+        this.leaveRequestRepository = leaveRequestRepository;
+        this.teamNotificationService = teamNotificationService;
+    }
 
     public TeamService(TeamRepository teamRepository,
                        UserRepository userRepository,
                        LeaveRequestRepository leaveRequestRepository,
                        NotificationEventProducer notificationEventProducer,
                        HREmailService emailService) {
-        this.teamRepository = teamRepository;
-        this.userRepository = userRepository;
-        this.leaveRequestRepository = leaveRequestRepository;
-        this.notificationEventProducer = notificationEventProducer;
-        this.emailService = emailService;
+        this(
+                teamRepository,
+                userRepository,
+                leaveRequestRepository,
+                new TeamNotificationService(notificationEventProducer, emailService)
+        );
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -124,14 +134,10 @@ public class TeamService {
                 oldLeader != null ? oldLeader.getUsername() : "none",
                 newLeader.getUsername());
 
-        publishLeaderNotification(newLeader, "TEAM_LEADER_ASSIGNED", team.getId(),
-                "You have been assigned as Team Leader of " + team.getName() + ".");
-        sendTeamLeaderAssignedEmail(newLeader, team.getName());
+        teamNotificationService.notifyTeamLeaderAssigned(newLeader, team.getId(), team.getName());
 
         if (oldLeader != null && !Objects.equals(oldLeader.getId(), newLeader.getId())) {
-            publishLeaderNotification(oldLeader, "TEAM_LEADER_REMOVED", team.getId(),
-                    "You are no longer Team Leader of " + team.getName() + ".");
-            sendTeamLeaderRemovedEmail(oldLeader, team.getName());
+            teamNotificationService.notifyTeamLeaderRemoved(oldLeader, team.getId(), team.getName());
         }
 
         return buildTeamResponse(team.getId(), team.getName(), team.getDescription(),
@@ -150,9 +156,7 @@ public class TeamService {
         userRepository.save(employee);
         touchTeam(targetTeam);
 
-        publishTeamNotification(employee, "TEAM_ASSIGNED", targetTeam.getId(),
-                "You have been assigned to the team: " + targetTeam.getName() + ".");
-        sendTeamAssignedEmail(employee, targetTeam.getName());
+        teamNotificationService.notifyTeamAssigned(employee, targetTeam.getId(), targetTeam.getName());
 
         return buildMembershipResponse("Employee assigned to team successfully", employee, targetTeam, null);
     }
@@ -175,9 +179,7 @@ public class TeamService {
         touchTeam(currentTeam);
         touchTeam(targetTeam);
 
-        publishTeamNotification(employee, "TEAM_CHANGED", targetTeam.getId(),
-                "Your team assignment changed from " + currentTeam.getName() + " to " + targetTeam.getName() + ".");
-        sendTeamChangedEmail(employee, currentTeam.getName(), targetTeam.getName());
+        teamNotificationService.notifyTeamChanged(employee, targetTeam.getId(), currentTeam.getName(), targetTeam.getName());
 
         return buildMembershipResponse("Employee moved to team successfully", employee, targetTeam, currentTeam);
     }
@@ -195,9 +197,7 @@ public class TeamService {
         userRepository.save(employee);
         touchTeam(currentTeam);
 
-        publishTeamNotification(employee, "TEAM_REMOVED", currentTeam.getId(),
-                "You have been removed from the team: " + currentTeam.getName() + ".");
-        sendTeamRemovedEmail(employee, currentTeam.getName());
+        teamNotificationService.notifyTeamRemoved(employee, currentTeam.getId(), currentTeam.getName());
 
         return buildMembershipResponse("Employee removed from team successfully", employee, null, currentTeam);
     }
@@ -473,88 +473,6 @@ public class TeamService {
         if (team == null) return;
         team.setUpdatedAt(LocalDateTime.now());
         teamRepository.save(team);
-    }
-
-    private void publishTeamNotification(User employee, String type, Long teamId, String message) {
-        if (employee.getKeycloakId() == null || employee.getKeycloakId().isBlank()) return;
-        try {
-            notificationEventProducer.publish(new NotificationEvent(
-                    employee.getKeycloakId(),
-                    message,
-                    type,
-                    "TEAM",
-                    teamId,
-                    "/employee/profile"
-            ));
-        } catch (Exception e) {
-            logger.warn("Failed to enqueue {} notification for userId={}", type, employee.getId(), e);
-        }
-    }
-
-    private void publishLeaderNotification(User leader, String type, Long teamId, String message) {
-        if (leader == null || leader.getKeycloakId() == null || leader.getKeycloakId().isBlank()) return;
-        try {
-            notificationEventProducer.publish(new NotificationEvent(
-                    leader.getKeycloakId(),
-                    message,
-                    type,
-                    "TEAM",
-                    teamId,
-                    "/team/members"
-            ));
-        } catch (Exception e) {
-            logger.warn("Failed to enqueue {} notification for leader userId={}", type, leader.getId(), e);
-        }
-    }
-
-    private void sendTeamAssignedEmail(User employee, String teamName) {
-        Person person = employee.getPerson();
-        if (person == null || person.getEmail() == null || person.getEmail().isBlank()) return;
-        try {
-            emailService.sendTeamAssigned(person.getEmail(), person.getFirstName(), person.getLastName(), teamName);
-        } catch (Exception e) {
-            logger.warn("Could not send team assignment email to userId={}", employee.getId(), e);
-        }
-    }
-
-    private void sendTeamChangedEmail(User employee, String oldTeamName, String newTeamName) {
-        Person person = employee.getPerson();
-        if (person == null || person.getEmail() == null || person.getEmail().isBlank()) return;
-        try {
-            emailService.sendTeamChanged(person.getEmail(), person.getFirstName(), person.getLastName(), oldTeamName, newTeamName);
-        } catch (Exception e) {
-            logger.warn("Could not send team change email to userId={}", employee.getId(), e);
-        }
-    }
-
-    private void sendTeamRemovedEmail(User employee, String oldTeamName) {
-        Person person = employee.getPerson();
-        if (person == null || person.getEmail() == null || person.getEmail().isBlank()) return;
-        try {
-            emailService.sendTeamRemoved(person.getEmail(), person.getFirstName(), person.getLastName(), oldTeamName);
-        } catch (Exception e) {
-            logger.warn("Could not send team removal email to userId={}", employee.getId(), e);
-        }
-    }
-
-    private void sendTeamLeaderAssignedEmail(User leader, String teamName) {
-        Person person = leader.getPerson();
-        if (person == null || person.getEmail() == null || person.getEmail().isBlank()) return;
-        try {
-            emailService.sendTeamLeaderAssigned(person.getEmail(), person.getFirstName(), person.getLastName(), teamName);
-        } catch (Exception e) {
-            logger.warn("Could not send Team Leader assignment email to userId={}", leader.getId(), e);
-        }
-    }
-
-    private void sendTeamLeaderRemovedEmail(User leader, String teamName) {
-        Person person = leader.getPerson();
-        if (person == null || person.getEmail() == null || person.getEmail().isBlank()) return;
-        try {
-            emailService.sendTeamLeaderRemoved(person.getEmail(), person.getFirstName(), person.getLastName(), teamName);
-        } catch (Exception e) {
-            logger.warn("Could not send Team Leader removal email to userId={}", leader.getId(), e);
-        }
     }
 
     private Map<String, Object> buildMembershipResponse(String message, User employee, Team currentTeam, Team previousTeam) {
