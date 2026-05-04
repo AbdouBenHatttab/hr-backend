@@ -26,9 +26,7 @@ public class TaskController {
         this.taskService = taskService;
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // TEAM LEADER — PROJECTS
-    // ─────────────────────────────────────────────────────────────
+    // TEAM LEADER - PROJECTS
 
     /** GET /api/leader/projects — get all projects for my team */
     @PreAuthorize("hasRole('TEAM_LEADER')")
@@ -76,9 +74,7 @@ public class TaskController {
         return ResponseEntity.ok(taskService.deleteProject(jwt.getSubject(), projectId));
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // TEAM LEADER — TASKS
-    // ─────────────────────────────────────────────────────────────
+    // TEAM LEADER - TASKS
 
     /** POST /api/leader/projects/{projectId}/tasks — create a task inside a project */
     @PreAuthorize("hasRole('TEAM_LEADER')")
@@ -130,9 +126,7 @@ public class TaskController {
         return ResponseEntity.ok(taskService.deleteTask(jwt.getSubject(), taskId));
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // EMPLOYEE — view and update own tasks
-    // ─────────────────────────────────────────────────────────────
+    // EMPLOYEE - view and update own tasks
 
     /** GET /api/employee/tasks — get my assigned tasks */
     @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER')")

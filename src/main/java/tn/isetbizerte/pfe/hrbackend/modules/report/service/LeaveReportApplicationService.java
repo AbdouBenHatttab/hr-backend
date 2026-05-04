@@ -66,7 +66,7 @@ public class LeaveReportApplicationService {
             }
         }
 
-        // HR_MANAGER: can download any PDF — no restriction needed
+        // HR_MANAGER: can download any PDF - no restriction needed
 
         validateEligibleForPdfGeneration(leaveRequest);
 

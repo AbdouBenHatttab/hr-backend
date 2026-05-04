@@ -33,6 +33,9 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+/**
+ * Owns task assignment eligibility and preview rules before TaskService creates or updates tasks.
+ */
 @Service
 public class TaskAssignmentPolicy {
 

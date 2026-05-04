@@ -21,7 +21,7 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Public endpoint — no authentication required.
+ * Public endpoint - no authentication required.
  * Anyone who scans the QR code on a PDF can verify the document.
  *
  * GET /public/verify/{token}

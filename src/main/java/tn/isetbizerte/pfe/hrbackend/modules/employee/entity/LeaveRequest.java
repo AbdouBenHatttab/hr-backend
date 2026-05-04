@@ -70,7 +70,7 @@ public class LeaveRequest {
 
     private LocalDateTime updatedAt;
 
-    // ── Scoring fields — computed on submission ──────────────────
+    // Scoring fields - computed on submission
     private Integer systemScore;           // 0-100
     private String  systemRecommendation;  // APPROVE / REVIEW / REJECT
     @Column(length = 2000)
@@ -87,7 +87,7 @@ public class LeaveRequest {
     @Column(nullable = true)
     private Integer totalLeaveTakenLast12Months = 0;
 
-    // QR verification token — generated when HR gives final approval
+    // QR verification token - generated when HR gives final approval
     @Column(unique = true)
     private String verificationToken;
 

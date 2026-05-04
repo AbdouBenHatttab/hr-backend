@@ -32,14 +32,14 @@ public class LeaveReportService {
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("dd/MM/yyyy");
     private static final DateTimeFormatter DATETIME_FORMATTER = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
 
-    // Base URL injected from application.properties — used to build QR verification link
+    // Base URL injected from application.properties - used to build QR verification link
     @Value("${app.base-url:http://localhost:8081}")
     private String baseUrl;
 
     @Value("${app.company.name:HR Management System}")
     private String companyName;
 
-    // Compiled ONCE at startup — not on every request
+    // Compiled ONCE at startup - not on every request
     private JasperReport compiledReport;
 
     @PostConstruct
@@ -55,7 +55,7 @@ public class LeaveReportService {
         try (InputStream logoStream = new ClassPathResource(LOGO_PATH).getInputStream()) {
 
             Map<String, Object> parameters = new HashMap<>();
-            // Employee department — read from Person entity
+            // Employee department - read from Person entity
             String dept = "";
             if (leaveRequest.getUser() != null && leaveRequest.getUser().getPerson() != null
                     && leaveRequest.getUser().getPerson().getDepartment() != null) {
@@ -79,9 +79,9 @@ public class LeaveReportService {
             parameters.put("referenceNumber",   "LV-" + String.format("%06d", leaveRequest.getId()));
             parameters.put("logoStream", logoStream);
 
-            // QR code — only embed if the document has a verification token
+            // QR code - only embed if the document has a verification token
             if (leaveRequest.getVerificationToken() != null) {
-                // QR points to frontend /verify/:token — shows a proper page when scanned
+                // QR points to frontend /verify/:token - shows a proper page when scanned
                 String verifyUrl = baseUrl + "/verify/" + leaveRequest.getVerificationToken();
                 InputStream qrStream = generateQrCodeStream(verifyUrl, 120);
                 parameters.put("qrCodeStream", qrStream);
@@ -118,7 +118,7 @@ public class LeaveReportService {
     }
 
     /**
-     * Converts enum name like "ANNUAL_LEAVE" → "Annual Leave"
+     * Converts enum name like "ANNUAL_LEAVE" to "Annual Leave"
      */
     private String formatEnum(String enumName) {
         if (enumName == null) return "N/A";

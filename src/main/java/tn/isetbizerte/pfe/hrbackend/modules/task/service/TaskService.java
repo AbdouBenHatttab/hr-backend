@@ -94,9 +94,7 @@ public class TaskService {
         );
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // TEAM LEADER — PROJECTS
-    // ─────────────────────────────────────────────────────────────
+    // TEAM LEADER - PROJECTS
 
     @Transactional
     public Map<String, Object> createProject(String leaderKeycloakId, CreateProjectRequest req) {
@@ -147,9 +145,7 @@ public class TaskService {
         return res;
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // TEAM LEADER — TASKS
-    // ─────────────────────────────────────────────────────────────
+    // TEAM LEADER - TASKS
 
     @Transactional
     public Map<String, Object> createTask(String leaderKeycloakId, Long projectId, CreateTaskRequest req) {
@@ -216,9 +212,7 @@ public class TaskService {
         return res;
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // EMPLOYEE — view and update own tasks
-    // ─────────────────────────────────────────────────────────────
+    // EMPLOYEE - view and update own tasks
 
     public List<Map<String, Object>> getMyTasks(String userIdentifier) {
         User user = resolveUser(userIdentifier);
@@ -246,7 +240,7 @@ public class TaskService {
         if (task.getAssignee() == null || !task.getAssignee().getId().equals(user.getId()))
             throw new UnauthorizedException("You can only update your own tasks.");
 
-        // Validate forward-only transitions: TODO → IN_PROGRESS → DONE
+        // Validate forward-only transitions: TODO to IN_PROGRESS to DONE
         TaskStatus current = task.getStatus();
         if (current == TaskStatus.DONE) {
             throw new BadRequestException("Task is already completed and cannot be changed.");
@@ -320,9 +314,7 @@ public class TaskService {
         return mapTask(task);
     }
 
-    // ─────────────────────────────────────────────────────────────
     // INTERNAL HELPERS
-    // ─────────────────────────────────────────────────────────────
 
     private Team getTeamByLeader(String keycloakId) {
         return teamRepository.findByTeamLeaderKeycloakId(keycloakId)

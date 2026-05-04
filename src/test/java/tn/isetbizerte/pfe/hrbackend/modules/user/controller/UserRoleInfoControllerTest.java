@@ -70,6 +70,27 @@ class UserRoleInfoControllerTest {
     }
 
     @Test
+    void updateMyProfile_rejectsHrManagedEmploymentAndTeamChanges() {
+        User user = userWithPerson("alice");
+        when(authenticatedUserResolver.resolve(any())).thenReturn(Optional.of(user));
+
+        assertSelfProfileFieldRejected("jobTitleId", 8,
+                "Job title is HR-managed employment data and cannot be changed from self-service.");
+        assertSelfProfileFieldRejected("hireDate", "2026-04-01",
+                "Hire date is HR-managed employment data and cannot be changed from self-service.");
+        assertSelfProfileFieldRejected("salary", "2500",
+                "Salary is HR-managed employment data and cannot be changed from self-service.");
+        assertSelfProfileFieldRejected("teamId", 3,
+                "Team assignment is HR-managed account data and cannot be changed from self-service.");
+
+        assertThat(user.getPerson().getJobTitleRef()).isNull();
+        assertThat(user.getPerson().getHireDate()).isNull();
+        assertThat(user.getPerson().getSalary()).isNull();
+        assertThat(user.getTeam()).isNull();
+        verify(personRepository, never()).save(any());
+    }
+
+    @Test
     void getMyProfile_resolvesUserByKeycloakIdWhenUsernameCaseDiffers() {
         User user = userWithPerson("alice");
         when(authenticatedUserResolver.resolve(any())).thenReturn(Optional.of(user));
@@ -150,5 +171,14 @@ class UserRoleInfoControllerTest {
                 .claim("sub", "kc-" + username.toLowerCase())
                 .claim("preferred_username", username)
                 .build();
+    }
+
+    private void assertSelfProfileFieldRejected(String fieldName, Object value, String message) {
+        UpdateMyProfileRequest request = new UpdateMyProfileRequest();
+        request.captureUnknownField(fieldName, value);
+
+        assertThatThrownBy(() -> controller.updateMyProfile(request, jwt("alice")))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage(message);
     }
 }

@@ -8,7 +8,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Builds authorization email HTML only; HREmailService remains responsible for sending. */
+/** Builds authorization email HTML bodies only; it does not send email. */
 public class AuthorizationEmailTemplate {
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("dd/MM/yyyy");

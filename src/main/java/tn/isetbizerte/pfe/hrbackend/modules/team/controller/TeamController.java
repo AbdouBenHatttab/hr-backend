@@ -26,9 +26,7 @@ public class TeamController {
         this.teamService = teamService;
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // HR ENDPOINTS  →  /api/hr/teams
-    // ─────────────────────────────────────────────────────────────
+    // HR ENDPOINTS  to  /api/hr/teams
 
     /**
      * HR creates a new team and assigns a Team Leader.
@@ -142,9 +140,7 @@ public class TeamController {
         return ResponseEntity.ok(teamService.removeEmployeeFromTeam(userId));
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // TEAM LEADER ENDPOINTS  →  /api/leader/team
-    // ─────────────────────────────────────────────────────────────
+    // TEAM LEADER ENDPOINTS  to  /api/leader/team
 
     /**
      * Team Leader views their own team and members.

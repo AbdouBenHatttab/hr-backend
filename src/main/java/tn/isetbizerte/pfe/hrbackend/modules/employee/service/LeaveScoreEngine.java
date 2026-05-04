@@ -19,9 +19,9 @@ import java.util.List;
 
 /**
  * Leave Scoring Engine
- * ─────────────────────────────────────────────────────────────────
+ * 
  * Evaluates a leave request on 4 dimensions and produces:
- *   - system_score          (0–100)
+ *   - system_score          (0-100)
  *   - system_recommendation (APPROVE / REVIEW / REJECT)
  *   - decision_reason       (human-readable explanation)
  *
@@ -63,7 +63,7 @@ public class LeaveScoreEngine {
         int          score   = 100;
         List<String> reasons = new ArrayList<>();
 
-        // Reload team fresh from DB — use findByIdWithDetails to avoid lazy loading
+        // Reload team fresh from DB - use findByIdWithDetails to avoid lazy loading
         Team team = null;
         try {
             if (employee.getTeam() != null && employee.getTeam().getId() != null) {
@@ -73,11 +73,11 @@ public class LeaveScoreEngine {
             log.warn("Could not load team for scoring: {}", e.getMessage());
         }
 
-        // ── A. Team availability ────────────────────────────────────────────
+        // A. Team availability
         int teamOverloadPenalty = 0;
         if (team != null) {
             try {
-                // Count members by querying users table directly — no lazy loading
+                // Count members by querying users table directly - no lazy loading
                 long memberCount = userRepository.countByTeamId(team.getId());
                 int  teamSize    = (int) memberCount + 1; // +1 for TL
 
@@ -107,7 +107,7 @@ public class LeaveScoreEngine {
         }
         score -= teamOverloadPenalty;
 
-        // ── B. Fairness — compare vs team average ───────────────────────────
+        // B. Fairness - compare vs team average
         int fairnessPenalty = 0;
         if (employee.getId() != null) {
             try {
@@ -142,7 +142,7 @@ public class LeaveScoreEngine {
         }
         score -= fairnessPenalty;
 
-        // ── C. Task impact ──────────────────────────────────────────────────
+        // C. Task impact
         int taskPenalty = 0;
         if (employee.getId() != null) {
             try {
@@ -168,7 +168,7 @@ public class LeaveScoreEngine {
         }
         score -= taskPenalty;
 
-        // ── D. Leave type bonus ─────────────────────────────────────────────
+        // D. Leave type bonus
         int bonus = 0;
         try {
             String typeName = leave.getLeaveType().name();
@@ -184,7 +184,7 @@ public class LeaveScoreEngine {
 
         score = Math.min(100, Math.max(0, score + bonus));
 
-        // ── Recommendation ──────────────────────────────────────────────────
+        // Recommendation
         String recommendation;
         if (score >= 70) {
             recommendation = "APPROVE";

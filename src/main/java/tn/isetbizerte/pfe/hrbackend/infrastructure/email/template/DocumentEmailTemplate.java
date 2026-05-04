@@ -2,7 +2,7 @@ package tn.isetbizerte.pfe.hrbackend.infrastructure.email.template;
 
 import org.springframework.core.io.ClassPathResource;
 
-/** Builds document email HTML only; HREmailService remains responsible for sending. */
+/** Builds document email HTML bodies only; it does not send email. */
 public class DocumentEmailTemplate {
 
     private static final String SYSTEM_NAME = "ArabSoft Human Resources Management System";

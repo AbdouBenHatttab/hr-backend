@@ -103,9 +103,7 @@ public class RequestsService {
         this.workingDayService = workingDayService;
     }
 
-    // ─────────────────────────────────────────────────────────────
     // DOCUMENT REQUESTS
-    // ─────────────────────────────────────────────────────────────
 
     @Transactional
     public Map<String, Object> createDocumentRequest(Jwt jwt, CreateDocumentRequestDto body) {
@@ -236,9 +234,7 @@ public class RequestsService {
         return mapDocument(req);
     }
 
-    // ─────────────────────────────────────────────────────────────
     // DOCUMENT ATTACHMENTS (HR-provided fulfillment)
-    // ─────────────────────────────────────────────────────────────
 
     @Transactional
     public Map<String, Object> uploadDocumentAttachment(Long id, String decidedByKeycloakId, String originalFileName, String contentType, byte[] bytes) {
@@ -331,9 +327,7 @@ public class RequestsService {
         }
     }
 
-    // ─────────────────────────────────────────────────────────────
     // HR-MANAGED EMPLOYEE DOCUMENTS
-    // ─────────────────────────────────────────────────────────────
 
     @Transactional
     public Map<String, Object> uploadStoredEmployeeDocument(Long employeeUserId,
@@ -450,9 +444,7 @@ public class RequestsService {
         }
     }
 
-    // ─────────────────────────────────────────────────────────────
     // LOAN REQUESTS
-    // ─────────────────────────────────────────────────────────────
 
     @Transactional
     public Map<String, Object> createLoanRequest(Jwt jwt, LoanType loanType,
@@ -506,7 +498,7 @@ public class RequestsService {
     }
 
     /**
-     * Loan eligibility rules — objective, cannot be bypassed:
+     * Loan eligibility rules - objective, cannot be bypassed:
      * 1. Salary must be set by HR before any loan can be requested
      * 2. Max loan = 3 × monthly salary
      * 3. No existing PENDING or active (APPROVED but unfinished) loan
@@ -516,26 +508,26 @@ public class RequestsService {
         if (user.getPerson() == null)
             return "SYSTEM-REJECTED: profile is incomplete. Contact HR.";
 
-        // Rule 1 — salary must exist
+        // Rule 1 - salary must exist
         BigDecimal salary = user.getPerson().getSalary();
         if (salary == null || salary.compareTo(BigDecimal.ZERO) <= 0)
             return "SYSTEM-REJECTED: salary has not been registered. Contact HR to set up employment details before requesting a loan.";
 
-        // Rule 2 — max 3x monthly salary
+        // Rule 2 - max 3x monthly salary
         BigDecimal maxAllowed = salary.multiply(new BigDecimal("3"));
         if (amount.compareTo(maxAllowed) > 0)
             return String.format(
                 "SYSTEM-REJECTED: requested amount (%.0f TND) exceeds the maximum allowed (3× salary = %.0f TND).",
                 amount, maxAllowed);
 
-        // Rule 3 — no existing pending/approved loan
+        // Rule 3 - no existing pending/approved loan
         boolean hasActiveLoan = loanRepo.findByUserOrderByRequestedAtDesc(user).stream()
                 .anyMatch(l -> l.getStatus() == RequestStatus.PENDING ||
                                l.getStatus() == RequestStatus.APPROVED);
         if (hasActiveLoan)
             return "SYSTEM-REJECTED: you already have a pending or active loan. You must fully repay your current loan before requesting a new one.";
 
-        // Rule 4 — minimum 6 months employment
+        // Rule 4 - minimum 6 months employment
         if (user.getPerson().getHireDate() != null) {
             long monthsEmployed = java.time.temporal.ChronoUnit.MONTHS.between(
                     user.getPerson().getHireDate(), java.time.LocalDate.now());
@@ -1002,9 +994,7 @@ public class RequestsService {
         }
     }
 
-    // ─────────────────────────────────────────────────────────────
     // AUTHORIZATION REQUESTS
-    // ─────────────────────────────────────────────────────────────
 
     @Transactional
     public Map<String, Object> createAuthRequest(Jwt jwt, CreateAuthorizationRequestDto body) {
@@ -1225,9 +1215,7 @@ public class RequestsService {
         }
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // PDF GETTERS — used by report controller
-    // ─────────────────────────────────────────────────────────────
+    // PDF GETTERS - used by report controller
 
     public DocumentRequest getDocumentRequestForPdf(Long id, String requesterKeycloakId) {
         DocumentRequest req = documentRepo.findById(id)
@@ -1250,9 +1238,7 @@ public class RequestsService {
         return req;
     }
 
-    // ─────────────────────────────────────────────────────────────
     // HELPERS
-    // ─────────────────────────────────────────────────────────────
 
     private void validateOwnerOrHR(String ownerKeycloakId, String requesterKeycloakId) {
         User requester = userRepository.findByKeycloakId(requesterKeycloakId)

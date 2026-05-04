@@ -25,7 +25,7 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
 
     /**
      * Find active (IN_PROGRESS) tasks for a user that overlap with a date range.
-     * Used for leave scoring — active tasks during leave = penalty.
+     * Used for leave scoring - active tasks during leave = penalty.
      */
     @Query(value = "SELECT t.* FROM tasks t " +
            "WHERE t.assignee_id = :userId " +
@@ -39,7 +39,7 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
                                           @Param("startDate") java.time.LocalDate startDate,
                                           @Param("endDate")   java.time.LocalDate endDate);
 
-    // Tasks due soon with no progress (TODO) — includes team + leader for notification routing.
+    // Tasks due soon with no progress (TODO) - includes team + leader for notification routing.
     @Query("""
         SELECT t FROM Task t
         JOIN FETCH t.project p
@@ -53,7 +53,7 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
                                         @Param("from") LocalDate from,
                                         @Param("to") LocalDate to);
 
-    // Tasks due soon and not finished (TODO/IN_PROGRESS) — includes team + leader for notification routing.
+    // Tasks due soon and not finished (TODO/IN_PROGRESS) - includes team + leader for notification routing.
     @Query("""
         SELECT t FROM Task t
         JOIN FETCH t.project p

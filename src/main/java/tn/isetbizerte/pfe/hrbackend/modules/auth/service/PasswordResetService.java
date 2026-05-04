@@ -58,7 +58,7 @@ public class PasswordResetService {
     public void initiatePasswordReset(String email) {
         logger.info("Password reset initiated for email: {}", email);
 
-        // Silent return if email not found — prevents user enumeration
+        // Silent return if email not found - prevents user enumeration
         java.util.Optional<Person> personOpt = personRepository.findByEmail(email);
         if (personOpt.isEmpty()) {
             logger.info("Password reset requested for unknown email (silently ignored): {}", email);

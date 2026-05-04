@@ -33,18 +33,18 @@ public class UserRoleEventConsumer {
 
     @PostConstruct
     public void init() {
-        logger.info("✅ UserRoleEventConsumer initialized - listening on topic: user-role-assigned");
+        logger.info("UserRoleEventConsumer initialized - listening on topic: user-role-assigned");
     }
 
     @KafkaListener(topics = "${app.kafka.topic.user-role-assigned}", groupId = "${spring.kafka.consumer.group-id}")
     public void handleUserRoleAssignedEvent(String eventJson) {
-        logger.info("📩 Received UserRoleAssignedEvent: {}", eventJson);
+        logger.info("Received UserRoleAssignedEvent: {}", eventJson);
 
         try {
             UserRoleAssignedEvent event = objectMapper.readValue(eventJson, UserRoleAssignedEvent.class);
 
             if (event.getEmail() == null || event.getEmail().isEmpty()) {
-                logger.warn("⚠️ Cannot send email - no email address for user: {}", event.getUsername());
+                logger.warn("Cannot send email - no email address for user: {}", event.getUsername());
                 return;
             }
 
@@ -54,11 +54,11 @@ public class UserRoleEventConsumer {
                     event.getUsername(), event.getOldRole(), event.getNewRole(),
                     event.getAssignedBy(), event.isFirstApproval());
 
-            logger.info("📧 Email notification triggered for user: {} with new role: {}",
+            logger.info("Email notification triggered for user: {} with new role: {}",
                     event.getUsername(), event.getNewRole());
 
         } catch (Exception e) {
-            logger.error("❌ Error handling UserRoleAssignedEvent: {}", e.getMessage(), e);
+            logger.error("Error handling UserRoleAssignedEvent: {}", e.getMessage(), e);
         }
     }
 }

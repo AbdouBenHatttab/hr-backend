@@ -34,7 +34,7 @@ public class PasswordResetController {
      */
     @PostMapping("/forgot-password")
     public ResponseEntity<Map<String, Object>> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
-        logger.info("📧 Forgot password request for email: {}", request.getEmail());
+        logger.info("Forgot password request for email: {}", request.getEmail());
 
         passwordResetService.initiatePasswordReset(request.getEmail());
 
@@ -63,4 +63,3 @@ public class PasswordResetController {
         return ResponseEntity.ok(response);
     }
 }
-

@@ -5,7 +5,7 @@ import org.springframework.core.io.ClassPathResource;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 
-/** Builds leave email HTML only; HREmailService remains responsible for sending. */
+/** Builds leave email HTML bodies only; it does not send email. */
 public class LeaveEmailTemplate {
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("dd/MM/yyyy");
@@ -15,7 +15,7 @@ public class LeaveEmailTemplate {
                                          LocalDate start, LocalDate end,
                                          int days, String refId,
                                          String fromDisplayName) {
-        return wrap("Leave Request Approved ✓", "Reference: " + refId, """
+        return wrap("Leave Request Approved", "Reference: " + refId, """
             <p style="font-size:15px;color:#374151;line-height:1.8;">
                 Dear <strong>%s</strong>,
             </p>

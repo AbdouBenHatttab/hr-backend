@@ -9,6 +9,9 @@ import tn.isetbizerte.pfe.hrbackend.infrastructure.kafka.producer.NotificationEv
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.Person;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
 
+/**
+ * Performs team notification and email side effects after TeamService validation and persistence.
+ */
 @Service
 public class TeamNotificationService {
 

@@ -35,9 +35,7 @@ public class RequestsController {
         this.historyService = historyService;
     }
 
-    // ══════════════════════════════════════════════════════════════
     // DOCUMENT REQUESTS
-    // ══════════════════════════════════════════════════════════════
 
     @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")
     @PostMapping(RequestApiRoutes.EMPLOYEE_DOCUMENTS)
@@ -187,9 +185,7 @@ public class RequestsController {
         return ResponseEntity.ok().headers(headers).body(bytes);
     }
 
-    // ══════════════════════════════════════════════════════════════
     // LOAN REQUESTS
-    // ══════════════════════════════════════════════════════════════
 
     @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")
     @PostMapping(RequestApiRoutes.EMPLOYEE_LOANS)
@@ -325,9 +321,7 @@ public class RequestsController {
         return ResponseEntity.ok().headers(headers).body(bytes);
     }
 
-    // ══════════════════════════════════════════════════════════════
     // AUTHORIZATION REQUESTS
-    // ══════════════════════════════════════════════════════════════
 
     @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")
     @PostMapping(RequestApiRoutes.EMPLOYEE_AUTHORIZATIONS)
@@ -390,7 +384,7 @@ public class RequestsController {
         return ok("Authorization rejected.", service.decideAuth(id, false, note, jwt.getSubject()));
     }
 
-    // ─── helper ──────────────────────────────────────────────────
+    // helper
     private ResponseEntity<Map<String, Object>> ok(String msg, Object data) {
         Map<String, Object> res = new HashMap<>();
         res.put("success", true);

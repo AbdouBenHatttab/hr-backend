@@ -47,7 +47,7 @@ public class LoanRequest {
 
     private String hrNote;
 
-    // ── Scoring ──────────────────────────────────────────
+    // Scoring
     @Column(precision = 10, scale = 2)
     private BigDecimal monthlyInstallment;   // amount / repaymentMonths
     private Integer riskScore;               // 0-100

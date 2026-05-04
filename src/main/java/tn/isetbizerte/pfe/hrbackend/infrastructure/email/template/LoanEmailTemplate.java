@@ -2,14 +2,14 @@ package tn.isetbizerte.pfe.hrbackend.infrastructure.email.template;
 
 import org.springframework.core.io.ClassPathResource;
 
-/** Builds loan email HTML only; HREmailService remains responsible for sending. */
+/** Builds loan email HTML bodies only; it does not send email. */
 public class LoanEmailTemplate {
 
     private static final String SYSTEM_NAME = "ArabSoft Human Resources Management System";
 
     public String buildLoanApprovedBody(String name, double amount, int months, double installment,
                                         String refId, String fromDisplayName) {
-        return wrap("Loan Request Approved ✓", "Reference: " + refId, """
+        return wrap("Loan Request Approved", "Reference: " + refId, """
             <p style="font-size:15px;color:#374151;line-height:1.8;">
                 Dear <strong>%s</strong>,
             </p>

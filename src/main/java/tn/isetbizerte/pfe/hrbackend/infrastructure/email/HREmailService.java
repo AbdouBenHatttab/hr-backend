@@ -23,17 +23,8 @@ import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 
 /**
- * ArabSoft Human Resources Management System (HRMS)
- * Central email service — handles all outgoing emails.
- *
- * Emails:
- *  1. Role assigned (welcome)
- *  2. Leave approved
- *  3. Leave rejected
- *  4. Loan approved
- *  5. Loan rejected
- *  6. Password reset OTP
- *  7. Task assigned
+ * Email facade for HR workflows.
+ * Owns sending, logging, and error handling while template classes build HTML bodies.
  */
 @Service
 public class HREmailService {
@@ -76,9 +67,7 @@ public class HREmailService {
         this.teamEmailTemplate = new TeamEmailTemplate();
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    // 1 — ROLE ASSIGNED (WELCOME)
-    // ═══════════════════════════════════════════════════════════════════
+    // 1 - ROLE ASSIGNED (WELCOME)
 
     @Async
     public void sendRoleAssigned(String email, String firstName, String lastName,
@@ -106,9 +95,7 @@ public class HREmailService {
             roleEmailTemplate.buildRoleUpdatedBody(name, roleEmailTemplate.formatRole(oldRole), roleLabel, assignedBy, frontendUrl, fromDisplayName));
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    // 2 — LEAVE APPROVED
-    // ═══════════════════════════════════════════════════════════════════
+    // 2 - LEAVE APPROVED
 
     @Async
     public void sendLeaveApproved(String email, String firstName, String lastName,
@@ -120,9 +107,7 @@ public class HREmailService {
             leaveEmailTemplate.buildLeaveApprovedBody(name, leaveType, startDate, endDate, days, referenceId, fromDisplayName));
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    // 3 — LEAVE REJECTED
-    // ═══════════════════════════════════════════════════════════════════
+    // 3 - LEAVE REJECTED
 
     @Async
     public void sendLeaveRejected(String email, String firstName, String lastName,
@@ -134,9 +119,7 @@ public class HREmailService {
             leaveEmailTemplate.buildLeaveRejectedBody(name, leaveType, startDate, endDate, reason, referenceId, fromDisplayName));
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    // 4 — LOAN APPROVED
-    // ═══════════════════════════════════════════════════════════════════
+    // 4 - LOAN APPROVED
 
     public boolean sendLoanApproved(String email, String firstName, String lastName,
                                     double amount, int months, double monthlyInstallment,
@@ -160,9 +143,7 @@ public class HREmailService {
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    // 5 — LOAN REJECTED
-    // ═══════════════════════════════════════════════════════════════════
+    // 5 - LOAN REJECTED
 
     public boolean sendLoanRejected(String email, String firstName, String lastName,
                                     double amount, String reason, String referenceId) {
@@ -230,9 +211,7 @@ public class HREmailService {
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    // 6 — PASSWORD RESET OTP
-    // ═══════════════════════════════════════════════════════════════════
+    // 6 - PASSWORD RESET OTP
 
     @Async
     public void sendPasswordReset(String email, String firstName, String lastName,
@@ -252,9 +231,7 @@ public class HREmailService {
                 buildPasswordChangeBody(name, otpCode, expiresAt));
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    // 7 — TASK ASSIGNED
-    // ═══════════════════════════════════════════════════════════════════
+    // 7 - TASK ASSIGNED
 
     @Async
     public void sendTaskAssigned(String email, String firstName, String lastName,
@@ -307,9 +284,7 @@ public class HREmailService {
                 teamEmailTemplate.buildTeamLeaderRemovedBody(name, teamName, fromDisplayName));
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    // 8 — TASK UPDATED
-    // ═══════════════════════════════════════════════════════════════════
+    // 8 - TASK UPDATED
 
     @Async
     public void sendTaskUpdated(String email, String firstName, String lastName,
@@ -321,9 +296,7 @@ public class HREmailService {
                 taskEmailTemplate.buildTaskUpdatedBody(name, taskTitle, taskDescription, projectName, priority, startDate, dueDate, updatedBy, frontendUrl, fromDisplayName));
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    // 9 — TASK COMPLETED (TEAM LEADER)
-    // ═══════════════════════════════════════════════════════════════════
+    // 9 - TASK COMPLETED (TEAM LEADER)
 
     @Async
     public void sendTaskCompletedToLeader(String email, String firstName, String lastName,
@@ -334,9 +307,7 @@ public class HREmailService {
                 taskEmailTemplate.buildTaskCompletedBody(name, taskTitle, projectName, completedBy, frontendUrl, fromDisplayName));
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    // 10 — DOCUMENT READY
-    // ═══════════════════════════════════════════════════════════════════
+    // 10 - DOCUMENT READY
 
     public boolean sendDocumentReady(String email, String firstName, String lastName,
                                      String referenceId) {
@@ -382,9 +353,7 @@ public class HREmailService {
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════════
-    // 10 — AUTHORIZATION DECISION
-    // ═══════════════════════════════════════════════════════════════════
+    // 10 - AUTHORIZATION DECISION
 
     public boolean sendAuthorizationDecision(String email, String firstName, String lastName,
                                              String authorizationType, LocalDate startDate,
@@ -418,9 +387,7 @@ public class HREmailService {
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════════
     // INTERNAL SEND
-    // ═══════════════════════════════════════════════════════════════════
 
     private boolean send(String to, String subject, String html) {
         try {
@@ -439,18 +406,16 @@ public class HREmailService {
             if (logo.exists()) helper.addInline("logo", logo);
 
             mailSender.send(msg);
-            log.info("✅ Email sent to {} — {}", to, subject);
+            log.info("Email sent to {} — {}", to, subject);
             return true;
         } catch (Exception e) {
-            log.error("❌ Failed to send email: recipientEmail={} subject={} errorType={} message={}",
+            log.error("Failed to send email: recipientEmail={} subject={} errorType={} message={}",
                     to, subject, e.getClass().getSimpleName(), e.getMessage(), e);
             return false;
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════════
     // HTML BUILDERS
-    // ═══════════════════════════════════════════════════════════════════
 
     private String buildPasswordResetBody(String name, String otpCode, String expiresAt) {
         return wrap("Password Reset Request", "Keep this code private", """
@@ -473,7 +438,7 @@ public class HREmailService {
                     %s
                 </p>
                 <p style="margin:12px 0 0;font-size:13px;color:#DC2626;font-weight:600;">
-                    ⏱ Expires at: %s
+                    Expires at: %s
                 </p>
             </div>
             <p style="font-size:14px;color:#6B7280;line-height:1.8;">
@@ -483,7 +448,7 @@ public class HREmailService {
             <div style="background:#FFFBEB;border-left:4px solid #F59E0B;border-radius:8px;
                         padding:14px 18px;margin-top:20px;">
                 <p style="margin:0;font-size:14px;color:#92400E;">
-                    ⚠️ If you did not request this password reset, please ignore this email.
+                    If you did not request this password reset, please ignore this email.
                     Your account remains secure.
                 </p>
             </div>
@@ -509,7 +474,7 @@ public class HREmailService {
                     %s
                 </p>
                 <p style="margin:12px 0 0;font-size:13px;color:#DC2626;font-weight:600;">
-                    ⏱ Expires at: %s
+                    Expires at: %s
                 </p>
             </div>
             <p style="font-size:14px;color:#6B7280;line-height:1.8;">
@@ -519,15 +484,13 @@ public class HREmailService {
             <div style="background:#FFFBEB;border-left:4px solid #F59E0B;border-radius:8px;
                         padding:14px 18px;margin-top:20px;">
                 <p style="margin:0;font-size:14px;color:#92400E;">
-                    ⚠️ If you did not request this password change, please contact HR immediately.
+                    If you did not request this password change, please contact HR immediately.
                 </p>
             </div>
             """.formatted(name, otpCode, expiresAt));
     }
 
-    // ═══════════════════════════════════════════════════════════════════
     // SHARED LAYOUT COMPONENTS
-    // ═══════════════════════════════════════════════════════════════════
 
     /** Wraps content in the ArabSoft HRMS email shell */
     private String wrap(String title, String subtitle, String content) {

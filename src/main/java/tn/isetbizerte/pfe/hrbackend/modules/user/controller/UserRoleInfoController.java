@@ -112,9 +112,7 @@ public class UserRoleInfoController {
             throw new ResourceNotFoundException("Profile not found");
         }
 
-        if (body.hasField("department") || body.hasField("departmentId")) {
-            throw new BadRequestException("Department is HR-managed employment data and cannot be changed from self-service.");
-        }
+        rejectSelfServiceEmploymentFields(body);
 
         Person p = user.getPerson();
 
@@ -211,6 +209,24 @@ public class UserRoleInfoController {
         return actorUsername != null && !actorUsername.isBlank()
                 && targetUser.getUsername() != null
                 && targetUser.getUsername().equalsIgnoreCase(actorUsername);
+    }
+
+    private void rejectSelfServiceEmploymentFields(UpdateMyProfileRequest body) {
+        if (body.hasField("department") || body.hasField("departmentId")) {
+            throw new BadRequestException("Department is HR-managed employment data and cannot be changed from self-service.");
+        }
+        if (body.hasField("jobTitle") || body.hasField("jobTitleId")) {
+            throw new BadRequestException("Job title is HR-managed employment data and cannot be changed from self-service.");
+        }
+        if (body.hasField("hireDate")) {
+            throw new BadRequestException("Hire date is HR-managed employment data and cannot be changed from self-service.");
+        }
+        if (body.hasField("salary")) {
+            throw new BadRequestException("Salary is HR-managed employment data and cannot be changed from self-service.");
+        }
+        if (body.hasField("team") || body.hasField("teamId") || body.hasField("ledTeam") || body.hasField("ledTeamId")) {
+            throw new BadRequestException("Team assignment is HR-managed account data and cannot be changed from self-service.");
+        }
     }
 
     @GetMapping("/api/new-user/waiting")

@@ -60,9 +60,7 @@ public class TeamService {
         );
     }
 
-    // ─────────────────────────────────────────────────────────────
     // HR OPERATIONS
-    // ─────────────────────────────────────────────────────────────
 
     @Transactional
     public Map<String, Object> createTeam(String name, String description, Long teamLeaderId) {
@@ -91,7 +89,7 @@ public class TeamService {
         teamRepository.save(team);
         logger.info("Team '{}' created with leader '{}'", normalizedName, leader.getUsername());
 
-        // Build response directly from known data — no lazy loading
+        // Build response directly from known data - no lazy loading
         return buildTeamResponse(team.getId(), team.getName(), team.getDescription(),
                 team.getCreatedAt(), leader, List.of());
     }
@@ -277,9 +275,7 @@ public class TeamService {
                 withLeader.getCreatedAt(), leader, members);
     }
 
-    // ─────────────────────────────────────────────────────────────
     // TEAM LEADER OPERATIONS
-    // ─────────────────────────────────────────────────────────────
 
     @Transactional
     public Map<String, Object> addMemberToTeam(String leaderKeycloakId, Long employeeId) {
@@ -432,9 +428,7 @@ public class TeamService {
         return response;
     }
 
-    // ─────────────────────────────────────────────────────────────
     // INTERNAL HELPERS
-    // ─────────────────────────────────────────────────────────────
 
     private Team getTeamByLeaderKeycloakId(String keycloakId) {
         return teamRepository.findByTeamLeaderKeycloakId(keycloakId)
@@ -490,7 +484,7 @@ public class TeamService {
 
     /**
      * Builds the team response map from already-loaded, non-lazy data.
-     * Never touches lazy associations — all data is passed explicitly.
+     * Never touches lazy associations - all data is passed explicitly.
      */
     private Map<String, Object> buildTeamResponse(
             Long id, String name, String description,
@@ -551,5 +545,5 @@ public class TeamService {
         return response;
     }
 
-    // Keep old mapTeamToResponse as unused safety fallback — removed to avoid confusion
+    // Keep old mapTeamToResponse as unused safety fallback - removed to avoid confusion
 }

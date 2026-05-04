@@ -5,6 +5,14 @@ import tn.isetbizerte.pfe.hrbackend.modules.department.entity.Department;
 import tn.isetbizerte.pfe.hrbackend.modules.jobtitle.entity.JobTitle;
 import java.time.LocalDate;
 
+/**
+ * Human profile and HR-managed employment entity.
+ *
+ * Person owns personal/contact information and employment data such as name,
+ * email, phone, address, marital/family fields, avatar, department, job title,
+ * hire date, salary, and payroll deduction state. Authentication, role, active
+ * state, and team membership remain on the linked {@link User}.
+ */
 @Entity
 @Table(name = "persons")
 public class Person {

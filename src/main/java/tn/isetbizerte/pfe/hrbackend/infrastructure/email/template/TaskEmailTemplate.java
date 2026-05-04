@@ -5,7 +5,7 @@ import org.springframework.core.io.ClassPathResource;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 
-/** Builds task email HTML only; HREmailService remains responsible for sending. */
+/** Builds task email HTML bodies only; it does not send email. */
 public class TaskEmailTemplate {
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("dd/MM/yyyy");

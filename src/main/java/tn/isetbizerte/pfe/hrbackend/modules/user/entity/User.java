@@ -7,6 +7,14 @@ import java.util.List;
 import tn.isetbizerte.pfe.hrbackend.common.enums.TypeRole;
 import tn.isetbizerte.pfe.hrbackend.modules.team.entity.Team;
 
+/**
+ * Account/security entity.
+ *
+ * User owns authentication identity and account lifecycle data: Keycloak ID,
+ * username, account email verification, active state, application role, regular
+ * team membership, and login history. Human profile and HR employment details
+ * live on the linked {@link Person}; do not merge these responsibilities.
+ */
 @Entity
 @Table(name = "users")
 public class User {
@@ -138,4 +146,3 @@ public class User {
         loginHistory.setUser(this);
     }
 }
-

@@ -84,7 +84,7 @@ public class EmployeeLeaveService {
     /**
      * Create a new leave request.
      * Business rule:
-     * - EMPLOYEE: goes through full 2-step flow (TL → HR)
+     * - EMPLOYEE: goes through full 2-step flow (TL to HR)
      * - TEAM_LEADER: TL step is auto-approved, goes directly to HR
      */
     @CacheEvict(value = "calendarLeaves", allEntries = true)
@@ -111,7 +111,7 @@ public class EmployeeLeaveService {
         leaveRequest.setReason(dto.getReason());
         leaveRequest.setRequestDate(LocalDateTime.now());
 
-        // Team Leader's leave goes directly to HR — TL step auto-approved
+        // Team Leader's leave goes directly to HR - TL step auto-approved
         if (user.getRole() == TypeRole.TEAM_LEADER) {
             leaveRequest.setTeamLeaderDecision(ApprovalDecision.APPROVED);
             log.info("Team Leader leave request — TL step auto-approved, routing directly to HR");
@@ -304,7 +304,7 @@ public class EmployeeLeaveService {
     }
 
     /**
-     * Get pending leave requests for a Team Leader — only their team's requests.
+     * Get pending leave requests for a Team Leader - only their team's requests.
      */
     public Page<LeaveRequestResponseDto> getPendingLeaveRequestsForTeamLeader(String keycloakId, Pageable pageable) {
         log.info("Fetching pending leave requests for team leader: {}", keycloakId);
@@ -535,7 +535,7 @@ public class EmployeeLeaveService {
     }
 
     /**
-     * Get all leave requests — HR overview.
+     * Get all leave requests - HR overview.
      */
     public Page<LeaveRequestResponseDto> getAllLeaveRequests(Pageable pageable) {
         return leaveRequestRepository.findAllForHrOverview(pageable)
@@ -559,7 +559,7 @@ public class EmployeeLeaveService {
             if (leave.getVerificationToken() == null) {
                 leave.setVerificationToken(UUID.randomUUID().toString());
             }
-            // ✅ Phase 6 — update total_leave_taken_last_12_months on the Person
+            // Phase 6 - update total_leave_taken_last_12_months on the Person
             if (leave.getUser() != null && leave.getUser().getPerson() != null) {
                 var person = leave.getUser().getPerson();
                 int current = (person.getCurrentMonthlyDeductions() != null) ? 0 : 0; // placeholder

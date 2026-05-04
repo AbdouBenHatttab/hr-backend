@@ -47,7 +47,7 @@ public class RequestReportService {
         loanReport              = compile("reports/leave/loan_request.jrxml");
     }
 
-    // ─── DOCUMENT PDF ──────────────────────────────────────────────────────────
+    // DOCUMENT PDF
     public byte[] generateDocumentPdf(DocumentRequest req) {
         try (InputStream logo = new ClassPathResource(LOGO_PATH).getInputStream()) {
             Map<String, Object> p = new HashMap<>();
@@ -70,7 +70,7 @@ public class RequestReportService {
         } catch (Exception e) { throw new IllegalStateException("Failed to generate document PDF", e); }
     }
 
-    // ─── LOAN PDF ──────────────────────────────────────────────────────────────
+    // LOAN PDF
     public byte[] generateLoanPdf(LoanRequest req) {
         try (InputStream logo = new ClassPathResource(LOGO_PATH).getInputStream()) {
             Map<String, Object> p = new HashMap<>();
@@ -95,7 +95,7 @@ public class RequestReportService {
         } catch (Exception e) { throw new IllegalStateException("Failed to generate loan PDF", e); }
     }
 
-    // ─── HELPERS ───────────────────────────────────────────────────────────────
+    // HELPERS
     private JasperReport compile(String path) {
         try (InputStream is = new ClassPathResource(path).getInputStream()) {
             return JasperCompileManager.compileReport(is);

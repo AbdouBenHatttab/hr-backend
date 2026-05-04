@@ -16,20 +16,20 @@ import java.util.List;
 
 /**
  * Loan Scoring Engine
- * ──────────────────────────────────────────────────────────────────
+ * 
  * After hard rules pass, calculates:
  *   - monthlyInstallment     = amount / repaymentMonths
- *   - risk_score             (0–100, higher = less risky)
+ *   - risk_score             (0-100, higher = less risky)
  *   - system_recommendation  APPROVE / REVIEW / REJECT
  *   - decision_reason        human-readable explanation
  *   - meeting_required       true for REVIEW
  *
  * Risk formula:
  *   score = 100
- *         - loanRatioPenalty    (0–40)  amount vs max allowed
- *         - deductionPenalty    (0–30)  monthly deduction vs salary
- *         + stabilityBonus      (0–20)  seniority
- *         - historyPenalty      (0–10)  previous loans
+ *         - loanRatioPenalty    (0-40)  amount vs max allowed
+ *         - deductionPenalty    (0-30)  monthly deduction vs salary
+ *         + stabilityBonus      (0-20)  seniority
+ *         - historyPenalty      (0-10)  previous loans
  */
 @Service
 public class LoanScoreEngine {
@@ -59,7 +59,7 @@ public class LoanScoreEngine {
         int score = 100;
         List<String> reasons = new ArrayList<>();
 
-        // ── Loan ratio penalty (0–40) ──────────────────────────────────────
+        // Loan ratio penalty (0-40)
         // How much of the 3× max are they requesting?
         BigDecimal maxAllowed   = salary.multiply(new BigDecimal("3"));
         double     loanRatio    = amount.divide(maxAllowed, 4, RoundingMode.HALF_UP).doubleValue();
@@ -79,7 +79,7 @@ public class LoanScoreEngine {
         }
         score -= loanPenalty;
 
-        // ── Deduction penalty (0–30) ───────────────────────────────────────
+        // Deduction penalty (0-30)
         // Total monthly deductions after this loan vs salary
         BigDecimal totalDeductions   = existingDed.add(installment);
         double     deductionRatio    = totalDeductions.divide(salary, 4, RoundingMode.HALF_UP).doubleValue();
@@ -101,7 +101,7 @@ public class LoanScoreEngine {
         }
         score -= deductionPenalty;
 
-        // ── Stability bonus (0–20) ─────────────────────────────────────────
+        // Stability bonus (0-20)
         int stabilityBonus = 0;
         if (person.getHireDate() != null) {
             long monthsEmployed = ChronoUnit.MONTHS.between(person.getHireDate(), LocalDate.now());
@@ -125,7 +125,7 @@ public class LoanScoreEngine {
         }
         score = Math.min(100, score + stabilityBonus);
 
-        // ── History penalty (0–10) ─────────────────────────────────────────
+        // History penalty (0-10)
         long pastLoans = loanRepo.findByUserOrderByRequestedAtDesc(user).stream()
                 .filter(l -> l.getStatus() == RequestStatus.APPROVED ||
                              l.getStatus() == RequestStatus.REJECTED)
@@ -141,11 +141,11 @@ public class LoanScoreEngine {
         score -= historyPenalty;
         score = Math.max(0, score);
 
-        // ── Recommendation ─────────────────────────────────────────────────
+        // Recommendation
         String recommendation;
         boolean meetingRequired;
         if (deductionRatio > 0.40) {
-            // Hard threshold — deductions too high
+            // Hard threshold - deductions too high
             recommendation  = "REJECT";
             meetingRequired = false;
             reasons.add("AUTO-REJECTED: monthly deductions would exceed 40% of salary. ");

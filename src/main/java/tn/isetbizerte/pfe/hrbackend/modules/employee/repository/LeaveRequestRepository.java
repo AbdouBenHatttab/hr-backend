@@ -18,7 +18,7 @@ public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, Long
 
     /**
      * Fetches a leave request with user AND person eagerly loaded in one query.
-     * Required for PDF generation — avoids LazyInitializationException.
+     * Required for PDF generation - avoids LazyInitializationException.
      */
     @Query("SELECT lr FROM LeaveRequest lr " +
            "JOIN FETCH lr.user u " +
@@ -113,7 +113,7 @@ public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, Long
     Page<LeaveRequest> findAllForHrOverview(Pageable pageable);
 
     /**
-     * Calendar — overlap date range for a specific user.
+     * Calendar - overlap date range for a specific user.
      * Includes leaves that cross the start/end boundaries.
      */
     @Query("SELECT lr FROM LeaveRequest lr " +
@@ -129,7 +129,7 @@ public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, Long
                                                          @Param("statuses") List<LeaveStatus> statuses);
 
     /**
-     * Calendar — overlap date range for a specific user id.
+     * Calendar - overlap date range for a specific user id.
      */
     @Query("SELECT lr FROM LeaveRequest lr " +
            "JOIN FETCH lr.user u " +
@@ -144,7 +144,7 @@ public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, Long
                                                            @Param("statuses") List<LeaveStatus> statuses);
 
     /**
-     * Calendar — overlap date range for a team.
+     * Calendar - overlap date range for a team.
      * Includes leaves that cross the start/end boundaries.
      */
     @Query("SELECT lr FROM LeaveRequest lr " +
@@ -160,7 +160,7 @@ public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, Long
                                                            @Param("statuses") List<LeaveStatus> statuses);
 
     /**
-     * Calendar — overlap date range for a team and specific user.
+     * Calendar - overlap date range for a team and specific user.
      */
     @Query("SELECT lr FROM LeaveRequest lr " +
            "JOIN FETCH lr.user u " +
@@ -177,7 +177,7 @@ public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, Long
                                                                     @Param("statuses") List<LeaveStatus> statuses);
 
     /**
-     * Calendar — overlap date range for all users (HR).
+     * Calendar - overlap date range for all users (HR).
      * Includes leaves that cross the start/end boundaries.
      */
     @Query("SELECT lr FROM LeaveRequest lr " +
@@ -191,7 +191,7 @@ public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, Long
                                                   @Param("statuses") List<LeaveStatus> statuses);
 
     /**
-     * Calendar — overlap date range for a specific user (HR filter).
+     * Calendar - overlap date range for a specific user (HR filter).
      */
     @Query("SELECT lr FROM LeaveRequest lr " +
            "JOIN FETCH lr.user u " +

@@ -233,6 +233,7 @@ public class HRService {
             throw new BadRequestException("Hire date is required.");
         }
 
+        // Validate the integrated HR setup before changing Keycloak or local user state.
         validateRoleSpecificSetup(user, newRole, request);
         Team employeeTeam = null;
         Team ledTeam = null;
@@ -436,7 +437,7 @@ public class HRService {
                     LocalDateTime.now()
             );
 
-            // Publish event to Kafka → Consumer will send email
+            // Publish event to Kafka; the consumer sends the email.
             kafkaEventProducer.publishUserRoleAssignedEvent(event);
             logger.info("Published UserRoleAssignedEvent to Kafka for user: {}", user.getUsername());
             return true;
@@ -668,7 +669,7 @@ public class HRService {
 
         if (user.getPerson() != null) {
             Person person = user.getPerson();
-            // Use HashMap instead of Map.of() — Map.of() throws NullPointerException on null values
+            // Use HashMap instead of Map.of() - Map.of() throws NullPointerException on null values
             Map<String, Object> personalInfo = new HashMap<>();
             personalInfo.put("firstName",       person.getFirstName()  != null ? person.getFirstName()  : "");
             personalInfo.put("lastName",        person.getLastName()   != null ? person.getLastName()   : "");

@@ -40,7 +40,7 @@ public class EmailNotificationService {
      */
     public void sendRoleAssignmentNotification(UserRoleAssignedEvent event) {
 
-        logger.info("📧 Sending welcome email to {}", event.getEmail());
+        logger.info("Sending welcome email to {}", event.getEmail());
 
         try {
 
@@ -71,12 +71,12 @@ public class EmailNotificationService {
 
             mailSender.send(message);
 
-            logger.info("✅ Email sent successfully to {}", event.getEmail());
+            logger.info("Email sent successfully to {}", event.getEmail());
 
         } catch (MailException e) {
-            logger.error("❌ Mail error sending to {} : {}", event.getEmail(), e.getMessage(), e);
+            logger.error("Mail error sending to {} : {}", event.getEmail(), e.getMessage(), e);
         } catch (Exception e) {
-            logger.error("❌ Unexpected error sending email to {} : {}", event.getEmail(), e.getMessage(), e);
+            logger.error("Unexpected error sending email to {} : {}", event.getEmail(), e.getMessage(), e);
         }
     }
 

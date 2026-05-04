@@ -42,10 +42,10 @@ public class KafkaEventProducer {
             logger.info("Enqueued UserRoleAssignedEvent for user: {}", event.getUsername());
 
         } catch (JsonProcessingException e) {
-            logger.error("❌ Error serializing event for user: {}: {}",
+            logger.error("Error serializing event for user: {}: {}",
                     event.getUsername(), e.getMessage());
         } catch (Exception e) {
-            logger.error("❌ Error enqueueing event for user: {}: {}",
+            logger.error("Error enqueueing event for user: {}: {}",
                     event.getUsername(), e.getMessage());
         }
     }

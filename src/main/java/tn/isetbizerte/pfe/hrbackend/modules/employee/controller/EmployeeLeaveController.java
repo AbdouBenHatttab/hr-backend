@@ -232,7 +232,7 @@ public class EmployeeLeaveController {
     }
 
     /**
-     * Get ALL leave requests — HR overview
+     * Get ALL leave requests - HR overview
      * GET /api/employee/leave/all
      */
     @PreAuthorize("hasRole('HR_MANAGER')")
@@ -257,7 +257,7 @@ public class EmployeeLeaveController {
     }
 
     /**
-     * Team Leader approves a leave request — only for their own team members
+     * Team Leader approves a leave request - only for their own team members
      * POST /api/employee/leave/{leaveId}/team-leader/approve
      */
     @PreAuthorize("hasRole('TEAM_LEADER')")
@@ -275,7 +275,7 @@ public class EmployeeLeaveController {
     }
 
     /**
-     * Team Leader rejects a leave request — only for their own team members
+     * Team Leader rejects a leave request - only for their own team members
      * POST /api/employee/leave/{leaveId}/team-leader/reject
      */
     @PreAuthorize("hasRole('TEAM_LEADER')")

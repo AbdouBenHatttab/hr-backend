@@ -23,7 +23,7 @@ public interface TeamRepository extends JpaRepository<Team, Long> {
 
     /**
      * Load a team with its leader AND leader's person in one query.
-     * Does NOT fetch members — use findByIdWithMembers separately.
+     * Does NOT fetch members - use findByIdWithMembers separately.
      */
     @Query("SELECT t FROM Team t " +
            "LEFT JOIN FETCH t.teamLeader tl " +
@@ -33,7 +33,7 @@ public interface TeamRepository extends JpaRepository<Team, Long> {
 
     /**
      * Load a team with its members AND their persons in one query.
-     * Does NOT fetch leader — use findByIdWithDetails separately.
+     * Does NOT fetch leader - use findByIdWithDetails separately.
      */
     @Query("SELECT DISTINCT t FROM Team t " +
            "LEFT JOIN FETCH t.members m " +
@@ -43,7 +43,7 @@ public interface TeamRepository extends JpaRepository<Team, Long> {
 
     /**
      * Find a team by team leader's Keycloak ID.
-     * Only fetches leader (no members) — used for TL auth checks.
+     * Only fetches leader (no members) - used for TL auth checks.
      */
     @Query("SELECT t FROM Team t " +
            "LEFT JOIN FETCH t.teamLeader tl " +
