@@ -12,10 +12,12 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import jakarta.ws.rs.core.Response;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 
 /**
  * Service for managing Keycloak roles via Admin API
@@ -195,6 +197,113 @@ public class KeycloakAdminService {
 
         } catch (Exception e) {
             logger.error("Failed to reset password for Keycloak user '{}'", keycloakUserId, e);
+            return false;
+        }
+    }
+
+    public String createUser(String username,
+                             String email,
+                             String firstName,
+                             String lastName,
+                             String password,
+                             boolean enabled,
+                             boolean emailVerified) {
+        try {
+            RealmResource realmResource = keycloak.realm(realm);
+            UsersResource usersResource = realmResource.users();
+
+            String existingId = findKeycloakUserIdByUsername(username);
+            if (existingId != null && !existingId.isBlank()) {
+                resetUserPassword(existingId, password);
+                setUserEnabled(existingId, enabled);
+                return existingId;
+            }
+
+            UserRepresentation user = new UserRepresentation();
+            user.setUsername(username);
+            user.setEmail(email);
+            user.setFirstName(firstName);
+            user.setLastName(lastName);
+            user.setEnabled(enabled);
+            user.setEmailVerified(emailVerified);
+
+            CredentialRepresentation credential = new CredentialRepresentation();
+            credential.setType(CredentialRepresentation.PASSWORD);
+            credential.setValue(password);
+            credential.setTemporary(false);
+            user.setCredentials(Collections.singletonList(credential));
+
+            try (Response response = usersResource.create(user)) {
+                if (response.getStatus() != Response.Status.CREATED.getStatusCode()) {
+                    logger.error("Failed to create Keycloak user '{}' in realm '{}'. Status={}",
+                            username, realm, response.getStatus());
+                    return null;
+                }
+            }
+
+            return findKeycloakUserIdByUsername(username);
+        } catch (Exception e) {
+            logger.error("Failed to create Keycloak user '{}' in realm '{}'", username, realm, e);
+            return null;
+        }
+    }
+
+    public boolean deleteUserById(String keycloakUserId) {
+        if (keycloakUserId == null || keycloakUserId.isBlank()) {
+            return true;
+        }
+        try {
+            Response response = keycloak.realm(realm).users().delete(keycloakUserId);
+            try (response) {
+                int status = response.getStatus();
+                if (status == Response.Status.NO_CONTENT.getStatusCode()
+                        || status == Response.Status.NOT_FOUND.getStatusCode()) {
+                    logger.info("Deleted Keycloak user '{}', status={}", keycloakUserId, status);
+                    return true;
+                }
+                logger.error("Failed to delete Keycloak user '{}'. Status={}", keycloakUserId, status);
+                return false;
+            }
+        } catch (Exception e) {
+            logger.error("Failed to delete Keycloak user '{}'", keycloakUserId, e);
+            return false;
+        }
+    }
+
+    public List<UserRepresentation> findUsersByUsernamePrefix(String prefix) {
+        if (prefix == null || prefix.isBlank()) {
+            return List.of();
+        }
+        try {
+            return keycloak.realm(realm).users().search(prefix, 0, 500).stream()
+                    .filter(user -> user.getUsername() != null && user.getUsername().startsWith(prefix))
+                    .toList();
+        } catch (Exception e) {
+            logger.error("Failed to find Keycloak users by prefix '{}'", prefix, e);
+            return List.of();
+        }
+    }
+
+    public boolean ensureRealmRolesExist(List<String> roleNames) {
+        try {
+            RealmResource realmResource = keycloak.realm(realm);
+            for (String roleName : roleNames) {
+                if (roleName == null || roleName.isBlank()) {
+                    continue;
+                }
+                if (resolveRealmRoleIgnoreCase(realmResource, roleName) != null) {
+                    continue;
+                }
+                RoleRepresentation role = new RoleRepresentation();
+                role.setName(roleName);
+                role.setDescription("Application role " + roleName);
+                realmResource.roles().create(role);
+                logger.info("Created missing Keycloak realm role '{}'", roleName);
+            }
+            return true;
+        } catch (Exception e) {
+            logger.error("Failed to ensure Keycloak realm roles exist: {}",
+                    Objects.toString(roleNames), e);
             return false;
         }
     }
