@@ -28,7 +28,8 @@ import java.util.stream.Collectors;
  *  1. Resolve the authenticated user's role.
  *  2. Build the safe context via AssistantContextBuilder.
  *  3. POST to FastAPI /assistant/chat using the dedicated aiServiceRestTemplate.
- *  4. Map the FastAPI response to the public AssistantChatResponse.
+ *  4. Map the FastAPI response to the public AssistantChatResponse — including
+ *     Phase 3.1 drafting fields (draft, draftType, draftFields, missingFields).
  *  5. Return a safe fallback if FastAPI is unreachable, times out, or errors.
  *
  * NEVER forwards the JWT token to FastAPI.
@@ -109,6 +110,9 @@ public class AssistantGatewayService {
     /**
      * Maps the internal AiServiceResponse to the public AssistantChatResponse.
      * Handles null responses from RestTemplate (e.g., FastAPI returned 204 or empty body).
+     *
+     * Phase 3.1: draft, draftType, draftFields, missingFields are passed through
+     * without modification. They are null / empty list for non-drafting responses.
      */
     private AssistantChatResponse toPublicResponse(AiServiceResponse aiResponse) {
         if (aiResponse == null) {
@@ -130,7 +134,12 @@ public class AssistantGatewayService {
                 aiResponse.warnings()  != null ? aiResponse.warnings()  : List.of(),
                 pages,
                 aiResponse.disclaimer() != null ? aiResponse.disclaimer() : DISCLAIMER,
-                aiResponse.aiGenerated()
+                aiResponse.aiGenerated(),
+                // Phase 3.1 drafting fields — null for non-drafting responses
+                aiResponse.draft(),
+                aiResponse.draftType(),
+                aiResponse.draftFields(),
+                aiResponse.missingFields() != null ? aiResponse.missingFields() : List.of()
         );
     }
 }
