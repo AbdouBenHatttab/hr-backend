@@ -57,6 +57,15 @@ class EmployeeLeaveServiceCriticalRulesTest {
 
     @BeforeEach
     void setUp() {
+        // Wire a real LeaveValidationService backed by the same mocks so that
+        // all existing validation tests continue to exercise real rule logic,
+        // not a mock. This preserves the full test coverage intent.
+        LeaveValidationService leaveValidationService = new LeaveValidationService(
+                workingDayService,
+                leaveBalanceService,
+                leaveRequestRepository
+        );
+
         service = new EmployeeLeaveService(
                 leaveRequestRepository,
                 userRepository,
@@ -67,7 +76,8 @@ class EmployeeLeaveServiceCriticalRulesTest {
                 requestEventProducer,
                 historyService,
                 leaveBalanceService,
-                workingDayService
+                workingDayService,
+                leaveValidationService
         );
         employee = new User("kc-employee", "employee");
         employee.setId(10L);
@@ -634,6 +644,10 @@ class EmployeeLeaveServiceCriticalRulesTest {
         verify(leaveBalanceService, never()).reserveForRequest(any(), any(), any(), anyInt());
         verify(leaveRequestRepository, never()).save(any());
     }
+
+    // -----------------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------------
 
     private LeaveRequest pendingLeave(Long id, User user) {
         LeaveRequest leave = new LeaveRequest();

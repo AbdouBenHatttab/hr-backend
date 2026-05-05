@@ -13,9 +13,15 @@ import org.springframework.web.bind.annotation.*;
 import tn.isetbizerte.pfe.hrbackend.modules.employee.dto.CreateLeaveRequestDto;
 import tn.isetbizerte.pfe.hrbackend.modules.employee.dto.LeaveDecisionRequestDto;
 import tn.isetbizerte.pfe.hrbackend.modules.employee.dto.LeaveBalanceDto;
+import tn.isetbizerte.pfe.hrbackend.modules.employee.dto.LeaveDraftValidationRequestDto;
+import tn.isetbizerte.pfe.hrbackend.modules.employee.dto.LeaveDraftValidationResponseDto;
 import tn.isetbizerte.pfe.hrbackend.modules.employee.dto.LeaveRequestResponseDto;
 import tn.isetbizerte.pfe.hrbackend.modules.employee.service.LeaveBalanceService;
 import tn.isetbizerte.pfe.hrbackend.modules.employee.service.EmployeeLeaveService;
+import tn.isetbizerte.pfe.hrbackend.modules.employee.service.LeaveValidationService;
+import tn.isetbizerte.pfe.hrbackend.common.exception.ResourceNotFoundException;
+import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
+import tn.isetbizerte.pfe.hrbackend.modules.user.repository.UserRepository;
 
 import java.util.HashMap;
 import java.util.List;
@@ -27,12 +33,56 @@ public class EmployeeLeaveController {
 
     private final EmployeeLeaveService employeeLeaveService;
     private final LeaveBalanceService leaveBalanceService;
+    private final LeaveValidationService leaveValidationService;
+    private final UserRepository userRepository;
 
     public EmployeeLeaveController(EmployeeLeaveService employeeLeaveService,
-                                   LeaveBalanceService leaveBalanceService) {
-        this.employeeLeaveService = employeeLeaveService;
-        this.leaveBalanceService = leaveBalanceService;
+                                   LeaveBalanceService leaveBalanceService,
+                                   LeaveValidationService leaveValidationService,
+                                   UserRepository userRepository) {
+        this.employeeLeaveService  = employeeLeaveService;
+        this.leaveBalanceService   = leaveBalanceService;
+        this.leaveValidationService = leaveValidationService;
+        this.userRepository        = userRepository;
     }
+
+    // -----------------------------------------------------------------------
+    // AI-assisted dry-run validation (Phase 3.2 — no side effects)
+    // -----------------------------------------------------------------------
+
+    /**
+     * Validate a leave draft without saving anything.
+     *
+     * Called by React after FastAPI extracts structured fields from the user's chat message.
+     * Spring Boot is the authority for all business rules (balance, holidays, overlaps, etc.).
+     *
+     * POST /api/employee/leave/validate-draft
+     * Roles: EMPLOYEE, TEAM_LEADER
+     *
+     * Guarantees:
+     * - No LeaveRequest row is created.
+     * - No balance is reserved or deducted.
+     * - No Kafka events are published.
+     * - No email is sent.
+     * - Always returns HTTP 200; valid=false signals validation failure.
+     */
+    @PreAuthorize("hasAnyRole('EMPLOYEE', 'TEAM_LEADER')")
+    @PostMapping("/validate-draft")
+    public ResponseEntity<LeaveDraftValidationResponseDto> validateDraft(
+            @RequestBody LeaveDraftValidationRequestDto request,
+            @AuthenticationPrincipal Jwt jwt
+    ) {
+        String keycloakId = jwt.getSubject();
+        User user = userRepository.findByKeycloakId(keycloakId)
+                .orElseThrow(() -> new ResourceNotFoundException("Authenticated user not found: " + keycloakId));
+
+        LeaveDraftValidationResponseDto result = leaveValidationService.validateDraft(user, request);
+        return ResponseEntity.ok(result);
+    }
+
+    // -----------------------------------------------------------------------
+    // Leave request submission
+    // -----------------------------------------------------------------------
 
     /**
      * Submit a new leave request
@@ -168,12 +218,6 @@ public class EmployeeLeaveController {
         return ResponseEntity.ok(response);
     }
 
-    /**
-     * Get pending leave requests.
-     * Team Leader sees ONLY their team's requests.
-     * HR Manager sees ALL pending requests.
-     * GET /api/employee/leave/pending
-     */
     /**
      * Team Leader sees only their team's PENDING requests.
      * HR uses GET /all instead.

@@ -40,11 +40,6 @@ import java.util.stream.Collectors;
 @Service
 @Slf4j
 public class EmployeeLeaveService {
-    private static final int MAX_LEAVE_DAYS_PER_REQUEST = 30;
-    private static final List<LeaveStatus> OVERLAP_BLOCKING_STATUSES = List.of(
-            LeaveStatus.PENDING,
-            LeaveStatus.APPROVED
-    );
 
     private final LeaveRequestRepository leaveRequestRepository;
     private final UserRepository          userRepository;
@@ -56,6 +51,7 @@ public class EmployeeLeaveService {
     private final RequestHistoryService   historyService;
     private final LeaveBalanceService      leaveBalanceService;
     private final WorkingDayService        workingDayService;
+    private final LeaveValidationService   leaveValidationService;
 
     public EmployeeLeaveService(
             LeaveRequestRepository leaveRequestRepository,
@@ -67,7 +63,8 @@ public class EmployeeLeaveService {
             RequestEventProducer requestEventProducer,
             RequestHistoryService historyService,
             LeaveBalanceService leaveBalanceService,
-            WorkingDayService workingDayService
+            WorkingDayService workingDayService,
+            LeaveValidationService leaveValidationService
     ) {
         this.leaveRequestRepository = leaveRequestRepository;
         this.userRepository         = userRepository;
@@ -79,6 +76,7 @@ public class EmployeeLeaveService {
         this.historyService         = historyService;
         this.leaveBalanceService    = leaveBalanceService;
         this.workingDayService      = workingDayService;
+        this.leaveValidationService = leaveValidationService;
     }
 
     /**
@@ -219,19 +217,39 @@ public class EmployeeLeaveService {
                 .orElseThrow(() -> new ResourceNotFoundException("User not found: " + identifier));
     }
 
+    // -----------------------------------------------------------------------
+    // Private validators — delegate to LeaveValidationService (single source of truth)
+    // -----------------------------------------------------------------------
+
     private void validateTeamSetupForLeaveSubmission(User user) {
-        if (user == null || user.getRole() != TypeRole.EMPLOYEE) {
-            return;
-        }
-
-        if (user.getTeam() == null) {
-            throw new BadRequestException("You must be assigned to a team before submitting a leave request.");
-        }
-
-        if (user.getTeam().getTeamLeader() == null) {
-            throw new BadRequestException("Your team has no Team Leader assigned. Ask HR to complete team setup before submitting leave.");
-        }
+        leaveValidationService.throwingValidateTeamSetup(user);
     }
+
+    private int validateLeaveRequestDates(LocalDate startDate, LocalDate endDate) {
+        return leaveValidationService.throwingValidateDates(startDate, endDate);
+    }
+
+    private void validateNoOverlappingLeave(User user, LocalDate startDate, LocalDate endDate) {
+        leaveValidationService.throwingValidateNoOverlap(user, startDate, endDate);
+    }
+
+    private void validateNoOverlappingLeave(User user, LocalDate startDate, LocalDate endDate, Long excludedLeaveId) {
+        leaveValidationService.throwingValidateNoOverlap(user, startDate, endDate, excludedLeaveId);
+    }
+
+    private void validateSickLeaveCreationRules(CreateLeaveRequestDto dto) {
+        if (dto.getLeaveType() != LeaveType.SICK) return;
+        leaveValidationService.throwingValidateSickLeave(dto.getStartDate());
+    }
+
+    private void validateAnnualLeaveCreationRules(User user, CreateLeaveRequestDto dto, int requestedWorkingDays) {
+        if (dto.getLeaveType() != LeaveType.ANNUAL) return;
+        leaveValidationService.throwingValidateAnnualLeave(user, dto.getStartDate(), requestedWorkingDays);
+    }
+
+    // -----------------------------------------------------------------------
+    // Decision flow
+    // -----------------------------------------------------------------------
 
     @CacheEvict(value = "calendarLeaves", allEntries = true)
     @Transactional
@@ -367,7 +385,6 @@ public class EmployeeLeaveService {
 
         String fromStage = computeApprovalStage(leave);
 
-        // Validate status
         // Validate Team Leader has a team
         Team leaderTeam = teamRepository.findByTeamLeaderKeycloakId(leaderKeycloakId)
                 .orElseThrow(() -> new ResourceNotFoundException(
@@ -559,12 +576,7 @@ public class EmployeeLeaveService {
             if (leave.getVerificationToken() == null) {
                 leave.setVerificationToken(UUID.randomUUID().toString());
             }
-            // Phase 6 - update total_leave_taken_last_12_months on the Person
             if (leave.getUser() != null && leave.getUser().getPerson() != null) {
-                var person = leave.getUser().getPerson();
-                int current = (person.getCurrentMonthlyDeductions() != null) ? 0 : 0; // placeholder
-                // We track leave on the LeaveRequest itself, not on Person
-                // The repository query sumLeaveDaysSince handles the 12-month window dynamically
                 log.info("Leave request ID {} fully APPROVED — {} day(s) added to employee record",
                         leave.getId(), leave.getNumberOfDays());
             }
@@ -612,91 +624,6 @@ public class EmployeeLeaveService {
             sb.append(Character.toUpperCase(w.charAt(0))).append(w.substring(1).toLowerCase());
         }
         return sb.toString();
-    }
-
-    /**
-     * Validate leave request dates
-     */
-    private int validateLeaveRequestDates(LocalDate startDate, LocalDate endDate) {
-        if (startDate.isAfter(endDate)) {
-            throw new BadRequestException("Start date must be before or equal to end date");
-        }
-
-        if (!workingDayService.isWorkingDay(startDate)) {
-            throw new BadRequestException("Leave cannot start on a weekend or holiday.");
-        }
-
-        if (!workingDayService.isWorkingDay(endDate)) {
-            throw new BadRequestException("Leave cannot end on a weekend or holiday.");
-        }
-
-        int workingDays = workingDayService.countWorkingDays(startDate, endDate);
-        if (workingDays <= 0) {
-            throw new BadRequestException("Leave request must include at least one working day.");
-        }
-
-        if (workingDays > MAX_LEAVE_DAYS_PER_REQUEST) {
-            throw new BadRequestException(
-                    String.format("Leave request cannot exceed %d days", MAX_LEAVE_DAYS_PER_REQUEST)
-            );
-        }
-        return workingDays;
-    }
-
-    private void validateNoOverlappingLeave(User user, LocalDate startDate, LocalDate endDate) {
-        validateNoOverlappingLeave(user, startDate, endDate, null);
-    }
-
-    private void validateNoOverlappingLeave(User user, LocalDate startDate, LocalDate endDate, Long excludedLeaveId) {
-        List<LeaveRequest> overlaps = leaveRequestRepository.findByUserAndDateRangeAndStatusIn(
-                user,
-                startDate,
-                endDate,
-                OVERLAP_BLOCKING_STATUSES
-        );
-        if (excludedLeaveId != null) {
-            overlaps = overlaps.stream()
-                    .filter(leave -> leave.getId() == null || !leave.getId().equals(excludedLeaveId))
-                    .collect(Collectors.toList());
-        }
-        if (overlaps.isEmpty()) return;
-
-        LeaveRequest overlap = overlaps.get(0);
-        throw new BadRequestException(String.format(
-                "This leave request overlaps with an existing %s leave request from %s to %s.",
-                overlap.getStatus().name().toLowerCase(),
-                overlap.getStartDate(),
-                overlap.getEndDate()
-        ));
-    }
-
-    private void validateAnnualLeaveCreationRules(User user, CreateLeaveRequestDto dto, int requestedWorkingDays) {
-        if (dto.getLeaveType() != LeaveType.ANNUAL) return;
-
-        if (!dto.getStartDate().isAfter(LocalDate.now())) {
-            throw new BadRequestException("Annual leave must be requested at least 1 day in advance.");
-        }
-
-        if (dto.getStartDate().isAfter(LocalDate.now().plusMonths(6))) {
-            throw new BadRequestException("Annual leave cannot be requested more than 6 months in advance.");
-        }
-
-        BigDecimal availableDays = leaveBalanceService.getAvailableDays(user, LeaveType.ANNUAL, dto.getStartDate());
-        if (BigDecimal.valueOf(requestedWorkingDays).compareTo(availableDays) > 0) {
-            throw new BadRequestException(String.format(
-                    "Insufficient annual leave balance. Requested %d working day(s), but only %s day(s) are available.",
-                    requestedWorkingDays,
-                    availableDays.stripTrailingZeros().toPlainString()
-            ));
-        }
-    }
-
-    private void validateSickLeaveCreationRules(CreateLeaveRequestDto dto) {
-        if (dto.getLeaveType() != LeaveType.SICK) return;
-
-        if (dto.getStartDate().isAfter(LocalDate.now().plusDays(7))) {
-            throw new BadRequestException("Sick leave cannot be requested more than 7 days in advance.");
-        }
     }
 
     /**
