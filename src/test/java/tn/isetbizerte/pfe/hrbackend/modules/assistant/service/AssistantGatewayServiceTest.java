@@ -10,6 +10,7 @@ import tn.isetbizerte.pfe.hrbackend.modules.assistant.dto.AiServiceRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.assistant.dto.AiServiceResponse;
 import tn.isetbizerte.pfe.hrbackend.modules.assistant.dto.AssistantChatRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.assistant.dto.AssistantChatResponse;
+import tn.isetbizerte.pfe.hrbackend.modules.assistant.dto.SafeAssistantContext;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
 import tn.isetbizerte.pfe.hrbackend.modules.user.service.AuthenticatedUserResolver;
 
@@ -42,6 +43,10 @@ class AssistantGatewayServiceTest {
 
     private static final String BASE_URL = "http://localhost:8000";
 
+    /** Empty typed context used as a safe stub in gateway-level tests. */
+    private static final SafeAssistantContext EMPTY_CONTEXT =
+            new SafeAssistantContext(null, null, null, null);
+
     @BeforeEach
     void setUp() {
         aiServiceRestTemplate      = mock(RestTemplate.class);
@@ -61,7 +66,8 @@ class AssistantGatewayServiceTest {
         Jwt jwt = jwt("kc-emp");
         User user = user(TypeRole.EMPLOYEE);
         when(authenticatedUserResolver.require(jwt)).thenReturn(user);
-        when(contextBuilder.build(jwt)).thenReturn(Map.of("displayName", "Ahmed Ben Ali"));
+        when(contextBuilder.build(jwt)).thenReturn(
+                new SafeAssistantContext("Ahmed Ben Ali", null, null, null));
 
         AiServiceResponse aiResponse = new AiServiceResponse(
                 "Your leave balance is 12 days.",
@@ -69,7 +75,8 @@ class AssistantGatewayServiceTest {
                 List.of(),
                 List.of(new AiServiceResponse.RelatedPage("Leave Balance", "/leave/balance")),
                 "The assistant provides guidance only.",
-                true
+                true,
+                null, null, null, List.of()
         );
 
         when(aiServiceRestTemplate.postForObject(
@@ -96,7 +103,7 @@ class AssistantGatewayServiceTest {
         Jwt jwt = jwt("kc-emp");
         User user = user(TypeRole.EMPLOYEE);
         when(authenticatedUserResolver.require(jwt)).thenReturn(user);
-        when(contextBuilder.build(jwt)).thenReturn(Map.of());
+        when(contextBuilder.build(jwt)).thenReturn(EMPTY_CONTEXT);
 
         // Simulates a connection refused / timeout
         when(aiServiceRestTemplate.postForObject(anyString(), any(), eq(AiServiceResponse.class)))
@@ -118,7 +125,7 @@ class AssistantGatewayServiceTest {
         Jwt jwt = jwt("kc-emp");
         User user = user(TypeRole.EMPLOYEE);
         when(authenticatedUserResolver.require(jwt)).thenReturn(user);
-        when(contextBuilder.build(jwt)).thenReturn(Map.of());
+        when(contextBuilder.build(jwt)).thenReturn(EMPTY_CONTEXT);
 
         when(aiServiceRestTemplate.postForObject(anyString(), any(), eq(AiServiceResponse.class)))
                 .thenReturn(null);
@@ -140,10 +147,11 @@ class AssistantGatewayServiceTest {
         Jwt jwt = jwt("kc-emp");
         User user = user(TypeRole.EMPLOYEE);
         when(authenticatedUserResolver.require(jwt)).thenReturn(user);
-        when(contextBuilder.build(jwt)).thenReturn(Map.of());
+        when(contextBuilder.build(jwt)).thenReturn(EMPTY_CONTEXT);
 
         AiServiceResponse aiResponse = new AiServiceResponse(
-                "Guidance.", List.of(), List.of(), List.of(), "Disclaimer.", true
+                "Guidance.", List.of(), List.of(), List.of(), "Disclaimer.", true,
+                null, null, null, List.of()
         );
 
         when(aiServiceRestTemplate.postForObject(anyString(), any(AiServiceRequest.class), eq(AiServiceResponse.class)))

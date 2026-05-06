@@ -49,6 +49,24 @@ public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, Long
     boolean existsPendingTeamLeaderApprovalByUserId(@Param("userId") Long userId);
 
     /**
+     * Count leave requests in a given team still awaiting the Team Leader's decision.
+     * Safe for the assistant context — returns a scalar count, no entity data.
+     *
+     * Excludes the leader's own requests and any nested TEAM_LEADER-role users
+     * so the count is scoped to regular members only.
+     */
+    @Query("SELECT COUNT(lr) FROM LeaveRequest lr " +
+           "WHERE lr.user.team.id = :teamId " +
+           "AND lr.status = 'PENDING' " +
+           "AND lr.teamLeaderDecision = 'PENDING' " +
+           "AND lr.user.keycloakId <> :leaderKeycloakId " +
+           "AND lr.user.role <> 'TEAM_LEADER'")
+    long countPendingTeamLeaderApprovalsByTeamId(
+            @Param("teamId") Long teamId,
+            @Param("leaderKeycloakId") String leaderKeycloakId
+    );
+
+    /**
      * Get all pending leave requests for employees in a specific team.
      * Used by Team Leader to see only their team's requests.
      */

@@ -15,8 +15,9 @@ import tn.isetbizerte.pfe.hrbackend.modules.assistant.dto.AssistantChatResponse;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
 import tn.isetbizerte.pfe.hrbackend.modules.user.service.AuthenticatedUserResolver;
 
+import tn.isetbizerte.pfe.hrbackend.modules.assistant.dto.SafeAssistantContext;
+
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -71,7 +72,7 @@ public class AssistantGatewayService {
             String role = user.getRole().name();
 
             // 2. Build safe context (no tokens, no private data, no entities)
-            Map<String, Object> context = contextBuilder.build(jwt);
+            SafeAssistantContext context = contextBuilder.build(jwt);
 
             // 3. Assemble the internal request sent to FastAPI
             AiServiceRequest aiRequest = new AiServiceRequest(

@@ -7,25 +7,28 @@ import org.springframework.stereotype.Service;
 import tn.isetbizerte.pfe.hrbackend.common.enums.LeaveType;
 import tn.isetbizerte.pfe.hrbackend.common.enums.TypeRole;
 import tn.isetbizerte.pfe.hrbackend.common.exception.ResourceNotFoundException;
+import tn.isetbizerte.pfe.hrbackend.modules.assistant.dto.SafeAssistantContext;
 import tn.isetbizerte.pfe.hrbackend.modules.employee.dto.LeaveBalanceDto;
+import tn.isetbizerte.pfe.hrbackend.modules.employee.repository.LeaveRequestRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.employee.service.LeaveBalanceService;
 import tn.isetbizerte.pfe.hrbackend.modules.hr.dto.RequestActionSummary;
 import tn.isetbizerte.pfe.hrbackend.modules.hr.service.DashboardRequestSummaryService;
-import tn.isetbizerte.pfe.hrbackend.modules.team.service.TeamService;
+import tn.isetbizerte.pfe.hrbackend.modules.team.entity.Team;
+import tn.isetbizerte.pfe.hrbackend.modules.team.repository.TeamRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.Person;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
+import tn.isetbizerte.pfe.hrbackend.modules.user.repository.UserRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.user.service.AuthenticatedUserResolver;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * AssistantContextBuilder
  * -----------------------
- * Builds a safe, role-scoped context object to be forwarded to the FastAPI AI service.
+ * Builds a typed, safe, role-scoped {@link SafeAssistantContext} to be forwarded
+ * to the FastAPI AI service.
  *
  * STRICT DATA RULES — the following are NEVER included in the output:
  *   - JWT access token or refresh token
@@ -33,15 +36,20 @@ import java.util.Map;
  *   - Keycloak realm name, client ID, or secrets
  *   - Password fields of any kind
  *   - Salary or monthly deduction amounts
- *   - Birth date, home address, phone number
+ *   - Birth date, home address, phone number, email
  *   - Avatar photo (can be megabytes of base64)
- *   - Full employee list or raw JPA entity data
+ *   - Full employee list, team member lists, or raw JPA entity data
+ *   - maritalStatus, numberOfChildren, login history, document file paths
  *
  * What IS included depends on role:
- *   All roles         : displayName (firstName + lastName if available)
- *   EMPLOYEE          : annual leave available days, open request counts
- *   TEAM_LEADER       : same as EMPLOYEE + team name and member count (graceful if no team)
- *   HR_MANAGER        : total pending platform actions count only
+ *   All roles     : displayName (firstName + lastName only — no email, no ID)
+ *   EMPLOYEE      : annual + sick leave balances, full open request breakdown
+ *   TEAM_LEADER   : same as EMPLOYEE + safe team summary + pending TL approvals count
+ *   HR_MANAGER    : platform-wide pending action counts + new-user onboarding count
+ *   NEW_USER      : empty context (safety backstop — endpoint blocks this role)
+ *
+ * All optional context failures are caught and logged; a partial context is always
+ * safer to forward than throwing an error and blocking the user.
  */
 @Service
 public class AssistantContextBuilder {
@@ -51,133 +59,219 @@ public class AssistantContextBuilder {
     private final AuthenticatedUserResolver authenticatedUserResolver;
     private final LeaveBalanceService leaveBalanceService;
     private final DashboardRequestSummaryService dashboardRequestSummaryService;
-    private final TeamService teamService;
+    private final TeamRepository teamRepository;
+    private final LeaveRequestRepository leaveRequestRepository;
+    private final UserRepository userRepository;
 
     public AssistantContextBuilder(
             AuthenticatedUserResolver authenticatedUserResolver,
             LeaveBalanceService leaveBalanceService,
             DashboardRequestSummaryService dashboardRequestSummaryService,
-            TeamService teamService
+            TeamRepository teamRepository,
+            LeaveRequestRepository leaveRequestRepository,
+            UserRepository userRepository
     ) {
         this.authenticatedUserResolver = authenticatedUserResolver;
         this.leaveBalanceService = leaveBalanceService;
         this.dashboardRequestSummaryService = dashboardRequestSummaryService;
-        this.teamService = teamService;
+        this.teamRepository = teamRepository;
+        this.leaveRequestRepository = leaveRequestRepository;
+        this.userRepository = userRepository;
     }
 
     /**
-     * Build and return the safe context map for the given JWT.
-     * Never throws on optional context failures — partial context is always safe to send.
+     * Build and return the typed safe context for the given JWT.
+     * Never throws on optional context failures — partial context is always safe to forward.
      */
-    public Map<String, Object> build(Jwt jwt) {
+    public SafeAssistantContext build(Jwt jwt) {
         User user = authenticatedUserResolver.require(jwt);
         TypeRole role = user.getRole();
         String keycloakId = jwt.getSubject();
 
-        Map<String, Object> context = new HashMap<>();
+        String displayName = resolveDisplayName(user.getPerson());
 
-        // --- Display name (always included when Person data is available) ---
-        addDisplayName(context, user.getPerson());
-
-        // --- Role-specific context ---
-        switch (role) {
-            case EMPLOYEE -> {
-                addLeaveContext(context, keycloakId);
-                addRequestContext(context, keycloakId);
-            }
-            case TEAM_LEADER -> {
-                addLeaveContext(context, keycloakId);
-                addRequestContext(context, keycloakId);
-                addTeamContext(context, keycloakId);
-            }
-            case HR_MANAGER -> {
-                addHrContext(context);
-            }
-            default -> {
-                // NEW_USER: no context — should not reach here (blocked at SecurityConfig)
-            }
-        }
-
-        return context;
+        return switch (role) {
+            case EMPLOYEE -> new SafeAssistantContext(
+                    displayName,
+                    buildEmployeeContext(keycloakId),
+                    null,
+                    null
+            );
+            case TEAM_LEADER -> new SafeAssistantContext(
+                    displayName,
+                    buildEmployeeContext(keycloakId),
+                    buildTeamContext(keycloakId),
+                    null
+            );
+            case HR_MANAGER -> new SafeAssistantContext(
+                    displayName,
+                    null,
+                    null,
+                    buildHrContext()
+            );
+            default -> // NEW_USER: endpoint blocks this role; empty context as safety backstop
+                    new SafeAssistantContext(null, null, null, null);
+        };
     }
 
     // ---------------------------------------------------------------------------
-    // Private builders
+    // Display name
     // ---------------------------------------------------------------------------
 
-    private void addDisplayName(Map<String, Object> context, Person person) {
-        if (person == null) return;
-        String firstName = person.getFirstName();
-        String lastName  = person.getLastName();
-        if (firstName != null && lastName != null) {
-            context.put("displayName", firstName + " " + lastName);
-        } else if (firstName != null) {
-            context.put("displayName", firstName);
+    /**
+     * Returns "First Last" when both parts are present, "First" when only the first
+     * name is available, or null when no Person exists or both name parts are missing.
+     * Never returns email, username, or any identifier.
+     */
+    private String resolveDisplayName(Person person) {
+        if (person == null) return null;
+        String first = person.getFirstName();
+        String last  = person.getLastName();
+        if (first != null && !first.isBlank() && last != null && !last.isBlank()) {
+            return first.trim() + " " + last.trim();
         }
+        if (first != null && !first.isBlank()) return first.trim();
+        return null;
     }
 
-    private void addLeaveContext(Map<String, Object> context, String keycloakId) {
+    // ---------------------------------------------------------------------------
+    // EMPLOYEE context
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Builds the personal employee context. Failures on individual sub-sections
+     * are caught independently so a leave-service outage does not wipe request counts.
+     */
+    private SafeAssistantContext.EmployeeContext buildEmployeeContext(String keycloakId) {
+        Integer annualDays = null;
+        Integer sickDays   = null;
+
         try {
             int year = LocalDate.now().getYear();
             List<LeaveBalanceDto> balances = leaveBalanceService.getMyBalances(keycloakId, year);
 
-            BigDecimal annualAvailable = balances.stream()
+            annualDays = balances.stream()
                     .filter(b -> LeaveType.ANNUAL.equals(b.getLeaveType()))
                     .findFirst()
                     .map(LeaveBalanceDto::getAvailableDays)
+                    .filter(v -> v != null)
+                    .map(BigDecimal::intValue)
                     .orElse(null);
 
-            if (annualAvailable != null) {
-                Map<String, Object> leaveCtx = new HashMap<>();
-                leaveCtx.put("annualAvailableDays", annualAvailable.intValue());
-                context.put("leave", leaveCtx);
-            }
-        } catch (Exception e) {
-            // Leave context is optional — log and continue
-            logger.warn("Could not load leave context for assistant: {}", e.getMessage());
-        }
-    }
+            sickDays = balances.stream()
+                    .filter(b -> LeaveType.SICK.equals(b.getLeaveType()))
+                    .findFirst()
+                    .map(LeaveBalanceDto::getAvailableDays)
+                    .filter(v -> v != null)
+                    .map(BigDecimal::intValue)
+                    .orElse(null);
 
-    private void addRequestContext(Map<String, Object> context, String keycloakId) {
+        } catch (Exception e) {
+            logger.warn("Could not load leave balances for assistant employee context: {}", e.getMessage());
+        }
+
+        long total = 0, leavesPending = 0, documentsPending = 0, loansPending = 0, authorizationsPending = 0;
         try {
             RequestActionSummary summary =
                     dashboardRequestSummaryService.getEmployeeOpenRequestsSummary(keycloakId);
-
-            Map<String, Object> requestsCtx = new HashMap<>();
-            requestsCtx.put("totalPending",  summary.total());
-            requestsCtx.put("leavesPending", summary.leavesPending());
-            context.put("requests", requestsCtx);
+            total                = summary.total();
+            leavesPending        = summary.leavesPending();
+            documentsPending     = summary.documentsPending();
+            loansPending         = summary.loansPending() + summary.loansAwaitingFile();
+            authorizationsPending = summary.authorizationsPending();
         } catch (Exception e) {
-            logger.warn("Could not load request context for assistant: {}", e.getMessage());
+            logger.warn("Could not load request summary for assistant employee context: {}", e.getMessage());
         }
+
+        return new SafeAssistantContext.EmployeeContext(
+                annualDays,
+                sickDays,
+                total,
+                leavesPending,
+                documentsPending,
+                loansPending,
+                authorizationsPending
+        );
     }
 
-    private void addTeamContext(Map<String, Object> context, String keycloakId) {
-        try {
-            Map<String, Object> team = teamService.getMyTeam(keycloakId);
+    // ---------------------------------------------------------------------------
+    // TEAM_LEADER team context
+    // ---------------------------------------------------------------------------
 
-            Map<String, Object> teamCtx = new HashMap<>();
-            teamCtx.put("teamName",    team.get("name"));
-            teamCtx.put("memberCount", team.get("memberCount"));
-            context.put("team", teamCtx);
+    /**
+     * Builds a safe team summary. Returns a TeamContext with null sub-fields when
+     * no team is assigned yet (valid state for a newly promoted Team Leader).
+     *
+     * NEVER reads TeamService.getMyTeam() — that map carries member personalInfo.
+     * Reads directly from TeamRepository (name only) and two safe count queries.
+     */
+    private SafeAssistantContext.TeamContext buildTeamContext(String keycloakId) {
+        try {
+            var teamOpt = teamRepository.findByTeamLeaderKeycloakId(keycloakId);
+            if (teamOpt.isEmpty()) {
+                logger.debug("Team Leader {} has no team assigned; omitting team sub-fields.", keycloakId);
+                return new SafeAssistantContext.TeamContext(null, null, 0L);
+            }
+
+            Team team = teamOpt.get();
+            Long teamId   = team.getId();
+            String teamName = team.getName();
+
+            // Safe scalar count — no entity data
+            int memberCount = (int) userRepository.countByTeamId(teamId);
+
+            // Safe scalar count — added in this step to LeaveRequestRepository
+            long pendingApprovals = leaveRequestRepository
+                    .countPendingTeamLeaderApprovalsByTeamId(teamId, keycloakId);
+
+            return new SafeAssistantContext.TeamContext(teamName, memberCount, pendingApprovals);
+
         } catch (ResourceNotFoundException e) {
-            // Team Leader may not yet have an assigned team — this is valid
-            logger.debug("Team Leader has no team assigned; omitting team context from assistant.");
+            logger.debug("Team Leader has no team assigned; returning empty team context.");
+            return new SafeAssistantContext.TeamContext(null, null, 0L);
         } catch (Exception e) {
             logger.warn("Could not load team context for assistant: {}", e.getMessage());
+            return new SafeAssistantContext.TeamContext(null, null, 0L);
         }
     }
 
-    private void addHrContext(Map<String, Object> context) {
+    // ---------------------------------------------------------------------------
+    // HR_MANAGER context
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Builds the HR management context using only aggregate counts.
+     * newUsersPendingApproval uses UserRepository.countByRole() — a safe scalar.
+     */
+    private SafeAssistantContext.HrContext buildHrContext() {
+        long totalPendingActions = 0, leavesPending = 0, documentsPending = 0,
+                loansPending = 0, authorizationsPending = 0;
         try {
             RequestActionSummary summary =
                     dashboardRequestSummaryService.getHrRequestActionSummary();
-
-            Map<String, Object> hrCtx = new HashMap<>();
-            hrCtx.put("totalPendingActions", summary.total());
-            context.put("hr", hrCtx);
+            totalPendingActions   = summary.total();
+            leavesPending         = summary.leavesPending();
+            documentsPending      = summary.documentsPending();
+            loansPending          = summary.loansPending() + summary.loansAwaitingFile();
+            authorizationsPending = summary.authorizationsPending();
         } catch (Exception e) {
-            logger.warn("Could not load HR context for assistant: {}", e.getMessage());
+            logger.warn("Could not load HR request action summary for assistant: {}", e.getMessage());
         }
+
+        long newUsersPending = 0;
+        try {
+            newUsersPending = userRepository.countByRole(TypeRole.NEW_USER);
+        } catch (Exception e) {
+            logger.warn("Could not load new-users-pending count for assistant: {}", e.getMessage());
+        }
+
+        return new SafeAssistantContext.HrContext(
+                totalPendingActions,
+                leavesPending,
+                documentsPending,
+                loansPending,
+                authorizationsPending,
+                newUsersPending
+        );
     }
 }
