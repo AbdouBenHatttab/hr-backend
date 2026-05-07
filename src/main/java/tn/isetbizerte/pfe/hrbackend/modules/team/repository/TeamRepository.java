@@ -50,4 +50,14 @@ public interface TeamRepository extends JpaRepository<Team, Long> {
            "LEFT JOIN FETCH tl.person " +
            "WHERE tl.keycloakId = :keycloakId")
     Optional<Team> findByTeamLeaderKeycloakId(@Param("keycloakId") String keycloakId);
+
+    /**
+     * Find a team led by the given local User id (teams.leader_id -> users.id).
+     * Only fetches leader (no members) - used for TL auth checks.
+     */
+    @Query("SELECT t FROM Team t " +
+           "LEFT JOIN FETCH t.teamLeader tl " +
+           "LEFT JOIN FETCH tl.person " +
+           "WHERE tl.id = :leaderId")
+    Optional<Team> findByTeamLeaderId(@Param("leaderId") Long leaderId);
 }
