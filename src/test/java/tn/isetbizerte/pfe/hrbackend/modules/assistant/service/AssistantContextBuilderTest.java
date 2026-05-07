@@ -105,7 +105,7 @@ class AssistantContextBuilderTest {
         User user = userWithPerson(TypeRole.EMPLOYEE, "Ahmed", "Ben Ali");
         when(authenticatedUserResolver.require(jwt)).thenReturn(user);
         stubLeaveBalances("kc-emp", 12, 5);
-        stubEmployeeRequests("kc-emp", 5, 2, 1, 1, 1);
+        stubEmployeeRequests("kc-emp", 5, 2, 1, 0L, 1, 1);
 
         SafeAssistantContext ctx = contextBuilder.build(jwt);
 
@@ -118,7 +118,8 @@ class AssistantContextBuilderTest {
         User user = userWithPerson(TypeRole.EMPLOYEE, "Ahmed", "Ben Ali");
         when(authenticatedUserResolver.require(jwt)).thenReturn(user);
         stubLeaveBalances("kc-emp", 15, 8);
-        stubEmployeeRequests("kc-emp", 7, 3, 2, 1, 1);
+        // total=7: leaves(3) + docs(2) + docsAwaiting(0) + loans(1) + auths(1) = 7
+        stubEmployeeRequests("kc-emp", 7, 3, 2, 0L, 1, 1);
 
         SafeAssistantContext ctx = contextBuilder.build(jwt);
 
@@ -128,6 +129,7 @@ class AssistantContextBuilderTest {
         assertThat(ctx.employee().totalPendingRequests()).isEqualTo(7L);
         assertThat(ctx.employee().leavesPending()).isEqualTo(3L);
         assertThat(ctx.employee().documentsPending()).isEqualTo(2L);
+        assertThat(ctx.employee().documentsAwaitingFile()).isEqualTo(0L);
         assertThat(ctx.employee().loansPending()).isEqualTo(1L);
         assertThat(ctx.employee().authorizationsPending()).isEqualTo(1L);
     }
@@ -138,7 +140,7 @@ class AssistantContextBuilderTest {
         User user = userWithPerson(TypeRole.EMPLOYEE, "Ahmed", "Ben Ali");
         when(authenticatedUserResolver.require(jwt)).thenReturn(user);
         stubLeaveBalances("kc-emp", 10, 5);
-        stubEmployeeRequests("kc-emp", 0, 0, 0, 0, 0);
+        stubEmployeeRequests("kc-emp", 0, 0, 0, 0L, 0, 0);
 
         SafeAssistantContext ctx = contextBuilder.build(jwt);
 
@@ -156,7 +158,7 @@ class AssistantContextBuilderTest {
         User user = userWithPerson(TypeRole.EMPLOYEE, "Ahmed", "Ben Ali");
         when(authenticatedUserResolver.require(jwt)).thenReturn(user);
         stubLeaveBalances("kc-emp", 10, 5);
-        stubEmployeeRequests("kc-emp", 0, 0, 0, 0, 0);
+        stubEmployeeRequests("kc-emp", 0, 0, 0, 0L, 0, 0);
 
         SafeAssistantContext ctx = contextBuilder.build(jwt);
         String json = mapper.writeValueAsString(ctx);
@@ -178,7 +180,7 @@ class AssistantContextBuilderTest {
         User user = userWithPerson(TypeRole.TEAM_LEADER, "Sami", "Trabelsi");
         when(authenticatedUserResolver.require(jwt)).thenReturn(user);
         stubLeaveBalances("kc-lead", 8, 3);
-        stubEmployeeRequests("kc-lead", 2, 1, 0, 0, 1);
+        stubEmployeeRequests("kc-lead", 2, 1, 0, 0L, 0, 1);
         stubTeam("kc-lead", 42L, "Backend Squad", 5, 3);
 
         SafeAssistantContext ctx = contextBuilder.build(jwt);
@@ -204,7 +206,7 @@ class AssistantContextBuilderTest {
         User user = userWithPerson(TypeRole.TEAM_LEADER, "Sami", "Trabelsi");
         when(authenticatedUserResolver.require(jwt)).thenReturn(user);
         stubLeaveBalances("kc-lead", 8, 3);
-        stubEmployeeRequests("kc-lead", 0, 0, 0, 0, 0);
+        stubEmployeeRequests("kc-lead", 0, 0, 0, 0L, 0, 0);
         when(teamRepository.findByTeamLeaderKeycloakId("kc-lead")).thenReturn(Optional.empty());
 
         SafeAssistantContext ctx = contextBuilder.build(jwt);
@@ -224,7 +226,7 @@ class AssistantContextBuilderTest {
         User user = userWithPerson(TypeRole.TEAM_LEADER, "Sami", "Trabelsi");
         when(authenticatedUserResolver.require(jwt)).thenReturn(user);
         stubLeaveBalances("kc-lead", 8, 3);
-        stubEmployeeRequests("kc-lead", 2, 1, 0, 0, 1);
+        stubEmployeeRequests("kc-lead", 2, 1, 0, 0L, 0, 1);
         stubTeam("kc-lead", 42L, "Backend Squad", 5, 2);
 
         SafeAssistantContext ctx = contextBuilder.build(jwt);
@@ -246,7 +248,8 @@ class AssistantContextBuilderTest {
         Jwt jwt = jwt("kc-hr");
         User user = userWithPerson(TypeRole.HR_MANAGER, "Fatma", "Amiri");
         when(authenticatedUserResolver.require(jwt)).thenReturn(user);
-        stubHrRequests(21, 5, 3, 4, 2, 7);
+        // total=21: leaves(5) + docs(3) + docsAwaiting(2) + loans(4) + loansAwaiting(2) + auths(5) = 21
+        stubHrRequests(21, 5, 3, 2L, 4, 2, 5);
         when(userRepository.countByRole(TypeRole.NEW_USER)).thenReturn(4L);
 
         SafeAssistantContext ctx = contextBuilder.build(jwt);
@@ -254,9 +257,13 @@ class AssistantContextBuilderTest {
         assertThat(ctx.hr()).isNotNull();
         assertThat(ctx.hr().totalPendingActions()).isEqualTo(21L);
         assertThat(ctx.hr().leavesPending()).isEqualTo(5L);
+        // documentsPending = PENDING status only, NOT merged with documentsAwaitingFile
         assertThat(ctx.hr().documentsPending()).isEqualTo(3L);
-        assertThat(ctx.hr().loansPending()).isEqualTo(4L + 2L); // loansPending + loansAwaitingFile
-        assertThat(ctx.hr().authorizationsPending()).isEqualTo(7L);
+        // documentsAwaitingFile exposed separately — approved but file not yet uploaded
+        assertThat(ctx.hr().documentsAwaitingFile()).isEqualTo(2L);
+        // loansPending merges loansPending + loansAwaitingFile (indistinguishable to HR)
+        assertThat(ctx.hr().loansPending()).isEqualTo(4L + 2L);
+        assertThat(ctx.hr().authorizationsPending()).isEqualTo(5L);
         assertThat(ctx.hr().newUsersPendingApproval()).isEqualTo(4L);
     }
 
@@ -265,7 +272,7 @@ class AssistantContextBuilderTest {
         Jwt jwt = jwt("kc-hr");
         User user = userWithPerson(TypeRole.HR_MANAGER, "Fatma", "Amiri");
         when(authenticatedUserResolver.require(jwt)).thenReturn(user);
-        stubHrRequests(0, 0, 0, 0, 0, 0);
+        stubHrRequests(0, 0, 0, 0L, 0, 0, 0);
         when(userRepository.countByRole(TypeRole.NEW_USER)).thenReturn(0L);
 
         SafeAssistantContext ctx = contextBuilder.build(jwt);
@@ -282,7 +289,7 @@ class AssistantContextBuilderTest {
         Jwt jwt = jwt("kc-hr");
         User user = userWithPerson(TypeRole.HR_MANAGER, "Fatma", "Amiri");
         when(authenticatedUserResolver.require(jwt)).thenReturn(user);
-        stubHrRequests(10, 3, 2, 2, 1, 2);
+        stubHrRequests(10, 3, 2, 0L, 2, 1, 2);
         when(userRepository.countByRole(TypeRole.NEW_USER)).thenReturn(2L);
 
         SafeAssistantContext ctx = contextBuilder.build(jwt);
@@ -308,7 +315,7 @@ class AssistantContextBuilderTest {
         // No Person set — simulates newly registered user whose profile is incomplete
         when(authenticatedUserResolver.require(jwt)).thenReturn(user);
         stubLeaveBalances("kc-emp", 10, 5);
-        stubEmployeeRequests("kc-emp", 0, 0, 0, 0, 0);
+        stubEmployeeRequests("kc-emp", 0, 0, 0, 0L, 0, 0);
 
         SafeAssistantContext ctx = contextBuilder.build(jwt);
 
@@ -327,7 +334,7 @@ class AssistantContextBuilderTest {
         user.setPerson(person);
         when(authenticatedUserResolver.require(jwt)).thenReturn(user);
         stubLeaveBalances("kc-emp", 0, 0);
-        stubEmployeeRequests("kc-emp", 0, 0, 0, 0, 0);
+        stubEmployeeRequests("kc-emp", 0, 0, 0, 0L, 0, 0);
 
         SafeAssistantContext ctx = contextBuilder.build(jwt);
 
@@ -347,7 +354,7 @@ class AssistantContextBuilderTest {
         // Leave service throws — request context should still be populated
         when(leaveBalanceService.getMyBalances(anyString(), anyInt()))
                 .thenThrow(new RuntimeException("DB connection lost"));
-        stubEmployeeRequests("kc-emp", 3, 2, 0, 0, 1);
+        stubEmployeeRequests("kc-emp", 3, 2, 0, 0L, 0, 1);
 
         SafeAssistantContext ctx = contextBuilder.build(jwt);
 
@@ -382,7 +389,7 @@ class AssistantContextBuilderTest {
         User user = userWithPerson(TypeRole.TEAM_LEADER, "Sami", "Trabelsi");
         when(authenticatedUserResolver.require(jwt)).thenReturn(user);
         stubLeaveBalances("kc-lead", 8, 3);
-        stubEmployeeRequests("kc-lead", 1, 1, 0, 0, 0);
+        stubEmployeeRequests("kc-lead", 1, 1, 0, 0L, 0, 0);
 
         // Team repository throws an unexpected error
         when(teamRepository.findByTeamLeaderKeycloakId(anyString()))
@@ -440,6 +447,109 @@ class AssistantContextBuilderTest {
     }
 
     // ===========================================================================
+    // 8. documentsAwaitingFile — explicit field regression tests
+    //
+    // These four tests are the regression guard for the bug where
+    // documentsAwaitingFile was counted in totalPendingRequests but never
+    // exposed in the context breakdown, making the AI assistant's explanation
+    // inconsistent with the total.
+    // ===========================================================================
+
+    @Test
+    void employee_documentsAwaitingFile_exposedSeparatelyNotMergedIntoPending() {
+        // The canonical case from the bug report:
+        //   documentsPending=1, documentsAwaitingFile=2, total must be 3.
+        Jwt jwt = jwt("kc-emp");
+        User user = userWithPerson(TypeRole.EMPLOYEE, "Ahmed", "Ben Ali");
+        when(authenticatedUserResolver.require(jwt)).thenReturn(user);
+        stubLeaveBalances("kc-emp", 10, 5);
+        // total = leaves(0) + docs(1) + docsAwaiting(2) + loans(0) + auths(0) = 3
+        stubEmployeeRequests("kc-emp", 3, 0, 1, 2L, 0, 0);
+
+        SafeAssistantContext ctx = contextBuilder.build(jwt);
+
+        assertThat(ctx.employee()).isNotNull();
+        // totalPendingRequests includes documentsAwaitingFile
+        assertThat(ctx.employee().totalPendingRequests()).isEqualTo(3L);
+        // documentsPending = PENDING status only — must NOT absorb documentsAwaitingFile
+        assertThat(ctx.employee().documentsPending()).isEqualTo(1L);
+        // documentsAwaitingFile is the separate, explicit field
+        assertThat(ctx.employee().documentsAwaitingFile()).isEqualTo(2L);
+        // The AI can now reconcile: 1 + 2 = 3 — no gap
+    }
+
+    @Test
+    void employee_documentsAwaitingFileZero_breakdownSumMatchesTotal() {
+        // When documentsAwaitingFile is zero, nothing changes versus the old behaviour.
+        Jwt jwt = jwt("kc-emp");
+        User user = userWithPerson(TypeRole.EMPLOYEE, "Ahmed", "Ben Ali");
+        when(authenticatedUserResolver.require(jwt)).thenReturn(user);
+        stubLeaveBalances("kc-emp", 10, 5);
+        // total = leaves(2) + docs(3) + docsAwaiting(0) + loans(1) + auths(0) = 6
+        stubEmployeeRequests("kc-emp", 6, 2, 3, 0L, 1, 0);
+
+        SafeAssistantContext ctx = contextBuilder.build(jwt);
+
+        assertThat(ctx.employee().totalPendingRequests()).isEqualTo(6L);
+        assertThat(ctx.employee().documentsPending()).isEqualTo(3L);
+        assertThat(ctx.employee().documentsAwaitingFile()).isEqualTo(0L);
+        // Sum of breakdown fields must equal total
+        long breakdownSum = ctx.employee().leavesPending()
+                + ctx.employee().documentsPending()
+                + ctx.employee().documentsAwaitingFile()
+                + ctx.employee().loansPending()
+                + ctx.employee().authorizationsPending();
+        assertThat(breakdownSum).isEqualTo(ctx.employee().totalPendingRequests());
+    }
+
+    @Test
+    void employee_loansAwaitingFileBehaviourUnchanged() {
+        // loansAwaitingFile must continue to be merged into loansPending.
+        // This test is the explicit regression guard for that contract.
+        Jwt jwt = jwt("kc-emp");
+        User user = userWithPerson(TypeRole.EMPLOYEE, "Ahmed", "Ben Ali");
+        when(authenticatedUserResolver.require(jwt)).thenReturn(user);
+        stubLeaveBalances("kc-emp", 10, 5);
+        // Stub: loansPending=2, loansAwaitingFile=3 in RequestActionSummary.
+        // The builder must add them: EmployeeContext.loansPending = 2 + 3 = 5.
+        // We set total to match: leaves(0)+docs(0)+docsAwaiting(0)+loans(2)+loansAwaitingFile(3)
+        //   = 5 — which RequestActionSummary.of() would compute. We pass it directly.
+        RequestActionSummary summary = new RequestActionSummary(
+                5L, 0L, 0L, 0L, 2L, 3L, 0L
+        );
+        when(dashboardRequestSummaryService.getEmployeeOpenRequestsSummary("kc-emp"))
+                .thenReturn(summary);
+
+        SafeAssistantContext ctx = contextBuilder.build(jwt);
+
+        // loansPending in context = loansPending(2) + loansAwaitingFile(3)
+        assertThat(ctx.employee().loansPending()).isEqualTo(5L);
+        // loansAwaitingFile must NOT appear as a separate field (no such field in EmployeeContext)
+        // — verified implicitly by EmployeeContext having no such accessor
+        assertThat(ctx.employee().totalPendingRequests()).isEqualTo(5L);
+    }
+
+    @Test
+    void hrManager_documentsAwaitingFile_exposedSeparatelyNotMergedIntoPending() {
+        // Mirror of the employee test — same bug existed in HrContext.
+        Jwt jwt = jwt("kc-hr");
+        User user = userWithPerson(TypeRole.HR_MANAGER, "Fatma", "Amiri");
+        when(authenticatedUserResolver.require(jwt)).thenReturn(user);
+        // total = leaves(0) + docs(1) + docsAwaiting(4) + loans(0) + loansAwaiting(0) + auths(0) = 5
+        stubHrRequests(5, 0, 1, 4L, 0, 0, 0);
+        when(userRepository.countByRole(TypeRole.NEW_USER)).thenReturn(0L);
+
+        SafeAssistantContext ctx = contextBuilder.build(jwt);
+
+        assertThat(ctx.hr()).isNotNull();
+        assertThat(ctx.hr().totalPendingActions()).isEqualTo(5L);
+        // documentsPending = PENDING status only
+        assertThat(ctx.hr().documentsPending()).isEqualTo(1L);
+        // documentsAwaitingFile is the separate, explicit field
+        assertThat(ctx.hr().documentsAwaitingFile()).isEqualTo(4L);
+    }
+
+    // ===========================================================================
     // Helpers
     // ===========================================================================
 
@@ -478,16 +588,18 @@ class AssistantContextBuilderTest {
     }
 
     /**
-     * @param total  expected total
-     * @param leaves leavesPending
-     * @param docs   documentsPending
-     * @param loans  loansPending (loansAwaitingFile stubbed as 0)
-     * @param auths  authorizationsPending
+     * @param total         expected total (must equal the sum of all breakdown buckets)
+     * @param leaves        leavesPending
+     * @param docs          documentsPending  (PENDING status only)
+     * @param docsAwaiting  documentsAwaitingFile (APPROVED, file not yet uploaded)
+     * @param loans         loansPending (loansAwaitingFile is always stubbed as 0 here
+     *                      because the builder merges it into loansPending)
+     * @param auths         authorizationsPending
      */
     private void stubEmployeeRequests(String keycloakId, long total, long leaves,
-                                      long docs, long loans, long auths) {
+                                      long docs, long docsAwaiting, long loans, long auths) {
         RequestActionSummary summary = new RequestActionSummary(
-                total, leaves, docs, 0L, loans, 0L, auths
+                total, leaves, docs, docsAwaiting, loans, 0L, auths
         );
         when(dashboardRequestSummaryService.getEmployeeOpenRequestsSummary(keycloakId))
                 .thenReturn(summary);
@@ -508,17 +620,18 @@ class AssistantContextBuilderTest {
     }
 
     /**
-     * @param total  totalPendingActions (should equal sum of the rest)
-     * @param leaves leavesPending
-     * @param docs   documentsPending
-     * @param loans  loansPending
-     * @param loansAwaiting loansAwaitingFile
-     * @param auths  authorizationsPending
+     * @param total         totalPendingActions (should equal sum of the rest)
+     * @param leaves        leavesPending
+     * @param docs          documentsPending  (PENDING status only)
+     * @param docsAwaiting  documentsAwaitingFile (APPROVED, file not yet uploaded)
+     * @param loans         loansPending
+     * @param loansAwaiting loansAwaitingFile (builder merges this into loansPending)
+     * @param auths         authorizationsPending
      */
-    private void stubHrRequests(long total, long leaves, long docs,
+    private void stubHrRequests(long total, long leaves, long docs, long docsAwaiting,
                                 long loans, long loansAwaiting, long auths) {
         RequestActionSummary summary = new RequestActionSummary(
-                total, leaves, docs, 0L, loans, loansAwaiting, auths
+                total, leaves, docs, docsAwaiting, loans, loansAwaiting, auths
         );
         when(dashboardRequestSummaryService.getHrRequestActionSummary()).thenReturn(summary);
     }

@@ -60,10 +60,15 @@ public record SafeAssistantContext(
      *                       current year; null when the balance has not been initialised yet.
      * sickAvailableDays   : integer days remaining in the SICK leave balance;
      *                       null when the balance has not been initialised yet.
-     * totalPendingRequests: sum of all open requests across all request types.
-     * leavesPending       : open leave requests awaiting any approval.
-     * documentsPending    : open document requests (submitted, not yet fulfilled).
-     * loansPending        : open loan requests (submitted or awaiting file upload).
+     * totalPendingRequests : sum of all open requests across all request types.
+     * leavesPending        : open leave requests awaiting any approval.
+     * documentsPending     : document requests submitted but not yet fulfilled (PENDING status).
+     *                        Does NOT include approved requests awaiting file upload.
+     * documentsAwaitingFile: approved document requests for which HR has not yet uploaded
+     *                        the file. Exposed separately so the AI assistant can explain
+     *                        each state precisely. Counted in totalPendingRequests.
+     * loansPending         : open loan requests (submitted or awaiting file upload — merged
+     *                        because both states are indistinguishable to the employee).
      * authorizationsPending: open authorization requests.
      */
     public record EmployeeContext(
@@ -72,6 +77,7 @@ public record SafeAssistantContext(
             long totalPendingRequests,
             long leavesPending,
             long documentsPending,
+            long documentsAwaitingFile,
             long loansPending,
             long authorizationsPending
     ) {}
@@ -96,8 +102,13 @@ public record SafeAssistantContext(
      *
      * totalPendingActions      : sum of all platform-level pending items.
      * leavesPending            : leave requests awaiting final HR decision.
-     * documentsPending         : document requests pending HR action.
-     * loansPending             : loan requests pending HR action.
+     * documentsPending         : document requests submitted but awaiting HR action (PENDING status).
+     *                           Does NOT include approved requests awaiting file upload.
+     * documentsAwaitingFile    : approved document requests for which HR has not yet uploaded
+     *                           the file. Exposed separately so the AI assistant can explain
+     *                           each state precisely. Counted in totalPendingActions.
+     * loansPending             : loan requests pending HR action (submitted or awaiting file
+     *                           upload — merged because both states are indistinguishable to HR).
      * authorizationsPending    : authorization requests pending HR action.
      * newUsersPendingApproval  : users with NEW_USER role waiting for HR onboarding.
      */
@@ -105,6 +116,7 @@ public record SafeAssistantContext(
             long totalPendingActions,
             long leavesPending,
             long documentsPending,
+            long documentsAwaitingFile,
             long loansPending,
             long authorizationsPending,
             long newUsersPendingApproval

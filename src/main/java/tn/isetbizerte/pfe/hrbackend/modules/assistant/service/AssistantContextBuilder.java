@@ -170,14 +170,18 @@ public class AssistantContextBuilder {
             logger.warn("Could not load leave balances for assistant employee context: {}", e.getMessage());
         }
 
-        long total = 0, leavesPending = 0, documentsPending = 0, loansPending = 0, authorizationsPending = 0;
+        long total = 0, leavesPending = 0, documentsPending = 0, documentsAwaitingFile = 0,
+                loansPending = 0, authorizationsPending = 0;
         try {
             RequestActionSummary summary =
                     dashboardRequestSummaryService.getEmployeeOpenRequestsSummary(keycloakId);
-            total                = summary.total();
-            leavesPending        = summary.leavesPending();
-            documentsPending     = summary.documentsPending();
-            loansPending         = summary.loansPending() + summary.loansAwaitingFile();
+            total                 = summary.total();
+            leavesPending         = summary.leavesPending();
+            documentsPending      = summary.documentsPending();
+            // Exposed separately — AI assistant can distinguish "submitted" vs "approved, awaiting upload"
+            documentsAwaitingFile = summary.documentsAwaitingFile();
+            // loansAwaitingFile merged into loansPending: both states are indistinguishable to the employee
+            loansPending          = summary.loansPending() + summary.loansAwaitingFile();
             authorizationsPending = summary.authorizationsPending();
         } catch (Exception e) {
             logger.warn("Could not load request summary for assistant employee context: {}", e.getMessage());
@@ -189,6 +193,7 @@ public class AssistantContextBuilder {
                 total,
                 leavesPending,
                 documentsPending,
+                documentsAwaitingFile,
                 loansPending,
                 authorizationsPending
         );
@@ -244,7 +249,7 @@ public class AssistantContextBuilder {
      * newUsersPendingApproval uses UserRepository.countByRole() — a safe scalar.
      */
     private SafeAssistantContext.HrContext buildHrContext() {
-        long totalPendingActions = 0, leavesPending = 0, documentsPending = 0,
+        long totalPendingActions = 0, leavesPending = 0, documentsPending = 0, documentsAwaitingFile = 0,
                 loansPending = 0, authorizationsPending = 0;
         try {
             RequestActionSummary summary =
@@ -252,6 +257,9 @@ public class AssistantContextBuilder {
             totalPendingActions   = summary.total();
             leavesPending         = summary.leavesPending();
             documentsPending      = summary.documentsPending();
+            // Exposed separately — AI assistant can distinguish "submitted" vs "approved, awaiting upload"
+            documentsAwaitingFile = summary.documentsAwaitingFile();
+            // loansAwaitingFile merged into loansPending: both states are indistinguishable to HR
             loansPending          = summary.loansPending() + summary.loansAwaitingFile();
             authorizationsPending = summary.authorizationsPending();
         } catch (Exception e) {
@@ -269,6 +277,7 @@ public class AssistantContextBuilder {
                 totalPendingActions,
                 leavesPending,
                 documentsPending,
+                documentsAwaitingFile,
                 loansPending,
                 authorizationsPending,
                 newUsersPending
