@@ -1,14 +1,18 @@
 package tn.isetbizerte.pfe.hrbackend.modules.assistant.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.oauth2.jwt.Jwt;
+import tn.isetbizerte.pfe.hrbackend.common.enums.ApprovalDecision;
+import tn.isetbizerte.pfe.hrbackend.common.enums.LeaveStatus;
 import tn.isetbizerte.pfe.hrbackend.common.enums.LeaveType;
 import tn.isetbizerte.pfe.hrbackend.common.enums.TypeRole;
 import tn.isetbizerte.pfe.hrbackend.common.exception.ResourceNotFoundException;
 import tn.isetbizerte.pfe.hrbackend.modules.assistant.dto.SafeAssistantContext;
 import tn.isetbizerte.pfe.hrbackend.modules.employee.dto.LeaveBalanceDto;
+import tn.isetbizerte.pfe.hrbackend.modules.employee.entity.LeaveRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.employee.repository.LeaveRequestRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.employee.service.LeaveBalanceService;
 import tn.isetbizerte.pfe.hrbackend.modules.hr.dto.RequestActionSummary;
@@ -66,7 +70,7 @@ class AssistantContextBuilderTest {
     private AssistantContextBuilder contextBuilder;
 
     // Jackson for serialization leak tests
-    private final ObjectMapper mapper = new ObjectMapper();
+    private final ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
 
     /** Forbidden JSON keys that must never appear anywhere in a serialized context. */
     private static final List<String> FORBIDDEN_KEYS = List.of(
@@ -147,7 +151,7 @@ class AssistantContextBuilderTest {
         assertThat(ctx.team()).isNull();
         assertThat(ctx.hr()).isNull();
 
-        verify(teamRepository, never()).findByTeamLeaderKeycloakId(anyString());
+        verify(teamRepository, never()).findByTeamLeaderId(anyLong());
         verify(dashboardRequestSummaryService, never()).getHrRequestActionSummary();
         verify(userRepository, never()).countByRole(any());
     }
@@ -207,7 +211,7 @@ class AssistantContextBuilderTest {
         when(authenticatedUserResolver.require(jwt)).thenReturn(user);
         stubLeaveBalances("kc-lead", 8, 3);
         stubEmployeeRequests("kc-lead", 0, 0, 0, 0L, 0, 0);
-        when(teamRepository.findByTeamLeaderKeycloakId("kc-lead")).thenReturn(Optional.empty());
+        when(teamRepository.findByTeamLeaderId(Math.abs((long) "kc-lead".hashCode()))).thenReturn(Optional.empty());
 
         SafeAssistantContext ctx = contextBuilder.build(jwt);
 
@@ -237,6 +241,235 @@ class AssistantContextBuilderTest {
                     .as("Forbidden key '%s' must not appear in serialized TEAM_LEADER context", forbidden)
                     .doesNotContain("\"" + forbidden + "\"");
         }
+    }
+
+    @Test
+    void teamLeader_selectedLeaveRequest_includesSafeDecisionContextForTeamRequest() {
+        Jwt jwt = jwt("kc-lead");
+        User leader = userWithPerson(TypeRole.TEAM_LEADER, "Sami", "Trabelsi");
+        assertThat(leader.getTeam()).as("TEAM_LEADER may have users.team_id = null").isNull();
+        when(authenticatedUserResolver.require(jwt)).thenReturn(leader);
+        stubLeaveBalances("kc-lead", 8, 3);
+        stubEmployeeRequests("kc-lead", 0, 0, 0, 0L, 0, 0);
+
+        Team team = team(42L, "Backend Squad");
+        when(teamRepository.findByTeamLeaderId(Math.abs((long) "kc-lead".hashCode()))).thenReturn(Optional.of(team));
+        when(userRepository.countByTeamId(42L)).thenReturn(5L);
+        when(leaveRequestRepository.countPendingTeamLeaderApprovalsByTeamId(42L, "kc-lead"))
+                .thenReturn(2L);
+
+        LeaveRequest selected = leaveRequest(
+                99L,
+                employee("kc-emp", "Ahmed", "Ben Ali", team, TypeRole.EMPLOYEE),
+                LeaveStatus.PENDING
+        );
+        selected.setNumberOfDays(4);
+        selected.setReason("Family event");
+        when(leaveRequestRepository.findByIdWithUserAndPerson(99L)).thenReturn(Optional.of(selected));
+
+        LeaveRequest approvedOverlap = leaveRequest(
+                100L,
+                employee("kc-peer-1", "Nour", "Mansour", team, TypeRole.EMPLOYEE),
+                LeaveStatus.APPROVED
+        );
+        LeaveRequest pendingOverlap = leaveRequest(
+                101L,
+                employee("kc-peer-2", "Ali", "Kacem", team, TypeRole.EMPLOYEE),
+                LeaveStatus.PENDING
+        );
+        when(leaveRequestRepository.findByTeamIdAndDateRangeAndStatusIn(
+                anyLong(), any(), any(), any()
+        )).thenReturn(List.of(selected, approvedOverlap, pendingOverlap));
+
+        SafeAssistantContext ctx = contextBuilder.build(jwt, 99L);
+
+        assertThat(ctx.teamLeaveDecision()).isNotNull();
+        assertThat(ctx.teamLeaveDecision().available()).isTrue();
+        assertThat(ctx.teamLeaveDecision().leaveRequestId()).isEqualTo(99L);
+        assertThat(ctx.teamLeaveDecision().employeeDisplayName()).isEqualTo("Ahmed Ben Ali");
+        assertThat(ctx.teamLeaveDecision().leaveType()).isEqualTo("ANNUAL");
+        assertThat(ctx.teamLeaveDecision().deductedWorkingDays()).isEqualTo(4);
+        assertThat(ctx.teamLeaveDecision().status()).isEqualTo("PENDING");
+        assertThat(ctx.teamLeaveDecision().approvalStage()).isEqualTo("PENDING_TL");
+        assertThat(ctx.teamLeaveDecision().reason()).isEqualTo("Family event");
+        assertThat(ctx.teamLeaveDecision().overlappingApprovedLeaves()).isEqualTo(1L);
+        assertThat(ctx.teamLeaveDecision().overlappingPendingLeaves()).isEqualTo(1L);
+        assertThat(ctx.teamLeaveDecision().teamMemberCount()).isEqualTo(5);
+        assertThat(ctx.teamLeaveDecision().overlapContextAvailable()).isTrue();
+        assertThat(ctx.teamLeaveDecision().workloadContextAvailable()).isFalse();
+        assertThat(ctx.teamLeaveDecision().activeTaskCount()).isZero();
+        assertThat(ctx.teamLeaveDecision().dueSoonTaskCount()).isZero();
+        assertThat(ctx.teamLeaveDecision().overdueTaskCount()).isZero();
+        assertThat(ctx.teamLeaveDecision().highPriorityTaskCount()).isZero();
+    }
+
+    @Test
+    void teamLeader_selectedLeaveRequest_blocksAnotherTeamLeaderFromAccessingSameLeave() {
+        Jwt jwt = jwt("kc-lead-2");
+        User otherLeader = new User("kc-lead-2", "other-leader");
+        otherLeader.setId(Math.abs((long) "kc-lead-2".hashCode()));
+        otherLeader.setRole(TypeRole.TEAM_LEADER);
+        otherLeader.setActive(true);
+        otherLeader.setPerson(new Person("Leader", "Other", "other.leader@example.com"));
+        when(authenticatedUserResolver.require(jwt)).thenReturn(otherLeader);
+
+        stubLeaveBalances("kc-lead-2", 8, 3);
+        stubEmployeeRequests("kc-lead-2", 0, 0, 0, 0L, 0, 0);
+
+        Team otherLeadersTeam = team(77L, "Other Squad");
+        when(teamRepository.findByTeamLeaderId(otherLeader.getId())).thenReturn(Optional.of(otherLeadersTeam));
+        when(userRepository.countByTeamId(77L)).thenReturn(1L);
+        when(leaveRequestRepository.countPendingTeamLeaderApprovalsByTeamId(77L, "kc-lead-2"))
+                .thenReturn(0L);
+
+        Team actualTeam = team(42L, "Backend Squad");
+        LeaveRequest selected = leaveRequest(
+                99L,
+                employee("kc-emp", "Ahmed", "Ben Ali", actualTeam, TypeRole.EMPLOYEE),
+                LeaveStatus.PENDING
+        );
+        when(leaveRequestRepository.findByIdWithUserAndPerson(99L)).thenReturn(Optional.of(selected));
+
+        SafeAssistantContext ctx = contextBuilder.build(jwt, 99L);
+
+        assertThat(ctx.teamLeaveDecision()).isNotNull();
+        assertThat(ctx.teamLeaveDecision().available()).isFalse();
+        assertThat(ctx.teamLeaveDecision().unavailableReason()).isEqualTo("LEAVE_REQUEST_NOT_VISIBLE");
+    }
+
+    @Test
+    void teamLeader_selectedLeaveRequest_omitsContextForAnotherTeamRequest() {
+        Jwt jwt = jwt("kc-lead");
+        User leader = userWithPerson(TypeRole.TEAM_LEADER, "Sami", "Trabelsi");
+        when(authenticatedUserResolver.require(jwt)).thenReturn(leader);
+        stubLeaveBalances("kc-lead", 8, 3);
+        stubEmployeeRequests("kc-lead", 0, 0, 0, 0L, 0, 0);
+        stubTeam("kc-lead", 42L, "Backend Squad", 5, 0);
+
+        Team otherTeam = team(77L, "Other Squad");
+        LeaveRequest selected = leaveRequest(
+                200L,
+                employee("kc-other", "Other", "Employee", otherTeam, TypeRole.EMPLOYEE),
+                LeaveStatus.PENDING
+        );
+        when(leaveRequestRepository.findByIdWithUserAndPerson(200L)).thenReturn(Optional.of(selected));
+
+        SafeAssistantContext ctx = contextBuilder.build(jwt, 200L);
+
+        assertThat(ctx.teamLeaveDecision()).isNotNull();
+        assertThat(ctx.teamLeaveDecision().available()).isFalse();
+        assertThat(ctx.teamLeaveDecision().unavailableReason()).isEqualTo("LEAVE_REQUEST_NOT_VISIBLE");
+        assertThat(ctx.teamLeaveDecision().employeeDisplayName()).isNull();
+        assertThat(ctx.teamLeaveDecision().overlapContextAvailable()).isFalse();
+    }
+
+    @Test
+    void teamLeader_selectedLeaveRequest_omitsSelfRequestContext() {
+        Jwt jwt = jwt("kc-lead");
+        User leader = userWithPerson(TypeRole.TEAM_LEADER, "Sami", "Trabelsi");
+        Team team = team(42L, "Backend Squad");
+        leader.setTeam(team);
+        when(authenticatedUserResolver.require(jwt)).thenReturn(leader);
+        stubLeaveBalances("kc-lead", 8, 3);
+        stubEmployeeRequests("kc-lead", 0, 0, 0, 0L, 0, 0);
+        stubTeam("kc-lead", 42L, "Backend Squad", 5, 0);
+
+        LeaveRequest selected = leaveRequest(300L, leader, LeaveStatus.PENDING);
+        when(leaveRequestRepository.findByIdWithUserAndPerson(300L)).thenReturn(Optional.of(selected));
+
+        SafeAssistantContext ctx = contextBuilder.build(jwt, 300L);
+
+        assertThat(ctx.teamLeaveDecision()).isNotNull();
+        assertThat(ctx.teamLeaveDecision().available()).isFalse();
+        assertThat(ctx.teamLeaveDecision().unavailableReason()).isEqualTo("SELF_REQUEST_NOT_AVAILABLE");
+        assertThat(ctx.teamLeaveDecision().employeeDisplayName()).isNull();
+    }
+
+    @Test
+    void teamLeader_selectedLeaveRequest_missingIdDoesNotBreakNormalContext() {
+        Jwt jwt = jwt("kc-lead");
+        User user = userWithPerson(TypeRole.TEAM_LEADER, "Sami", "Trabelsi");
+        when(authenticatedUserResolver.require(jwt)).thenReturn(user);
+        stubLeaveBalances("kc-lead", 8, 3);
+        stubEmployeeRequests("kc-lead", 1, 1, 0, 0L, 0, 0);
+        stubTeam("kc-lead", 42L, "Backend Squad", 5, 0);
+        when(leaveRequestRepository.findByIdWithUserAndPerson(404L)).thenReturn(Optional.empty());
+
+        SafeAssistantContext ctx = contextBuilder.build(jwt, 404L);
+
+        assertThat(ctx.employee()).isNotNull();
+        assertThat(ctx.team()).isNotNull();
+        assertThat(ctx.teamLeaveDecision()).isNotNull();
+        assertThat(ctx.teamLeaveDecision().available()).isFalse();
+        assertThat(ctx.teamLeaveDecision().unavailableReason()).isEqualTo("LEAVE_REQUEST_NOT_FOUND");
+    }
+
+    @Test
+    void teamLeader_selectedLeaveRequest_serializedContextContainsNoSensitiveFieldsOrRecommendation() throws Exception {
+        Jwt jwt = jwt("kc-lead");
+        User leader = userWithPerson(TypeRole.TEAM_LEADER, "Sami", "Trabelsi");
+        when(authenticatedUserResolver.require(jwt)).thenReturn(leader);
+        stubLeaveBalances("kc-lead", 8, 3);
+        stubEmployeeRequests("kc-lead", 0, 0, 0, 0L, 0, 0);
+
+        Team team = team(42L, "Backend Squad");
+        when(teamRepository.findByTeamLeaderId(Math.abs((long) "kc-lead".hashCode()))).thenReturn(Optional.of(team));
+        when(userRepository.countByTeamId(42L)).thenReturn(5L);
+        when(leaveRequestRepository.countPendingTeamLeaderApprovalsByTeamId(42L, "kc-lead"))
+                .thenReturn(0L);
+
+        LeaveRequest selected = leaveRequest(
+                99L,
+                employee("kc-emp", "Ahmed", "Ben Ali", team, TypeRole.EMPLOYEE),
+                LeaveStatus.PENDING
+        );
+        selected.setSystemRecommendation("APPROVE");
+        when(leaveRequestRepository.findByIdWithUserAndPerson(99L)).thenReturn(Optional.of(selected));
+        when(leaveRequestRepository.findByTeamIdAndDateRangeAndStatusIn(anyLong(), any(), any(), any()))
+                .thenReturn(List.of(selected));
+
+        String json = mapper.writeValueAsString(contextBuilder.build(jwt, 99L));
+
+        for (String forbidden : FORBIDDEN_KEYS) {
+            assertThat(json)
+                    .as("Forbidden key '%s' must not appear in serialized decision context", forbidden)
+                    .doesNotContain("\"" + forbidden + "\"");
+        }
+        assertThat(json).doesNotContain("APPROVE");
+        assertThat(json).doesNotContain("systemRecommendation");
+        assertThat(json).contains("\"workloadContextAvailable\":false");
+    }
+
+    @Test
+    void teamLeader_selectedLeaveRequest_overlapFailureMarkedUnavailableNotFakeAvailableZero() {
+        Jwt jwt = jwt("kc-lead");
+        User leader = userWithPerson(TypeRole.TEAM_LEADER, "Sami", "Trabelsi");
+        when(authenticatedUserResolver.require(jwt)).thenReturn(leader);
+        stubLeaveBalances("kc-lead", 8, 3);
+        stubEmployeeRequests("kc-lead", 0, 0, 0, 0L, 0, 0);
+
+        Team team = team(42L, "Backend Squad");
+        when(teamRepository.findByTeamLeaderId(Math.abs((long) "kc-lead".hashCode()))).thenReturn(Optional.of(team));
+        when(userRepository.countByTeamId(42L)).thenReturn(5L);
+        when(leaveRequestRepository.countPendingTeamLeaderApprovalsByTeamId(42L, "kc-lead"))
+                .thenReturn(0L);
+
+        LeaveRequest selected = leaveRequest(
+                99L,
+                employee("kc-emp", "Ahmed", "Ben Ali", team, TypeRole.EMPLOYEE),
+                LeaveStatus.PENDING
+        );
+        when(leaveRequestRepository.findByIdWithUserAndPerson(99L)).thenReturn(Optional.of(selected));
+        when(leaveRequestRepository.findByTeamIdAndDateRangeAndStatusIn(anyLong(), any(), any(), any()))
+                .thenThrow(new RuntimeException("calendar unavailable"));
+
+        SafeAssistantContext ctx = contextBuilder.build(jwt, 99L);
+
+        assertThat(ctx.teamLeaveDecision().available()).isTrue();
+        assertThat(ctx.teamLeaveDecision().overlapContextAvailable()).isFalse();
+        assertThat(ctx.teamLeaveDecision().overlappingApprovedLeaves()).isZero();
+        assertThat(ctx.teamLeaveDecision().overlappingPendingLeaves()).isZero();
+        assertThat(ctx.teamLeaveDecision().workloadContextAvailable()).isFalse();
     }
 
     // ===========================================================================
@@ -281,7 +514,7 @@ class AssistantContextBuilderTest {
         assertThat(ctx.team()).isNull();
 
         verify(leaveBalanceService, never()).getMyBalances(anyString(), anyInt());
-        verify(teamRepository, never()).findByTeamLeaderKeycloakId(anyString());
+        verify(teamRepository, never()).findByTeamLeaderId(anyLong());
     }
 
     @Test
@@ -392,7 +625,7 @@ class AssistantContextBuilderTest {
         stubEmployeeRequests("kc-lead", 1, 1, 0, 0L, 0, 0);
 
         // Team repository throws an unexpected error
-        when(teamRepository.findByTeamLeaderKeycloakId(anyString()))
+        when(teamRepository.findByTeamLeaderId(anyLong()))
                 .thenThrow(new RuntimeException("DB timeout"));
 
         SafeAssistantContext ctx = contextBuilder.build(jwt);
@@ -443,7 +676,7 @@ class AssistantContextBuilderTest {
         verify(leaveBalanceService, never()).getMyBalances(anyString(), anyInt());
         verify(dashboardRequestSummaryService, never()).getEmployeeOpenRequestsSummary(anyString());
         verify(dashboardRequestSummaryService, never()).getHrRequestActionSummary();
-        verify(teamRepository, never()).findByTeamLeaderKeycloakId(anyString());
+        verify(teamRepository, never()).findByTeamLeaderId(anyLong());
     }
 
     // ===========================================================================
@@ -564,12 +797,51 @@ class AssistantContextBuilderTest {
     }
 
     private User userWithPerson(TypeRole role, String firstName, String lastName) {
-        User user = new User("kc-id-" + role.name(), "user-" + role.name().toLowerCase());
+        // Keep keycloakId aligned with the JWT subject used in tests.
+        User user = new User(
+                role == TypeRole.TEAM_LEADER ? "kc-lead"
+                        : role == TypeRole.HR_MANAGER ? "kc-hr"
+                        : role == TypeRole.NEW_USER ? "kc-new"
+                        : "kc-emp",
+                "user-" + role.name().toLowerCase()
+        );
+        user.setId(Math.abs((long) user.getKeycloakId().hashCode()));
         user.setRole(role);
         user.setActive(true);
         Person person = new Person(lastName, firstName, firstName.toLowerCase() + "@example.com");
         user.setPerson(person);
         return user;
+    }
+
+    private Team team(Long id, String name) {
+        Team team = new Team();
+        team.setId(id);
+        team.setName(name);
+        return team;
+    }
+
+    private User employee(String keycloakId, String firstName, String lastName, Team team, TypeRole role) {
+        User user = new User(keycloakId, firstName.toLowerCase());
+        user.setId(Math.abs((long) keycloakId.hashCode()));
+        user.setRole(role);
+        user.setActive(true);
+        user.setTeam(team);
+        user.setPerson(new Person(lastName, firstName, firstName.toLowerCase() + "@example.com"));
+        return user;
+    }
+
+    private LeaveRequest leaveRequest(Long id, User employee, LeaveStatus status) {
+        LeaveRequest leaveRequest = new LeaveRequest();
+        leaveRequest.setId(id);
+        leaveRequest.setUser(employee);
+        leaveRequest.setLeaveType(LeaveType.ANNUAL);
+        leaveRequest.setStartDate(java.time.LocalDate.of(2026, 6, 10));
+        leaveRequest.setEndDate(java.time.LocalDate.of(2026, 6, 13));
+        leaveRequest.setNumberOfDays(3);
+        leaveRequest.setStatus(status);
+        leaveRequest.setTeamLeaderDecision(ApprovalDecision.PENDING);
+        leaveRequest.setHrDecision(ApprovalDecision.PENDING);
+        return leaveRequest;
     }
 
     private void stubLeaveBalances(String keycloakId, int annualDays, int sickDays) {
@@ -613,7 +885,7 @@ class AssistantContextBuilderTest {
         Team team = new Team();
         team.setId(teamId);
         team.setName(teamName);
-        when(teamRepository.findByTeamLeaderKeycloakId(keycloakId)).thenReturn(Optional.of(team));
+        when(teamRepository.findByTeamLeaderId(Math.abs((long) keycloakId.hashCode()))).thenReturn(Optional.of(team));
         when(userRepository.countByTeamId(teamId)).thenReturn((long) memberCount);
         when(leaveRequestRepository.countPendingTeamLeaderApprovalsByTeamId(teamId, keycloakId))
                 .thenReturn(pendingApprovals);

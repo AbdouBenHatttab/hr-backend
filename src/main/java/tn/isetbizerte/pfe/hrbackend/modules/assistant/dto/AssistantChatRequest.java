@@ -18,5 +18,7 @@ public record AssistantChatRequest(
         @Size(max = 1000, message = "question must not exceed 1000 characters")
         String question,
 
-        String pageContext
+        String pageContext,
+
+        Long selectedLeaveRequestId
 ) {}

@@ -72,7 +72,7 @@ public class AssistantGatewayService {
             String role = user.getRole().name();
 
             // 2. Build safe context (no tokens, no private data, no entities)
-            SafeAssistantContext context = contextBuilder.build(jwt);
+            SafeAssistantContext context = contextBuilder.build(jwt, request.selectedLeaveRequestId());
 
             // 3. Assemble the internal request sent to FastAPI
             AiServiceRequest aiRequest = new AiServiceRequest(

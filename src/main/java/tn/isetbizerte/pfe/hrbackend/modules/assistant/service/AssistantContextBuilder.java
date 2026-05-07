@@ -4,11 +4,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
+import tn.isetbizerte.pfe.hrbackend.common.enums.ApprovalDecision;
 import tn.isetbizerte.pfe.hrbackend.common.enums.LeaveType;
+import tn.isetbizerte.pfe.hrbackend.common.enums.LeaveStatus;
 import tn.isetbizerte.pfe.hrbackend.common.enums.TypeRole;
 import tn.isetbizerte.pfe.hrbackend.common.exception.ResourceNotFoundException;
 import tn.isetbizerte.pfe.hrbackend.modules.assistant.dto.SafeAssistantContext;
 import tn.isetbizerte.pfe.hrbackend.modules.employee.dto.LeaveBalanceDto;
+import tn.isetbizerte.pfe.hrbackend.modules.employee.entity.LeaveRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.employee.repository.LeaveRequestRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.employee.service.LeaveBalanceService;
 import tn.isetbizerte.pfe.hrbackend.modules.hr.dto.RequestActionSummary;
@@ -84,9 +87,18 @@ public class AssistantContextBuilder {
      * Never throws on optional context failures — partial context is always safe to forward.
      */
     public SafeAssistantContext build(Jwt jwt) {
+        return build(jwt, null);
+    }
+
+    /**
+     * Build and return the typed safe context for the given JWT plus optional
+     * selected Team Leader leave request context. Never throws on optional
+     * context failures — partial context is always safe to forward.
+     */
+    public SafeAssistantContext build(Jwt jwt, Long selectedLeaveRequestId) {
         User user = authenticatedUserResolver.require(jwt);
         TypeRole role = user.getRole();
-        String keycloakId = jwt.getSubject();
+        String keycloakId = user.getKeycloakId();
 
         String displayName = resolveDisplayName(user.getPerson());
 
@@ -95,22 +107,25 @@ public class AssistantContextBuilder {
                     displayName,
                     buildEmployeeContext(keycloakId),
                     null,
+                    null,
                     null
             );
-            case TEAM_LEADER -> new SafeAssistantContext(
-                    displayName,
-                    buildEmployeeContext(keycloakId),
-                    buildTeamContext(keycloakId),
-                    null
+case TEAM_LEADER -> new SafeAssistantContext(
+                displayName,
+                buildEmployeeContext(keycloakId),
+                buildTeamContext(user),
+                null,
+                buildTeamLeaveDecisionContext(user, selectedLeaveRequestId)
             );
             case HR_MANAGER -> new SafeAssistantContext(
                     displayName,
                     null,
                     null,
-                    buildHrContext()
+                    buildHrContext(),
+                    null
             );
             default -> // NEW_USER: endpoint blocks this role; empty context as safety backstop
-                    new SafeAssistantContext(null, null, null, null);
+                    new SafeAssistantContext(null, null, null, null, null);
         };
     }
 
@@ -239,6 +254,259 @@ public class AssistantContextBuilder {
             return new SafeAssistantContext.TeamContext(null, null, 0L);
         }
     }
+
+    private SafeAssistantContext.TeamContext buildTeamContext(User leader) {
+        if (leader == null || leader.getId() == null) {
+            return new SafeAssistantContext.TeamContext(null, null, 0L);
+        }
+        try {
+            var teamOpt = teamRepository.findByTeamLeaderId(leader.getId());
+            if (teamOpt.isEmpty()) {
+                logger.debug("Team Leader {} has no team assigned; omitting team sub-fields.", leader.getId());
+                return new SafeAssistantContext.TeamContext(null, null, 0L);
+            }
+
+            Team team = teamOpt.get();
+            Long teamId = team.getId();
+            String teamName = team.getName();
+
+            int memberCount = (int) userRepository.countByTeamId(teamId);
+
+            long pendingApprovals = leaveRequestRepository
+                    .countPendingTeamLeaderApprovalsByTeamId(teamId, leader.getKeycloakId());
+
+            return new SafeAssistantContext.TeamContext(teamName, memberCount, pendingApprovals);
+        } catch (Exception e) {
+            logger.warn("Could not load team context for assistant: {}", e.getMessage());
+            return new SafeAssistantContext.TeamContext(null, null, 0L);
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // TEAM_LEADER selected leave decision-support context
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Builds a read-only, safe context for one selected leave request.
+     * Authorization mirrors the Team Leader approval boundary: the leave must belong
+     * to the leader's team, must not be the leader's own request, and must not belong
+     * to another Team Leader account.
+     */
+    private SafeAssistantContext.TeamLeaveDecisionContext buildTeamLeaveDecisionContext(
+            String leaderKeycloakId,
+            Long selectedLeaveRequestId
+    ) {
+        if (selectedLeaveRequestId == null) {
+            return null;
+        }
+
+        try {
+            var teamOpt = teamRepository.findByTeamLeaderKeycloakId(leaderKeycloakId);
+            if (teamOpt.isEmpty()) {
+                return unavailableTeamLeaveDecision(selectedLeaveRequestId, "TEAM_NOT_ASSIGNED");
+            }
+
+            Team leaderTeam = teamOpt.get();
+            Long leaderTeamId = leaderTeam.getId();
+
+            var leaveOpt = leaveRequestRepository.findByIdWithUserAndPerson(selectedLeaveRequestId);
+            if (leaveOpt.isEmpty()) {
+                return unavailableTeamLeaveDecision(selectedLeaveRequestId, "LEAVE_REQUEST_NOT_FOUND");
+            }
+
+            LeaveRequest leave = leaveOpt.get();
+            User employee = leave.getUser();
+            if (employee == null || employee.getTeam() == null || employee.getTeam().getId() == null) {
+                return unavailableTeamLeaveDecision(selectedLeaveRequestId, "LEAVE_REQUEST_NOT_IN_TEAM");
+            }
+
+            if (!employee.getTeam().getId().equals(leaderTeamId)) {
+                return unavailableTeamLeaveDecision(selectedLeaveRequestId, "LEAVE_REQUEST_NOT_VISIBLE");
+            }
+
+            if (leaderKeycloakId.equals(employee.getKeycloakId()) || TypeRole.TEAM_LEADER.equals(employee.getRole())) {
+                return unavailableTeamLeaveDecision(selectedLeaveRequestId, "SELF_REQUEST_NOT_AVAILABLE");
+            }
+
+            OverlapCounts overlapCounts = resolveOverlapCounts(leaderTeamId, leave);
+            Integer teamMemberCount = resolveTeamMemberCount(leaderTeamId);
+
+            return new SafeAssistantContext.TeamLeaveDecisionContext(
+                    true,
+                    null,
+                    leave.getId(),
+                    resolveDisplayName(employee.getPerson()),
+                    leave.getLeaveType() != null ? leave.getLeaveType().name() : null,
+                    leave.getStartDate(),
+                    leave.getEndDate(),
+                    leave.getNumberOfDays(),
+                    leave.getStatus() != null ? leave.getStatus().name() : null,
+                    computeApprovalStage(leave),
+                    leave.getReason(),
+                    overlapCounts.approved(),
+                    overlapCounts.pending(),
+                    teamMemberCount,
+                    0L,
+                    0L,
+                    0L,
+                    0L,
+                    false,
+                    overlapCounts.available()
+            );
+        } catch (Exception e) {
+            logger.warn("Could not load Team Leader leave decision context for assistant: {}", e.getMessage());
+            return unavailableTeamLeaveDecision(selectedLeaveRequestId, "CONTEXT_UNAVAILABLE");
+        }
+    }
+
+    private SafeAssistantContext.TeamLeaveDecisionContext buildTeamLeaveDecisionContext(
+            User leader,
+            Long selectedLeaveRequestId
+    ) {
+        if (selectedLeaveRequestId == null) {
+            return null;
+        }
+        if (leader == null || leader.getId() == null) {
+            return unavailableTeamLeaveDecision(selectedLeaveRequestId, "TEAM_NOT_ASSIGNED");
+        }
+
+        try {
+            var teamOpt = teamRepository.findByTeamLeaderId(leader.getId());
+            if (teamOpt.isEmpty()) {
+                return unavailableTeamLeaveDecision(selectedLeaveRequestId, "TEAM_NOT_ASSIGNED");
+            }
+
+            Team leaderTeam = teamOpt.get();
+            Long leaderTeamId = leaderTeam.getId();
+
+            var leaveOpt = leaveRequestRepository.findByIdWithUserAndPerson(selectedLeaveRequestId);
+            if (leaveOpt.isEmpty()) {
+                return unavailableTeamLeaveDecision(selectedLeaveRequestId, "LEAVE_REQUEST_NOT_FOUND");
+            }
+
+            LeaveRequest leave = leaveOpt.get();
+            User employee = leave.getUser();
+            if (employee == null || employee.getTeam() == null || employee.getTeam().getId() == null) {
+                return unavailableTeamLeaveDecision(selectedLeaveRequestId, "LEAVE_REQUEST_NOT_IN_TEAM");
+            }
+
+            if (!employee.getTeam().getId().equals(leaderTeamId)) {
+                return unavailableTeamLeaveDecision(selectedLeaveRequestId, "LEAVE_REQUEST_NOT_VISIBLE");
+            }
+
+            if (leader.getId().equals(employee.getId()) || TypeRole.TEAM_LEADER.equals(employee.getRole())) {
+                return unavailableTeamLeaveDecision(selectedLeaveRequestId, "SELF_REQUEST_NOT_AVAILABLE");
+            }
+
+            OverlapCounts overlapCounts = resolveOverlapCounts(leaderTeamId, leave);
+            Integer teamMemberCount = resolveTeamMemberCount(leaderTeamId);
+
+            return new SafeAssistantContext.TeamLeaveDecisionContext(
+                    true,
+                    null,
+                    leave.getId(),
+                    resolveDisplayName(employee.getPerson()),
+                    leave.getLeaveType() != null ? leave.getLeaveType().name() : null,
+                    leave.getStartDate(),
+                    leave.getEndDate(),
+                    leave.getNumberOfDays(),
+                    leave.getStatus() != null ? leave.getStatus().name() : null,
+                    computeApprovalStage(leave),
+                    leave.getReason(),
+                    overlapCounts.approved(),
+                    overlapCounts.pending(),
+                    teamMemberCount,
+                    0L,
+                    0L,
+                    0L,
+                    0L,
+                    false,
+                    overlapCounts.available()
+            );
+        } catch (Exception e) {
+            logger.warn("Could not load Team Leader leave decision context for assistant: {}", e.getMessage());
+            return unavailableTeamLeaveDecision(selectedLeaveRequestId, "CONTEXT_UNAVAILABLE");
+        }
+    }
+
+    private SafeAssistantContext.TeamLeaveDecisionContext unavailableTeamLeaveDecision(
+            Long selectedLeaveRequestId,
+            String reason
+    ) {
+        return new SafeAssistantContext.TeamLeaveDecisionContext(
+                false,
+                reason,
+                selectedLeaveRequestId,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                0L,
+                0L,
+                null,
+                0L,
+                0L,
+                0L,
+                0L,
+                false,
+                false
+        );
+    }
+
+    private OverlapCounts resolveOverlapCounts(Long teamId, LeaveRequest selectedLeave) {
+        try {
+            List<LeaveRequest> overlaps = leaveRequestRepository.findByTeamIdAndDateRangeAndStatusIn(
+                    teamId,
+                    selectedLeave.getStartDate(),
+                    selectedLeave.getEndDate(),
+                    List.of(LeaveStatus.PENDING, LeaveStatus.APPROVED)
+            );
+
+            long approved = overlaps.stream()
+                    .filter(lr -> !selectedLeave.getId().equals(lr.getId()))
+                    .filter(lr -> LeaveStatus.APPROVED.equals(lr.getStatus()))
+                    .count();
+
+            long pending = overlaps.stream()
+                    .filter(lr -> !selectedLeave.getId().equals(lr.getId()))
+                    .filter(lr -> LeaveStatus.PENDING.equals(lr.getStatus()))
+                    .count();
+
+            return new OverlapCounts(approved, pending, true);
+        } catch (Exception e) {
+            logger.warn("Could not load overlap counts for assistant leave decision context: {}", e.getMessage());
+            return new OverlapCounts(0L, 0L, false);
+        }
+    }
+
+    private Integer resolveTeamMemberCount(Long teamId) {
+        try {
+            return (int) userRepository.countByTeamId(teamId);
+        } catch (Exception e) {
+            logger.warn("Could not load team member count for assistant leave decision context: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private String computeApprovalStage(LeaveRequest leave) {
+        if (leave.getStatus() == LeaveStatus.CANCELLED_BY_EMPLOYEE) return "CANCELLED_BY_EMPLOYEE";
+        if (leave.getStatus() == LeaveStatus.REJECTED) return "REJECTED";
+        if (leave.getStatus() == LeaveStatus.APPROVED) return "APPROVED";
+        if (leave.getTeamLeaderDecision() == ApprovalDecision.APPROVED
+                && leave.getHrDecision() == ApprovalDecision.PENDING) {
+            return "PENDING_HR";
+        }
+        if (leave.getTeamLeaderDecision() == ApprovalDecision.PENDING) {
+            return "PENDING_TL";
+        }
+        return "PENDING";
+    }
+
+    private record OverlapCounts(long approved, long pending, boolean available) {}
 
     // ---------------------------------------------------------------------------
     // HR_MANAGER context

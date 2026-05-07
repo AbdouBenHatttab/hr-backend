@@ -17,6 +17,8 @@ package tn.isetbizerte.pfe.hrbackend.modules.assistant.dto;
  *   - team          : non-null for TEAM_LEADER (may still carry null sub-fields if no team
  *                     is assigned yet); null for all other roles.
  *   - hr            : non-null for HR_MANAGER; null for all other roles.
+ *   - teamLeaveDecision: optional read-only Team Leader decision-support context for one
+ *                     selected leave request; absent when not requested or not authorized.
  *
  * Every numeric field within the nested records is a primitive long or int (never boxed
  * when a safe default of 0 is appropriate) so that serialization never produces
@@ -44,7 +46,13 @@ public record SafeAssistantContext(
          * HR management context.
          * Present for HR_MANAGER only; absent for all other roles.
          */
-        HrContext hr
+        HrContext hr,
+
+        /**
+         * Read-only selected leave request context for Team Leader decision support.
+         * Present only when a TEAM_LEADER asks with an authorized selectedLeaveRequestId.
+         */
+        TeamLeaveDecisionContext teamLeaveDecision
 
 ) {
 
@@ -120,5 +128,34 @@ public record SafeAssistantContext(
             long loansPending,
             long authorizationsPending,
             long newUsersPendingApproval
+    ) {}
+
+    /**
+     * Safe selected leave request context for Team Leader decision support.
+     * Contains only data already visible to the Team Leader and aggregate counts.
+     * Never includes email, keycloakId, JWT, salary, private profile data, raw entities,
+     * or systemRecommendation approve/reject wording.
+     */
+    public record TeamLeaveDecisionContext(
+            boolean available,
+            String unavailableReason,
+            Long leaveRequestId,
+            String employeeDisplayName,
+            String leaveType,
+            java.time.LocalDate startDate,
+            java.time.LocalDate endDate,
+            Integer deductedWorkingDays,
+            String status,
+            String approvalStage,
+            String reason,
+            long overlappingApprovedLeaves,
+            long overlappingPendingLeaves,
+            Integer teamMemberCount,
+            long activeTaskCount,
+            long dueSoonTaskCount,
+            long overdueTaskCount,
+            long highPriorityTaskCount,
+            boolean workloadContextAvailable,
+            boolean overlapContextAvailable
     ) {}
 }

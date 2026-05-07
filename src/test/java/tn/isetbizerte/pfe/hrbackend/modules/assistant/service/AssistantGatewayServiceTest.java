@@ -23,6 +23,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -45,7 +46,7 @@ class AssistantGatewayServiceTest {
 
     /** Empty typed context used as a safe stub in gateway-level tests. */
     private static final SafeAssistantContext EMPTY_CONTEXT =
-            new SafeAssistantContext(null, null, null, null);
+            new SafeAssistantContext(null, null, null, null, null);
 
     @BeforeEach
     void setUp() {
@@ -66,8 +67,8 @@ class AssistantGatewayServiceTest {
         Jwt jwt = jwt("kc-emp");
         User user = user(TypeRole.EMPLOYEE);
         when(authenticatedUserResolver.require(jwt)).thenReturn(user);
-        when(contextBuilder.build(jwt)).thenReturn(
-                new SafeAssistantContext("Ahmed Ben Ali", null, null, null));
+        when(contextBuilder.build(jwt, null)).thenReturn(
+                new SafeAssistantContext("Ahmed Ben Ali", null, null, null, null));
 
         AiServiceResponse aiResponse = new AiServiceResponse(
                 "Your leave balance is 12 days.",
@@ -86,7 +87,7 @@ class AssistantGatewayServiceTest {
         )).thenReturn(aiResponse);
 
         AssistantChatResponse response = gatewayService.chat(
-                new AssistantChatRequest("What is my leave balance?", "leave"),
+                new AssistantChatRequest("What is my leave balance?", "leave", null),
                 jwt
         );
 
@@ -103,14 +104,14 @@ class AssistantGatewayServiceTest {
         Jwt jwt = jwt("kc-emp");
         User user = user(TypeRole.EMPLOYEE);
         when(authenticatedUserResolver.require(jwt)).thenReturn(user);
-        when(contextBuilder.build(jwt)).thenReturn(EMPTY_CONTEXT);
+        when(contextBuilder.build(jwt, null)).thenReturn(EMPTY_CONTEXT);
 
         // Simulates a connection refused / timeout
         when(aiServiceRestTemplate.postForObject(anyString(), any(), eq(AiServiceResponse.class)))
                 .thenThrow(new ResourceAccessException("Connection refused"));
 
         AssistantChatResponse response = gatewayService.chat(
-                new AssistantChatRequest("Help", null),
+                new AssistantChatRequest("Help", null, null),
                 jwt
         );
 
@@ -125,13 +126,13 @@ class AssistantGatewayServiceTest {
         Jwt jwt = jwt("kc-emp");
         User user = user(TypeRole.EMPLOYEE);
         when(authenticatedUserResolver.require(jwt)).thenReturn(user);
-        when(contextBuilder.build(jwt)).thenReturn(EMPTY_CONTEXT);
+        when(contextBuilder.build(jwt, null)).thenReturn(EMPTY_CONTEXT);
 
         when(aiServiceRestTemplate.postForObject(anyString(), any(), eq(AiServiceResponse.class)))
                 .thenReturn(null);
 
         AssistantChatResponse response = gatewayService.chat(
-                new AssistantChatRequest("Help", null),
+                new AssistantChatRequest("Help", null, null),
                 jwt
         );
 
@@ -147,7 +148,7 @@ class AssistantGatewayServiceTest {
         Jwt jwt = jwt("kc-emp");
         User user = user(TypeRole.EMPLOYEE);
         when(authenticatedUserResolver.require(jwt)).thenReturn(user);
-        when(contextBuilder.build(jwt)).thenReturn(EMPTY_CONTEXT);
+        when(contextBuilder.build(jwt, null)).thenReturn(EMPTY_CONTEXT);
 
         AiServiceResponse aiResponse = new AiServiceResponse(
                 "Guidance.", List.of(), List.of(), List.of(), "Disclaimer.", true,
@@ -163,7 +164,80 @@ class AssistantGatewayServiceTest {
                     return aiResponse;
                 });
 
-        gatewayService.chat(new AssistantChatRequest("test", null), jwt);
+        gatewayService.chat(new AssistantChatRequest("test", null, null), jwt);
+    }
+
+    @Test
+    void chat_passesSelectedLeaveRequestIdToContextBuilder() {
+        Jwt jwt = jwt("kc-lead");
+        User user = user(TypeRole.TEAM_LEADER);
+        when(authenticatedUserResolver.require(jwt)).thenReturn(user);
+        when(contextBuilder.build(jwt, 99L)).thenReturn(EMPTY_CONTEXT);
+
+        AiServiceResponse aiResponse = new AiServiceResponse(
+                "Guidance.", List.of(), List.of(), List.of(), "Disclaimer.", true,
+                null, null, null, List.of()
+        );
+
+        when(aiServiceRestTemplate.postForObject(anyString(), any(AiServiceRequest.class), eq(AiServiceResponse.class)))
+                .thenReturn(aiResponse);
+
+        gatewayService.chat(new AssistantChatRequest("Help me review this leave", "team", 99L), jwt);
+
+        verify(contextBuilder).build(jwt, 99L);
+    }
+
+    @Test
+    void chat_outboundRequest_containsTeamLeaveDecisionAvailableWhenProvidedByContextBuilder() {
+        Jwt jwt = jwt("kc-lead");
+        User user = user(TypeRole.TEAM_LEADER);
+        when(authenticatedUserResolver.require(jwt)).thenReturn(user);
+
+        SafeAssistantContext ctxWithDecision = new SafeAssistantContext(
+                "Leader Name",
+                null,
+                null,
+                null,
+                new SafeAssistantContext.TeamLeaveDecisionContext(
+                        true,
+                        null,
+                        130L,
+                        "Employee Name",
+                        "ANNUAL",
+                        java.time.LocalDate.of(2026, 6, 10),
+                        java.time.LocalDate.of(2026, 6, 12),
+                        2,
+                        "PENDING",
+                        "PENDING_TL",
+                        "Reason",
+                        0L,
+                        0L,
+                        5,
+                        0L,
+                        0L,
+                        0L,
+                        0L,
+                        false,
+                        true
+                )
+        );
+        when(contextBuilder.build(jwt, 130L)).thenReturn(ctxWithDecision);
+
+        AiServiceResponse aiResponse = new AiServiceResponse(
+                "Guidance.", List.of(), List.of(), List.of(), "Disclaimer.", true,
+                null, null, null, List.of()
+        );
+
+        when(aiServiceRestTemplate.postForObject(anyString(), any(AiServiceRequest.class), eq(AiServiceResponse.class)))
+                .thenAnswer(invocation -> {
+                    AiServiceRequest req = invocation.getArgument(1);
+                    assertThat(req.context()).isNotNull();
+                    assertThat(req.context().teamLeaveDecision()).isNotNull();
+                    assertThat(req.context().teamLeaveDecision().available()).isTrue();
+                    return aiResponse;
+                });
+
+        gatewayService.chat(new AssistantChatRequest("Help", "team", 130L), jwt);
     }
 
     // ---------------------------------------------------------------------------
