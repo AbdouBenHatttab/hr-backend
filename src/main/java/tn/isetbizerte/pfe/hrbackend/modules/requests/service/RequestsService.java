@@ -24,6 +24,8 @@ import tn.isetbizerte.pfe.hrbackend.modules.calendar.service.WorkingDayService;
 import tn.isetbizerte.pfe.hrbackend.modules.employee.repository.LeaveRequestRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.CreateAuthorizationRequestDto;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.CreateDocumentRequestDto;
+import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.ValidateDocumentDraftRequestDto;
+import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.ValidateDocumentDraftResponseDto;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -104,6 +106,32 @@ public class RequestsService {
     }
 
     // DOCUMENT REQUESTS
+
+    /**
+     * Dry-run document draft validation — no side effects.
+     *
+     * Applies the same business rules as createDocumentRequest without saving
+     * anything, reserving any resource, or publishing any event.
+     * Always returns HTTP 200; valid=false signals a rule violation.
+     */
+    public ValidateDocumentDraftResponseDto validateDocumentDraft(ValidateDocumentDraftRequestDto body) {
+        DocumentType type = body.getDocumentType();
+        // documentType nullability is already enforced by @NotNull in the DTO;
+        // this guard is a safety net in case the method is called directly.
+        if (type == null) {
+            return ValidateDocumentDraftResponseDto.invalid("documentType is required.");
+        }
+        if (type == DocumentType.CONTRACT_COPY) {
+            return ValidateDocumentDraftResponseDto.invalid(
+                    "CONTRACT_COPY is an HR-managed document and cannot be requested by employees.");
+        }
+        boolean generated = isSystemGeneratedDocument(type);
+        String fulfillmentMode = generated ? "GENERATED" : "UPLOADED";
+        String message = generated
+                ? "This document will be generated automatically by the system once HR approves your request."
+                : "HR will prepare and upload this document once your request is approved.";
+        return ValidateDocumentDraftResponseDto.valid(type, fulfillmentMode, message);
+    }
 
     @Transactional
     public Map<String, Object> createDocumentRequest(Jwt jwt, CreateDocumentRequestDto body) {

@@ -16,6 +16,7 @@ class RequestsControllerRouteContractTest {
     void employeeRequestRoutes_arePresentOnController() {
         assertHasGetMapping(RequestApiRoutes.EMPLOYEE_DOCUMENTS);
         assertHasPostMapping(RequestApiRoutes.EMPLOYEE_DOCUMENTS);
+        assertHasPostMapping(RequestApiRoutes.EMPLOYEE_DOCUMENTS_VALIDATE_DRAFT);
         assertHasPostMapping(RequestApiRoutes.EMPLOYEE_DOCUMENTS_CANCEL);
         assertHasGetMapping(RequestApiRoutes.EMPLOYEE_DOCUMENTS_ATTACHMENT);
         assertHasGetMapping(RequestApiRoutes.EMPLOYEE_DOCUMENTS_MANAGED);

@@ -18,6 +18,8 @@ import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.CreateLoanRequestDto;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.HrDecisionNoteDto;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.RejectLoanRequestDto;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.ScheduleLoanMeetingDto;
+import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.ValidateDocumentDraftRequestDto;
+import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.ValidateDocumentDraftResponseDto;
 import tn.isetbizerte.pfe.hrbackend.modules.history.service.RequestHistoryService;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.service.RequestsService;
 
@@ -44,6 +46,21 @@ public class RequestsController {
             @AuthenticationPrincipal Jwt jwt) {
         var data = service.createDocumentRequest(jwt, body);
         return ok("Document request submitted.", data);
+    }
+
+    /**
+     * POST /api/employee/documents/validate-draft
+     *
+     * Dry-run validation of a document draft. No data is saved, no events published.
+     * Always returns HTTP 200; {@code valid=false} in the body signals a rule violation.
+     * Called by React after FastAPI extracts structured fields from the user's chat message,
+     * before showing the confirmation dialog.
+     */
+    @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")
+    @PostMapping(RequestApiRoutes.EMPLOYEE_DOCUMENTS_VALIDATE_DRAFT)
+    public ResponseEntity<ValidateDocumentDraftResponseDto> validateDocumentDraft(
+            @Valid @RequestBody ValidateDocumentDraftRequestDto body) {
+        return ResponseEntity.ok(service.validateDocumentDraft(body));
     }
 
     @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")

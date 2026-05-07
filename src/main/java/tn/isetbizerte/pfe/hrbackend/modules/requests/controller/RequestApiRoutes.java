@@ -6,6 +6,7 @@ public final class RequestApiRoutes {
     }
 
     public static final String EMPLOYEE_DOCUMENTS = "/api/employee/documents";
+    public static final String EMPLOYEE_DOCUMENTS_VALIDATE_DRAFT = EMPLOYEE_DOCUMENTS + "/validate-draft";
     public static final String EMPLOYEE_DOCUMENTS_CANCEL = EMPLOYEE_DOCUMENTS + "/{id}/cancel";
     public static final String EMPLOYEE_DOCUMENTS_ATTACHMENT = EMPLOYEE_DOCUMENTS + "/{id}/attachment";
     public static final String EMPLOYEE_DOCUMENTS_MANAGED = EMPLOYEE_DOCUMENTS + "/managed";
