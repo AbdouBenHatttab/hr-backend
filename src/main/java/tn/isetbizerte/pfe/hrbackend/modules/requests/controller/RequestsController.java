@@ -22,6 +22,8 @@ import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.ValidateAuthorizationDr
 import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.ValidateAuthorizationDraftResponseDto;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.ValidateDocumentDraftRequestDto;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.ValidateDocumentDraftResponseDto;
+import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.ValidateLoanDraftRequestDto;
+import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.ValidateLoanDraftResponseDto;
 import tn.isetbizerte.pfe.hrbackend.modules.history.service.RequestHistoryService;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.service.RequestsService;
 
@@ -214,6 +216,24 @@ public class RequestsController {
         var data = service.createLoanRequest(jwt,
                 body.getType(), body.getAmount(), body.getRepaymentMonths(), body.getReason());
         return ok("Loan request submitted.", data);
+    }
+
+    /**
+     * POST /api/employee/loans/validate-draft
+     *
+     * Dry-run validation of a loan draft for the AI assistant.
+     * No data is saved, no events published, no history recorded.
+     * Always returns HTTP 200; {@code valid=false} signals a rule violation.
+     *
+     * repaymentMonths is required (unlike the official create endpoint) so
+     * that the scoring preview is meaningful to the user.
+     */
+    @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")
+    @PostMapping(RequestApiRoutes.EMPLOYEE_LOANS_VALIDATE_DRAFT)
+    public ResponseEntity<ValidateLoanDraftResponseDto> validateLoanDraft(
+            @Valid @RequestBody ValidateLoanDraftRequestDto body,
+            @AuthenticationPrincipal Jwt jwt) {
+        return ResponseEntity.ok(service.validateLoanDraft(body, jwt));
     }
 
     @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")

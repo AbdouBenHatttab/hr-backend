@@ -13,6 +13,7 @@ public final class RequestApiRoutes {
     public static final String EMPLOYEE_DOCUMENTS_MANAGED_DOWNLOAD = EMPLOYEE_DOCUMENTS_MANAGED + "/{id}/download";
 
     public static final String EMPLOYEE_LOANS = "/api/employee/loans";
+    public static final String EMPLOYEE_LOANS_VALIDATE_DRAFT = EMPLOYEE_LOANS + "/validate-draft";
     public static final String EMPLOYEE_LOANS_CANCEL = EMPLOYEE_LOANS + "/{id}/cancel";
     public static final String EMPLOYEE_LOANS_ELIGIBILITY = EMPLOYEE_LOANS + "/eligibility";
     public static final String EMPLOYEE_LOANS_ATTACHMENT = EMPLOYEE_LOANS + "/{id}/attachment";

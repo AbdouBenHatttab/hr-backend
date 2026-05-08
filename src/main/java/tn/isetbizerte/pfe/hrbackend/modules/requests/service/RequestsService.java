@@ -28,6 +28,8 @@ import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.ValidateAuthorizationDr
 import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.ValidateAuthorizationDraftResponseDto;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.ValidateDocumentDraftRequestDto;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.ValidateDocumentDraftResponseDto;
+import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.ValidateLoanDraftRequestDto;
+import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.ValidateLoanDraftResponseDto;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -118,17 +120,8 @@ public class RequestsService {
 
     // DOCUMENT REQUESTS
 
-    /**
-     * Dry-run document draft validation — no side effects.
-     *
-     * Applies the same business rules as createDocumentRequest without saving
-     * anything, reserving any resource, or publishing any event.
-     * Always returns HTTP 200; valid=false signals a rule violation.
-     */
     public ValidateDocumentDraftResponseDto validateDocumentDraft(ValidateDocumentDraftRequestDto body) {
         DocumentType type = body.getDocumentType();
-        // documentType nullability is already enforced by @NotNull in the DTO;
-        // this guard is a safety net in case the method is called directly.
         if (type == null) {
             return ValidateDocumentDraftResponseDto.invalid("documentType is required.");
         }
@@ -144,31 +137,12 @@ public class RequestsService {
         return ValidateDocumentDraftResponseDto.valid(type, fulfillmentMode, message);
     }
 
-    /**
-     * Dry-run authorization draft validation — no side effects.
-     *
-     * Applies the same business rules as createAuthRequest but without saving
-     * anything, publishing any Kafka/outbox event, or creating history records.
-     * Always returns HTTP 200; valid=false signals one or more rule violations.
-     *
-     * Working-time rule enforced here:
-     *   - Morning session: 08:00–12:00
-     *   - Lunch break blocked: 12:00–13:00
-     *   - Afternoon session: 13:00–17:00
-     * This is stricter than the existing createAuthRequest window (08:00–17:00)
-     * because the assistant should never propose a time that spans lunch.
-     * The real create endpoint remains unchanged.
-     *
-     * Leave-overlap check requires the caller's identity. Pass jwt=null to skip
-     * (e.g. from unit tests that do not need DB interaction).
-     */
     public ValidateAuthorizationDraftResponseDto validateAuthorizationDraft(
             ValidateAuthorizationDraftRequestDto body,
             Jwt jwt) {
 
         AuthorizationType type = body.getAuthorizationType();
 
-        // --- Blocked legacy types ---
         if (type == AuthorizationType.BUSINESS_TRIP || type == AuthorizationType.TRAINING) {
             return ValidateAuthorizationDraftResponseDto.invalid(
                     "Authorization type " + type.name() + " is no longer available for new requests.");
@@ -192,8 +166,6 @@ public class RequestsService {
         return ValidateAuthorizationDraftResponseDto.valid(type, message);
     }
 
-    // --- TIME_PERMISSION draft validation ---
-
     private void validateTimePermissionDraft(
             ValidateAuthorizationDraftRequestDto body,
             Jwt jwt,
@@ -213,7 +185,6 @@ public class RequestsService {
             errors.add("Short absence requests require toTime.");
         }
 
-        // Time-range consistency (only if both provided)
         if (from != null && to != null) {
             if (!to.isAfter(from)) {
                 errors.add("toTime must be after fromTime.");
@@ -222,7 +193,6 @@ public class RequestsService {
             }
         }
 
-        // Date-based rules (only if date provided)
         if (date != null) {
             DayOfWeek dow = date.getDayOfWeek();
             if (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) {
@@ -230,7 +200,6 @@ public class RequestsService {
             } else if (workingDayService.isPublicHoliday(date)) {
                 errors.add("Short absence date cannot be a public holiday.");
             } else if (jwt != null) {
-                // Leave-overlap check — requires an authenticated user
                 try {
                     User user = authenticatedUserResolver.require(jwt);
                     var overlaps = leaveRequestRepository.findByUserAndDateRangeAndStatusIn(
@@ -243,47 +212,20 @@ public class RequestsService {
                     }
                 } catch (Exception e) {
                     log.warn("validateAuthorizationDraft: could not resolve user for leave-overlap check.", e);
-                    // Non-fatal: overlap check skipped if user cannot be resolved
                 }
             }
         }
     }
 
-    /**
-     * Working-window rules for the assistant draft validator.
-     *
-     * Delegates to the SHARED {@link #validateShortAbsenceWindowRules(LocalTime, LocalTime)}
-     * helper so that the dry-run validate-draft endpoint and the real
-     * createAuthRequest endpoint apply EXACTLY the same time-window rule.
-     *
-     * Errors are accumulated into the provided list so that the caller can
-     * collect every violation (multiple-error response shape).
-     */
     private void validateTimePermissionWindowDraft(
             LocalTime from, LocalTime to, List<String> errors) {
         errors.addAll(validateShortAbsenceWindowRules(from, to));
     }
 
-    /**
-     * SHARED working-time rule for TIME_PERMISSION authorization requests.
-     *
-     * Used by:
-     *   - {@link #validateAuthorizationDraft(...)}     (assistant validate-draft)
-     *   - {@link #validateShortAbsenceTimeWindow(...)} (official createAuthRequest)
-     *
-     * Rules:
-     *   - Morning   : 08:00 (incl) - 12:00 (excl)
-     *   - Lunch     : 12:00 - 13:00  BLOCKED
-     *   - Afternoon : 13:00 (incl) - 17:00 (incl)
-     *   - Range cannot span the lunch break.
-     *
-     * Returns an empty list when the times are valid, or a list of error
-     * messages otherwise. Caller decides whether to throw or accumulate.
-     */
     private static List<String> validateShortAbsenceWindowRules(LocalTime from, LocalTime to) {
         List<String> errors = new ArrayList<>();
         if (from == null || to == null) {
-            return errors; // nullability is the caller's responsibility
+            return errors;
         }
 
         boolean fromBeforeLunch = !from.isBefore(SHORT_ABSENCE_WORKDAY_START) && from.isBefore(SHORT_ABSENCE_LUNCH_START);
@@ -295,24 +237,21 @@ public class RequestsService {
         boolean toValid   = toBeforeLunch   || toAfterLunch;
 
         if (!fromValid) {
-            errors.add("fromTime " + from + " is outside working windows (08:00–12:00 or 13:00–17:00).");
-            return errors; // no further cross-checks useful
+            errors.add("fromTime " + from + " is outside working windows (08:00\u201312:00 or 13:00\u201317:00).");
+            return errors;
         }
         if (!toValid) {
-            errors.add("toTime " + to + " is outside working windows (08:00–12:00 or 13:00–17:00).");
+            errors.add("toTime " + to + " is outside working windows (08:00\u201312:00 or 13:00\u201317:00).");
             return errors;
         }
 
-        // Both times in valid zones — reject if they span across lunch
         if (fromBeforeLunch && toAfterLunch) {
-            errors.add("The time range " + from + "–" + to
-                    + " spans the lunch break (12:00–13:00). "
+            errors.add("The time range " + from + "\u2013" + to
+                    + " spans the lunch break (12:00\u201313:00). "
                     + "Please split into a morning and afternoon request.");
         }
         return errors;
     }
-
-    // --- EQUIPMENT_REQUEST draft validation ---
 
     private void validateEquipmentRequestDraft(
             ValidateAuthorizationDraftRequestDto body,
@@ -335,8 +274,6 @@ public class RequestsService {
         }
     }
 
-    // --- message builder ---
-
     private String buildValidMessage(AuthorizationType type, ValidateAuthorizationDraftRequestDto body) {
         if (type == AuthorizationType.TIME_PERMISSION) {
             return "Short absence request looks valid. "
@@ -347,6 +284,149 @@ public class RequestsService {
                     + "It will be submitted for HR review and you will be notified once a decision is made.";
         }
         return "Authorization request looks valid.";
+    }
+
+    // LOAN DRAFT VALIDATION
+
+    /**
+     * Dry-run loan draft validation for the AI assistant — no side effects.
+     *
+     * Mirrors the same hard eligibility rules as createLoanRequest but without
+     * saving anything, publishing any Kafka/outbox event, or creating history records.
+     * Always returns HTTP 200. valid=false signals a rule violation.
+     *
+     * repaymentMonths is required (enforced by DTO @NotNull) so that the scoring
+     * preview is meaningful; the official create endpoint accepts it as optional.
+     *
+     * Scoring is performed on a detached (non-persisted) LoanRequest. The engine
+     * outcome is translated:
+     *   REJECT + AUTO-REJECTED in reason -> valid=false
+     *   REVIEW                           -> valid=true + warning about meeting
+     *   APPROVE                          -> valid=true
+     */
+    public ValidateLoanDraftResponseDto validateLoanDraft(ValidateLoanDraftRequestDto body, Jwt jwt) {
+        User user = authenticatedUserResolver.require(jwt);
+
+        ValidateLoanDraftResponseDto response = new ValidateLoanDraftResponseDto();
+        response.setLoanType(body.getType());
+        response.setAmount(body.getAmount());
+        response.setRepaymentMonths(body.getRepaymentMonths());
+        response.setReason(body.getReason());
+
+        List<String> errors = new ArrayList<>();
+
+        // --- Hard eligibility checks (mirror getLoanHardFailReason) ---
+
+        if (user.getPerson() == null) {
+            errors.add("Your profile is incomplete. Contact HR to register your employment details.");
+            response.setValid(false);
+            response.setErrors(errors);
+            return response;
+        }
+
+        BigDecimal salary = user.getPerson().getSalary();
+        if (salary == null || salary.compareTo(BigDecimal.ZERO) <= 0) {
+            errors.add("Your salary has not been registered. Contact HR to set up employment details before requesting a loan.");
+            response.setValid(false);
+            response.setErrors(errors);
+            return response;
+        }
+
+        // Populate context fields available at this point
+        response.setSalary(salary);
+        BigDecimal maxEligibleAmount = salary.multiply(new BigDecimal("3"));
+        response.setMaxEligibleAmount(maxEligibleAmount);
+
+        if (user.getPerson().getHireDate() != null) {
+            long months = ChronoUnit.MONTHS.between(user.getPerson().getHireDate(), LocalDate.now());
+            response.setMonthsEmployed(months);
+        }
+
+        BigDecimal amount = body.getAmount();
+
+        if (amount.compareTo(maxEligibleAmount) > 0) {
+            errors.add(String.format(
+                    "Requested amount (%.0f TND) exceeds the maximum allowed (3\u00d7 salary = %.0f TND).",
+                    amount, maxEligibleAmount));
+        }
+
+        boolean hasActiveLoan = loanRepo.findByUserOrderByRequestedAtDesc(user).stream()
+                .anyMatch(l -> l.getStatus() == RequestStatus.PENDING
+                        || l.getStatus() == RequestStatus.APPROVED);
+        if (hasActiveLoan) {
+            errors.add("You already have a pending or active loan. You must fully repay your current loan before requesting a new one.");
+        }
+
+        if (user.getPerson().getHireDate() != null) {
+            long monthsEmployed = ChronoUnit.MONTHS.between(user.getPerson().getHireDate(), LocalDate.now());
+            if (monthsEmployed < 6) {
+                errors.add(String.format(
+                        "You must be employed for at least 6 months before requesting a loan. You have been employed for %d month(s).",
+                        monthsEmployed));
+            }
+        }
+        // hireDate == null: seniority check skipped, matching current createLoanRequest behavior
+
+        if (!errors.isEmpty()) {
+            response.setValid(false);
+            response.setErrors(errors);
+            return response;
+        }
+
+        // --- Scoring preview on detached LoanRequest ---
+        // Never saved, never published, never recorded in history.
+
+        LoanRequest detached = new LoanRequest();
+        detached.setUser(user);
+        detached.setLoanType(body.getType());
+        detached.setAmount(amount);
+        detached.setRepaymentMonths(body.getRepaymentMonths());
+        detached.setReason(body.getReason());
+
+        List<String> warnings = new ArrayList<>();
+
+        try {
+            loanScoreEngine.evaluate(detached);
+
+            response.setRiskScore(detached.getRiskScore());
+            response.setSystemRecommendation(detached.getSystemRecommendation());
+            response.setMeetingRequired(detached.getMeetingRequired());
+            if (detached.getMonthlyInstallment() != null) {
+                response.setEstimatedMonthlyInstallment(detached.getMonthlyInstallment());
+            }
+
+            String recommendation = detached.getSystemRecommendation();
+            String decisionReason = detached.getDecisionReason();
+
+            boolean isAutoReject = "REJECT".equals(recommendation)
+                    && decisionReason != null
+                    && decisionReason.contains("AUTO-REJECTED");
+
+            if (isAutoReject) {
+                // Deduction threshold exceeded — valid=false, no DB write
+                errors.add(decisionReason != null
+                        ? decisionReason.replace("AUTO-REJECTED: ", "")
+                        : "Loan rejected by scoring engine due to excessive monthly deductions.");
+                response.setValid(false);
+                response.setErrors(errors);
+                return response;
+            }
+
+            if ("REVIEW".equals(recommendation)) {
+                warnings.add("Based on your profile, this loan request may require an HR meeting before a final decision. "
+                        + "HR will contact you to schedule a review session.");
+            }
+
+        } catch (Exception e) {
+            log.warn("validateLoanDraft: scoring engine failed, returning hard-rules-only result. error={}", e.getMessage());
+            // Non-fatal: scoring unavailable, return valid=true based on hard rules only
+        }
+
+        response.setValid(true);
+        response.setWarnings(warnings);
+        response.setMessage("Your loan request draft passes all eligibility checks. "
+                + "Once submitted, HR will review your request and contact you about next steps.");
+        return response;
     }
 
     @Transactional
@@ -478,8 +558,6 @@ public class RequestsService {
         return mapDocument(req);
     }
 
-    // DOCUMENT ATTACHMENTS (HR-provided fulfillment)
-
     @Transactional
     public Map<String, Object> uploadDocumentAttachment(Long id, String decidedByKeycloakId, String originalFileName, String contentType, byte[] bytes) {
         DocumentRequest req = documentRepo.findById(id)
@@ -499,7 +577,6 @@ public class RequestsService {
         UploadFileValidator.ValidatedFile validatedFile = UploadFileValidator.validate(originalFileName, bytes);
 
         try {
-            // Replace if exists to keep minimal (one attachment per request).
             attachmentStorage.deleteIfExists(req.getAttachmentStoragePath());
             StoredAttachment stored = attachmentStorage.store(id,
                     originalFileName != null ? originalFileName : "attachment",
@@ -514,7 +591,6 @@ public class RequestsService {
             req.setAttachmentUploadedAt(LocalDateTime.now());
             req.setAttachmentUploadedBy(decidedByKeycloakId);
 
-            // Enable public verification only once there's a deliverable file.
             if (req.getVerificationToken() == null || req.getVerificationToken().isBlank()) {
                 req.setVerificationToken(UUID.randomUUID().toString());
             }
@@ -570,8 +646,6 @@ public class RequestsService {
             throw new ResourceNotFoundException("Attachment not found.");
         }
     }
-
-    // HR-MANAGED EMPLOYEE DOCUMENTS
 
     @Transactional
     public Map<String, Object> uploadStoredEmployeeDocument(Long employeeUserId,
@@ -741,37 +815,26 @@ public class RequestsService {
         return mapLoan(req);
     }
 
-    /**
-     * Loan eligibility rules - objective, cannot be bypassed:
-     * 1. Salary must be set by HR before any loan can be requested
-     * 2. Max loan = 3 × monthly salary
-     * 3. No existing PENDING or active (APPROVED but unfinished) loan
-     * 4. Must have been hired at least 6 months ago
-     */
     private String getLoanHardFailReason(User user, BigDecimal amount) {
         if (user.getPerson() == null)
             return "SYSTEM-REJECTED: profile is incomplete. Contact HR.";
 
-        // Rule 1 - salary must exist
         BigDecimal salary = user.getPerson().getSalary();
         if (salary == null || salary.compareTo(BigDecimal.ZERO) <= 0)
             return "SYSTEM-REJECTED: salary has not been registered. Contact HR to set up employment details before requesting a loan.";
 
-        // Rule 2 - max 3x monthly salary
         BigDecimal maxAllowed = salary.multiply(new BigDecimal("3"));
         if (amount.compareTo(maxAllowed) > 0)
             return String.format(
-                "SYSTEM-REJECTED: requested amount (%.0f TND) exceeds the maximum allowed (3× salary = %.0f TND).",
+                "SYSTEM-REJECTED: requested amount (%.0f TND) exceeds the maximum allowed (3\u00d7 salary = %.0f TND).",
                 amount, maxAllowed);
 
-        // Rule 3 - no existing pending/approved loan
         boolean hasActiveLoan = loanRepo.findByUserOrderByRequestedAtDesc(user).stream()
                 .anyMatch(l -> l.getStatus() == RequestStatus.PENDING ||
                                l.getStatus() == RequestStatus.APPROVED);
         if (hasActiveLoan)
             return "SYSTEM-REJECTED: you already have a pending or active loan. You must fully repay your current loan before requesting a new one.";
 
-        // Rule 4 - minimum 6 months employment
         if (user.getPerson().getHireDate() != null) {
             long monthsEmployed = java.time.temporal.ChronoUnit.MONTHS.between(
                     user.getPerson().getHireDate(), java.time.LocalDate.now());
@@ -789,10 +852,6 @@ public class RequestsService {
                 && req.getDecisionReason().contains("AUTO-REJECTED");
     }
 
-    /**
-     * Returns the employee's loan eligibility details without submitting anything.
-     * Frontend uses this to show the eligibility panel before the form.
-     */
     public Map<String, Object> getLoanEligibility(Jwt jwt) {
         User user = authenticatedUserResolver.require(jwt);
         Map<String, Object> result = new HashMap<>();
@@ -974,7 +1033,6 @@ public class RequestsService {
             req.setApprovedBy(decidedByKeycloakId);
             req.setApprovedAt(decidedAt);
             req.setVerificationToken(UUID.randomUUID().toString());
-            // Update monthly deductions
             if (req.getMonthlyInstallment() != null
                     && req.getUser() != null
                     && req.getUser().getPerson() != null) {
@@ -1344,17 +1402,6 @@ public class RequestsService {
         }
     }
 
-    /**
-     * Time-window validation for the OFFICIAL createAuthRequest TIME_PERMISSION flow.
-     *
-     * Delegates to the shared {@link #validateShortAbsenceWindowRules(LocalTime, LocalTime)}
-     * helper so the official endpoint enforces exactly the same rule as
-     * validate-draft (morning 08:00–12:00, lunch blocked 12:00–13:00,
-     * afternoon 13:00–17:00, no range spanning lunch).
-     *
-     * Throws on the first violation to preserve the existing exception-driven
-     * contract used by the create endpoint and its tests.
-     */
     private void validateShortAbsenceTimeWindow(LocalTime fromTime, LocalTime toTime) {
         if (fromTime == null || toTime == null) {
             throw new BadRequestException("Short absence requests require from time and to time.");
@@ -1468,7 +1515,7 @@ public class RequestsService {
         }
     }
 
-    // PDF GETTERS - used by report controller
+    // PDF GETTERS
 
     public DocumentRequest getDocumentRequestForPdf(Long id, String requesterKeycloakId) {
         DocumentRequest req = documentRepo.findById(id)
@@ -1663,8 +1710,6 @@ public class RequestsService {
         m.put("hrDecisionReason", r.getHrDecisionReason());
         m.put("hrDecisionStage", r.getHrDecisionStage());
         m.put("cancellationReason", r.getCancellationReason());
-        m.put("canceledBy",       r.getCanceledBy());
-        m.put("canceledAt",       r.getCanceledAt());
         m.put("hrNote",          r.getHrNote());
         m.put("requestedAt",     r.getRequestedAt());
         m.put("processedAt",     r.getProcessedAt());
@@ -1679,7 +1724,6 @@ public class RequestsService {
             m.put("employeeUsername", r.getUser().getUsername());
             m.put("employeeRole", r.getUser().getRole() != null ? r.getUser().getRole().name() : null);
         }
-        // Scoring fields
         m.put("monthlyInstallment",   r.getMonthlyInstallment());
         m.put("monthlyPayback",       r.getMonthlyInstallment());
         if (r.getMonthlyInstallment() != null && r.getRepaymentMonths() != null) {
@@ -1699,7 +1743,6 @@ public class RequestsService {
         m.put("meetingNote",          r.getMeetingNote());
         m.put("meetingScheduledBy",   r.getMeetingScheduledBy());
         m.put("meetingScheduledAt",   r.getMeetingScheduledAt());
-        // Include salary for HR risk assessment
         if (r.getUser() != null && r.getUser().getPerson() != null) {
             var person = r.getUser().getPerson();
             m.put("employeeEmail",            person.getEmail());
@@ -1763,7 +1806,7 @@ public class RequestsService {
             LocalDate date = r.getAbsenceDate() != null ? r.getAbsenceDate() : r.getStartDate();
             String dateLabel = date != null ? date.toString() : "Date not specified";
             if (r.getFromTime() != null && r.getToTime() != null) {
-                return dateLabel + " · " + formatTime(r.getFromTime()) + "-" + formatTime(r.getToTime());
+                return dateLabel + " \u00b7 " + formatTime(r.getFromTime()) + "-" + formatTime(r.getToTime());
             }
             return dateLabel;
         }
@@ -1777,9 +1820,3 @@ public class RequestsService {
         return time == null ? "" : time.toString().substring(0, 5);
     }
 }
-
-
-
-
-
-
