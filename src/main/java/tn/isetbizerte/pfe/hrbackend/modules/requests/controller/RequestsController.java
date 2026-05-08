@@ -18,6 +18,8 @@ import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.CreateLoanRequestDto;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.HrDecisionNoteDto;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.RejectLoanRequestDto;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.ScheduleLoanMeetingDto;
+import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.ValidateAuthorizationDraftRequestDto;
+import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.ValidateAuthorizationDraftResponseDto;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.ValidateDocumentDraftRequestDto;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.ValidateDocumentDraftResponseDto;
 import tn.isetbizerte.pfe.hrbackend.modules.history.service.RequestHistoryService;
@@ -339,6 +341,25 @@ public class RequestsController {
     }
 
     // AUTHORIZATION REQUESTS
+
+    /**
+     * POST /api/employee/authorizations/validate-draft
+     *
+     * Dry-run validation of an authorization draft. No data is saved, no events
+     * published, and no history records are created.
+     * Always returns HTTP 200; {@code valid=false} in the body signals a rule violation.
+     * Called by React/FastAPI after extracting structured fields from the user's chat
+     * message, before showing the confirmation dialog.
+     *
+     * Requires authenticated user so that leave-overlap can be checked.
+     */
+    @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")
+    @PostMapping(RequestApiRoutes.EMPLOYEE_AUTHORIZATIONS_VALIDATE_DRAFT)
+    public ResponseEntity<ValidateAuthorizationDraftResponseDto> validateAuthorizationDraft(
+            @Valid @RequestBody ValidateAuthorizationDraftRequestDto body,
+            @AuthenticationPrincipal Jwt jwt) {
+        return ResponseEntity.ok(service.validateAuthorizationDraft(body, jwt));
+    }
 
     @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")
     @PostMapping(RequestApiRoutes.EMPLOYEE_AUTHORIZATIONS)

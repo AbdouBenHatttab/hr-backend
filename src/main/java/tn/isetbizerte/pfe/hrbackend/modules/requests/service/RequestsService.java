@@ -24,6 +24,8 @@ import tn.isetbizerte.pfe.hrbackend.modules.calendar.service.WorkingDayService;
 import tn.isetbizerte.pfe.hrbackend.modules.employee.repository.LeaveRequestRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.CreateAuthorizationRequestDto;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.CreateDocumentRequestDto;
+import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.ValidateAuthorizationDraftRequestDto;
+import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.ValidateAuthorizationDraftResponseDto;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.ValidateDocumentDraftRequestDto;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.dto.ValidateDocumentDraftResponseDto;
 
@@ -43,8 +45,17 @@ import org.springframework.security.oauth2.jwt.Jwt;
 @Service
 @Slf4j
 public class RequestsService {
-    private static final LocalTime SHORT_ABSENCE_WORKDAY_START = LocalTime.of(8, 0);
-    private static final LocalTime SHORT_ABSENCE_WORKDAY_END = LocalTime.of(17, 0);
+    // Working-time rule shared between assistant validate-draft and the official
+    // createAuthRequest TIME_PERMISSION flow. The day is split into:
+    //   Morning   : 08:00 (incl) - 12:00 (excl)
+    //   Lunch     : 12:00 - 13:00  BLOCKED
+    //   Afternoon : 13:00 (incl) - 17:00 (incl)
+    // A range that starts in the morning and ends in the afternoon is rejected
+    // because it spans the lunch break.
+    private static final LocalTime SHORT_ABSENCE_WORKDAY_START  = LocalTime.of(8,  0);
+    private static final LocalTime SHORT_ABSENCE_LUNCH_START    = LocalTime.of(12, 0);
+    private static final LocalTime SHORT_ABSENCE_LUNCH_END      = LocalTime.of(13, 0);
+    private static final LocalTime SHORT_ABSENCE_WORKDAY_END    = LocalTime.of(17, 0);
     private static final LocalTime LOAN_MEETING_START = LocalTime.of(8, 0);
     private static final LocalTime LOAN_MEETING_LUNCH_START = LocalTime.of(12, 0);
     private static final LocalTime LOAN_MEETING_LATEST_START = LocalTime.of(16, 0);
@@ -131,6 +142,211 @@ public class RequestsService {
                 ? "This document will be generated automatically by the system once HR approves your request."
                 : "HR will prepare and upload this document once your request is approved.";
         return ValidateDocumentDraftResponseDto.valid(type, fulfillmentMode, message);
+    }
+
+    /**
+     * Dry-run authorization draft validation — no side effects.
+     *
+     * Applies the same business rules as createAuthRequest but without saving
+     * anything, publishing any Kafka/outbox event, or creating history records.
+     * Always returns HTTP 200; valid=false signals one or more rule violations.
+     *
+     * Working-time rule enforced here:
+     *   - Morning session: 08:00–12:00
+     *   - Lunch break blocked: 12:00–13:00
+     *   - Afternoon session: 13:00–17:00
+     * This is stricter than the existing createAuthRequest window (08:00–17:00)
+     * because the assistant should never propose a time that spans lunch.
+     * The real create endpoint remains unchanged.
+     *
+     * Leave-overlap check requires the caller's identity. Pass jwt=null to skip
+     * (e.g. from unit tests that do not need DB interaction).
+     */
+    public ValidateAuthorizationDraftResponseDto validateAuthorizationDraft(
+            ValidateAuthorizationDraftRequestDto body,
+            Jwt jwt) {
+
+        AuthorizationType type = body.getAuthorizationType();
+
+        // --- Blocked legacy types ---
+        if (type == AuthorizationType.BUSINESS_TRIP || type == AuthorizationType.TRAINING) {
+            return ValidateAuthorizationDraftResponseDto.invalid(
+                    "Authorization type " + type.name() + " is no longer available for new requests.");
+        }
+
+        List<String> errors = new ArrayList<>();
+
+        if (type == AuthorizationType.TIME_PERMISSION) {
+            validateTimePermissionDraft(body, jwt, errors);
+        } else if (type == AuthorizationType.EQUIPMENT_REQUEST) {
+            validateEquipmentRequestDraft(body, errors);
+        } else {
+            errors.add("Unsupported authorization type: " + type.name());
+        }
+
+        if (!errors.isEmpty()) {
+            return ValidateAuthorizationDraftResponseDto.invalid(type, errors);
+        }
+
+        String message = buildValidMessage(type, body);
+        return ValidateAuthorizationDraftResponseDto.valid(type, message);
+    }
+
+    // --- TIME_PERMISSION draft validation ---
+
+    private void validateTimePermissionDraft(
+            ValidateAuthorizationDraftRequestDto body,
+            Jwt jwt,
+            List<String> errors) {
+
+        LocalDate date = body.getEffectiveAbsenceDate();
+        LocalTime from = body.getFromTime();
+        LocalTime to   = body.getToTime();
+
+        if (date == null) {
+            errors.add("Short absence requests require a date (absenceDate).");
+        }
+        if (from == null) {
+            errors.add("Short absence requests require fromTime.");
+        }
+        if (to == null) {
+            errors.add("Short absence requests require toTime.");
+        }
+
+        // Time-range consistency (only if both provided)
+        if (from != null && to != null) {
+            if (!to.isAfter(from)) {
+                errors.add("toTime must be after fromTime.");
+            } else {
+                validateTimePermissionWindowDraft(from, to, errors);
+            }
+        }
+
+        // Date-based rules (only if date provided)
+        if (date != null) {
+            DayOfWeek dow = date.getDayOfWeek();
+            if (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) {
+                errors.add("Short absence date must be a working day. Weekends are not allowed.");
+            } else if (workingDayService.isPublicHoliday(date)) {
+                errors.add("Short absence date cannot be a public holiday.");
+            } else if (jwt != null) {
+                // Leave-overlap check — requires an authenticated user
+                try {
+                    User user = authenticatedUserResolver.require(jwt);
+                    var overlaps = leaveRequestRepository.findByUserAndDateRangeAndStatusIn(
+                            user, date, date,
+                            List.of(LeaveStatus.PENDING, LeaveStatus.APPROVED));
+                    if (overlaps.stream().anyMatch(l -> l.getStatus() == LeaveStatus.APPROVED)) {
+                        errors.add("Short absence date overlaps an approved leave.");
+                    } else if (!overlaps.isEmpty()) {
+                        errors.add("Short absence date overlaps a pending leave request.");
+                    }
+                } catch (Exception e) {
+                    log.warn("validateAuthorizationDraft: could not resolve user for leave-overlap check.", e);
+                    // Non-fatal: overlap check skipped if user cannot be resolved
+                }
+            }
+        }
+    }
+
+    /**
+     * Working-window rules for the assistant draft validator.
+     *
+     * Delegates to the SHARED {@link #validateShortAbsenceWindowRules(LocalTime, LocalTime)}
+     * helper so that the dry-run validate-draft endpoint and the real
+     * createAuthRequest endpoint apply EXACTLY the same time-window rule.
+     *
+     * Errors are accumulated into the provided list so that the caller can
+     * collect every violation (multiple-error response shape).
+     */
+    private void validateTimePermissionWindowDraft(
+            LocalTime from, LocalTime to, List<String> errors) {
+        errors.addAll(validateShortAbsenceWindowRules(from, to));
+    }
+
+    /**
+     * SHARED working-time rule for TIME_PERMISSION authorization requests.
+     *
+     * Used by:
+     *   - {@link #validateAuthorizationDraft(...)}     (assistant validate-draft)
+     *   - {@link #validateShortAbsenceTimeWindow(...)} (official createAuthRequest)
+     *
+     * Rules:
+     *   - Morning   : 08:00 (incl) - 12:00 (excl)
+     *   - Lunch     : 12:00 - 13:00  BLOCKED
+     *   - Afternoon : 13:00 (incl) - 17:00 (incl)
+     *   - Range cannot span the lunch break.
+     *
+     * Returns an empty list when the times are valid, or a list of error
+     * messages otherwise. Caller decides whether to throw or accumulate.
+     */
+    private static List<String> validateShortAbsenceWindowRules(LocalTime from, LocalTime to) {
+        List<String> errors = new ArrayList<>();
+        if (from == null || to == null) {
+            return errors; // nullability is the caller's responsibility
+        }
+
+        boolean fromBeforeLunch = !from.isBefore(SHORT_ABSENCE_WORKDAY_START) && from.isBefore(SHORT_ABSENCE_LUNCH_START);
+        boolean fromAfterLunch  = !from.isBefore(SHORT_ABSENCE_LUNCH_END)    && !from.isAfter(SHORT_ABSENCE_WORKDAY_END);
+        boolean toBeforeLunch   = !to.isBefore(SHORT_ABSENCE_WORKDAY_START)  && !to.isAfter(SHORT_ABSENCE_LUNCH_START);
+        boolean toAfterLunch    = !to.isBefore(SHORT_ABSENCE_LUNCH_END)      && !to.isAfter(SHORT_ABSENCE_WORKDAY_END);
+
+        boolean fromValid = fromBeforeLunch || fromAfterLunch;
+        boolean toValid   = toBeforeLunch   || toAfterLunch;
+
+        if (!fromValid) {
+            errors.add("fromTime " + from + " is outside working windows (08:00–12:00 or 13:00–17:00).");
+            return errors; // no further cross-checks useful
+        }
+        if (!toValid) {
+            errors.add("toTime " + to + " is outside working windows (08:00–12:00 or 13:00–17:00).");
+            return errors;
+        }
+
+        // Both times in valid zones — reject if they span across lunch
+        if (fromBeforeLunch && toAfterLunch) {
+            errors.add("The time range " + from + "–" + to
+                    + " spans the lunch break (12:00–13:00). "
+                    + "Please split into a morning and afternoon request.");
+        }
+        return errors;
+    }
+
+    // --- EQUIPMENT_REQUEST draft validation ---
+
+    private void validateEquipmentRequestDraft(
+            ValidateAuthorizationDraftRequestDto body,
+            List<String> errors) {
+
+        if (body.getEquipmentType() == null || body.getEquipmentType().trim().isBlank()) {
+            errors.add("Equipment type is required.");
+        }
+        if (body.getReason() == null || body.getReason().trim().isBlank()) {
+            errors.add("Reason is required for equipment requests.");
+        }
+        if (body.getStartDate() == null) {
+            errors.add("Needed-from date (startDate) is required.");
+        } else if (body.getStartDate().isBefore(LocalDate.now())) {
+            errors.add("Needed-from date cannot be in the past.");
+        }
+        if (body.getStartDate() != null && body.getEndDate() != null
+                && body.getEndDate().isBefore(body.getStartDate())) {
+            errors.add("Expected return date must be on or after needed-from date.");
+        }
+    }
+
+    // --- message builder ---
+
+    private String buildValidMessage(AuthorizationType type, ValidateAuthorizationDraftRequestDto body) {
+        if (type == AuthorizationType.TIME_PERMISSION) {
+            return "Short absence request looks valid. "
+                    + "It will be submitted for HR review and you will be notified once a decision is made.";
+        }
+        if (type == AuthorizationType.EQUIPMENT_REQUEST) {
+            return "Equipment borrowing request looks valid. "
+                    + "It will be submitted for HR review and you will be notified once a decision is made.";
+        }
+        return "Authorization request looks valid.";
     }
 
     @Transactional
@@ -1128,18 +1344,27 @@ public class RequestsService {
         }
     }
 
+    /**
+     * Time-window validation for the OFFICIAL createAuthRequest TIME_PERMISSION flow.
+     *
+     * Delegates to the shared {@link #validateShortAbsenceWindowRules(LocalTime, LocalTime)}
+     * helper so the official endpoint enforces exactly the same rule as
+     * validate-draft (morning 08:00–12:00, lunch blocked 12:00–13:00,
+     * afternoon 13:00–17:00, no range spanning lunch).
+     *
+     * Throws on the first violation to preserve the existing exception-driven
+     * contract used by the create endpoint and its tests.
+     */
     private void validateShortAbsenceTimeWindow(LocalTime fromTime, LocalTime toTime) {
         if (fromTime == null || toTime == null) {
             throw new BadRequestException("Short absence requests require from time and to time.");
         }
-        if (fromTime.isBefore(SHORT_ABSENCE_WORKDAY_START)
-                || fromTime.isAfter(SHORT_ABSENCE_WORKDAY_END)
-                || toTime.isBefore(SHORT_ABSENCE_WORKDAY_START)
-                || toTime.isAfter(SHORT_ABSENCE_WORKDAY_END)) {
-            throw new BadRequestException("Short absence must be within company working hours.");
-        }
         if (!toTime.isAfter(fromTime)) {
             throw new BadRequestException("To time must be after from time.");
+        }
+        List<String> errors = validateShortAbsenceWindowRules(fromTime, toTime);
+        if (!errors.isEmpty()) {
+            throw new BadRequestException(errors.get(0));
         }
     }
 

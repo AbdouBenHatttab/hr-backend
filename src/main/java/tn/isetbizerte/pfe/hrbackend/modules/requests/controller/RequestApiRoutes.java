@@ -18,6 +18,7 @@ public final class RequestApiRoutes {
     public static final String EMPLOYEE_LOANS_ATTACHMENT = EMPLOYEE_LOANS + "/{id}/attachment";
 
     public static final String EMPLOYEE_AUTHORIZATIONS = "/api/employee/authorizations";
+    public static final String EMPLOYEE_AUTHORIZATIONS_VALIDATE_DRAFT = EMPLOYEE_AUTHORIZATIONS + "/validate-draft";
     public static final String EMPLOYEE_AUTHORIZATIONS_CANCEL = EMPLOYEE_AUTHORIZATIONS + "/{id}/cancel";
 
     public static final String HR_DOCUMENTS = "/api/hr/documents";
