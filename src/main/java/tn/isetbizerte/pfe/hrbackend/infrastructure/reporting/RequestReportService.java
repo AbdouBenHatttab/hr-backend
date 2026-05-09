@@ -81,7 +81,7 @@ public class RequestReportService {
             p.put("employeeDepartment", req.getEmployeeDepartment());
             p.put("loanType",           fmt(req.getLoanType().name()));
             p.put("amount",             req.getAmount().toPlainString() + " TND");
-            p.put("repaymentMonths",    String.valueOf(req.getRepaymentMonths()));
+            p.put("repaymentMonths",    req.getRepaymentMonths() != null ? String.valueOf(req.getRepaymentMonths()) : null);
             p.put("reason",             req.getReason() != null ? req.getReason() : "");
             p.put("requestedAt",        req.getRequestedAt() != null ? req.getRequestedAt().format(DATETIME_FMT) : "");
             p.put("processedAt",        req.getProcessedAt() != null ? req.getProcessedAt().format(DATETIME_FMT) : "");

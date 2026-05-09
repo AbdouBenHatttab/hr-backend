@@ -166,7 +166,7 @@ class RequestsControllerLoanDraftValidationTest {
 
     @Test
     void missingRequiredFields_returns400BeforeServiceIsCalled() throws Exception {
-        // Empty JSON — amount, type, reason, repaymentMonths all missing
+        // Empty JSON — amount, type, and reason are still required.
         mockMvc.perform(post(RequestApiRoutes.EMPLOYEE_LOANS_VALIDATE_DRAFT)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
@@ -176,7 +176,12 @@ class RequestsControllerLoanDraftValidationTest {
     }
 
     @Test
-    void missingRepaymentMonths_returns400BeforeServiceIsCalled() throws Exception {
+    void missingRepaymentMonths_returns200AndDelegatesToService() throws Exception {
+        ValidateLoanDraftResponseDto stub = ValidateLoanDraftResponseDto.valid("OK");
+
+        when(requestsService.validateLoanDraft(any(ValidateLoanDraftRequestDto.class), any(Jwt.class)))
+                .thenReturn(stub);
+
         mockMvc.perform(post(RequestApiRoutes.EMPLOYEE_LOANS_VALIDATE_DRAFT)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -186,9 +191,10 @@ class RequestsControllerLoanDraftValidationTest {
                                   "reason": "Need funds"
                                 }
                                 """.formatted(VALID_LOAN_TYPE.name())))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.valid").value(true));
 
-        verifyNoInteractions(requestsService);
+        verify(requestsService).validateLoanDraft(any(ValidateLoanDraftRequestDto.class), any(Jwt.class));
     }
 
     // -------------------------------------------------------------------------

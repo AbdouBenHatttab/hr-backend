@@ -35,7 +35,7 @@ public class LoanRequest {
     @Column(length = 1000)
     private String approvedAmountJustification;
 
-    @Column(nullable = false)
+    @Column
     private Integer repaymentMonths;
 
     @Column(length = 1000)

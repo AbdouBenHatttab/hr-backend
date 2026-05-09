@@ -46,14 +46,17 @@ public class LoanScoreEngine {
 
         BigDecimal salary      = person.getSalary();
         BigDecimal amount      = loan.getAmount();
-        int        months      = loan.getRepaymentMonths();
+        Integer    months      = loan.getRepaymentMonths();
         BigDecimal existingDed = person.getCurrentMonthlyDeductions() != null
                 ? person.getCurrentMonthlyDeductions()
                 : BigDecimal.ZERO;
 
-        // Monthly installment for this loan
-        BigDecimal installment = amount.divide(
-                BigDecimal.valueOf(months), 2, RoundingMode.HALF_UP);
+        // Monthly installment is only derivable when the repayment term is known.
+        BigDecimal installment = null;
+        if (months != null) {
+            installment = amount.divide(
+                    BigDecimal.valueOf(months), 2, RoundingMode.HALF_UP);
+        }
         loan.setMonthlyInstallment(installment);
 
         int score = 100;
@@ -81,25 +84,29 @@ public class LoanScoreEngine {
 
         // Deduction penalty (0-30)
         // Total monthly deductions after this loan vs salary
-        BigDecimal totalDeductions   = existingDed.add(installment);
-        double     deductionRatio    = totalDeductions.divide(salary, 4, RoundingMode.HALF_UP).doubleValue();
-        int        deductionPenalty  = 0;
-        if (deductionRatio > 0.40) {
-            deductionPenalty = 30;
-            reasons.add(String.format(
-                "Total deductions would be %.0f%% of salary (exceeds 40%% threshold). ",
-                deductionRatio * 100));
-        } else if (deductionRatio > 0.30) {
-            deductionPenalty = 20;
-            reasons.add(String.format(
-                "Total deductions would be %.0f%% of salary (above 30%% warning threshold). ",
-                deductionRatio * 100));
-        } else if (deductionRatio > 0.20) {
-            deductionPenalty = 8;
-            reasons.add(String.format(
-                "Deductions at %.0f%% of salary (manageable). ", deductionRatio * 100));
+        Double deductionRatio = null;
+        if (installment != null) {
+            BigDecimal totalDeductions = existingDed.add(installment);
+            deductionRatio = totalDeductions.divide(salary, 4, RoundingMode.HALF_UP).doubleValue();
+
+            int deductionPenalty = 0;
+            if (deductionRatio > 0.40) {
+                deductionPenalty = 30;
+                reasons.add(String.format(
+                        "Total deductions would be %.0f%% of salary (exceeds 40%% threshold). ",
+                        deductionRatio * 100));
+            } else if (deductionRatio > 0.30) {
+                deductionPenalty = 20;
+                reasons.add(String.format(
+                        "Total deductions would be %.0f%% of salary (above 30%% warning threshold). ",
+                        deductionRatio * 100));
+            } else if (deductionRatio > 0.20) {
+                deductionPenalty = 8;
+                reasons.add(String.format(
+                        "Deductions at %.0f%% of salary (manageable). ", deductionRatio * 100));
+            }
+            score -= deductionPenalty;
         }
-        score -= deductionPenalty;
 
         // Stability bonus (0-20)
         int stabilityBonus = 0;
@@ -144,7 +151,7 @@ public class LoanScoreEngine {
         // Recommendation
         String recommendation;
         boolean meetingRequired;
-        if (deductionRatio > 0.40) {
+        if (deductionRatio != null && deductionRatio > 0.40) {
             // Hard threshold - deductions too high
             recommendation  = "REJECT";
             meetingRequired = false;

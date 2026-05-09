@@ -225,8 +225,8 @@ public class RequestsController {
      * No data is saved, no events published, no history recorded.
      * Always returns HTTP 200; {@code valid=false} signals a rule violation.
      *
-     * repaymentMonths is required (unlike the official create endpoint) so
-     * that the scoring preview is meaningful to the user.
+     * repaymentMonths is optional so the assistant can mirror the manual loan
+     * form, where HR confirms repayment terms later.
      */
     @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")
     @PostMapping(RequestApiRoutes.EMPLOYEE_LOANS_VALIDATE_DRAFT)

@@ -9,9 +9,9 @@ import java.math.BigDecimal;
 /**
  * Request DTO for the dry-run loan draft validation endpoint.
  *
- * repaymentMonths is REQUIRED here (unlike CreateLoanRequestDto where it
- * is optional and defaults to 1). The assistant must always provide a
- * repayment period so that the scoring preview is meaningful.
+ * repaymentMonths is OPTIONAL here so the assistant can validate the same
+ * draft shape as the manual loan form. When omitted, HR confirms the final
+ * repayment terms later.
  *
  * Business-rule violations (salary missing, amount too high, etc.) are
  * returned as structured errors (valid=false, errors=[...]) with HTTP 200,
@@ -34,10 +34,9 @@ public class ValidateLoanDraftRequestDto {
     private String reason;
 
     /**
-     * Required for assistant preview. Defaults in CreateLoanRequestDto (→ 1)
-     * make the scoring misleading; the assistant must always supply this.
+     * Optional for assistant preview. If the user did not mention a repayment
+     * period, the draft still validates and HR confirms the final terms later.
      */
-    @NotNull(message = "Repayment period is required for assistant loan eligibility preview. HR may adjust final terms during approval.")
     @Min(value = 1, message = "Repayment months must be at least 1")
     @Max(value = 120, message = "Repayment months cannot exceed 120")
     private Integer repaymentMonths;

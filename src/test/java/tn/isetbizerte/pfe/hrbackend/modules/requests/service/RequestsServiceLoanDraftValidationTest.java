@@ -2,6 +2,7 @@ package tn.isetbizerte.pfe.hrbackend.modules.requests.service;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.security.oauth2.jwt.Jwt;
 import tn.isetbizerte.pfe.hrbackend.common.enums.LoanType;
 import tn.isetbizerte.pfe.hrbackend.common.enums.RequestStatus;
@@ -101,7 +102,11 @@ class RequestsServiceLoanDraftValidationTest {
             req.setSystemRecommendation("APPROVE");
             req.setDecisionReason("Loan meets all criteria with acceptable risk.");
             req.setMeetingRequired(false);
-            req.setMonthlyInstallment(req.getAmount().divide(BigDecimal.valueOf(req.getRepaymentMonths()), 2, java.math.RoundingMode.HALF_UP));
+            if (req.getRepaymentMonths() != null) {
+                req.setMonthlyInstallment(req.getAmount().divide(BigDecimal.valueOf(req.getRepaymentMonths()), 2, java.math.RoundingMode.HALF_UP));
+            } else {
+                req.setMonthlyInstallment(null);
+            }
             return null;
         }).when(loanScoreEngine).evaluate(any(LoanRequest.class));
     }
@@ -208,6 +213,32 @@ class RequestsServiceLoanDraftValidationTest {
         verifyNoInteractions(loanScoreEngine);
     }
 
+    @Test
+    void existingRejectedLoan_doesNotBlockValidation() {
+        LoanRequest existing = new LoanRequest();
+        existing.setStatus(RequestStatus.REJECTED);
+        when(loanRepo.findByUserOrderByRequestedAtDesc(user)).thenReturn(List.of(existing));
+
+        var req = loanRequest(new BigDecimal("3000"), 12);
+        var result = service.validateLoanDraft(req, jwt);
+
+        assertThat(result.isValid()).isTrue();
+        verify(loanScoreEngine).evaluate(any(LoanRequest.class));
+    }
+
+    @Test
+    void existingCancelledLoan_doesNotBlockValidation() {
+        LoanRequest existing = new LoanRequest();
+        existing.setStatus(RequestStatus.CANCELLED_AFTER_MEETING);
+        when(loanRepo.findByUserOrderByRequestedAtDesc(user)).thenReturn(List.of(existing));
+
+        var req = loanRequest(new BigDecimal("3000"), 12);
+        var result = service.validateLoanDraft(req, jwt);
+
+        assertThat(result.isValid()).isTrue();
+        verify(loanScoreEngine).evaluate(any(LoanRequest.class));
+    }
+
     // =========================================================================
     // Test 6: seniority below 6 months returns valid=false
     // =========================================================================
@@ -241,19 +272,54 @@ class RequestsServiceLoanDraftValidationTest {
     }
 
     // =========================================================================
-    // Test 8: missing repaymentMonths — DTO @NotNull, so service gets null
-    //         The spec says return valid=false with the preview message.
-    //         In reality @Valid catches it as HTTP 400 before service, so
-    //         this test verifies the DTO constraint is present and meaningful.
+    // Test 8: repaymentMonths is optional for assistant loan drafts
     // =========================================================================
 
     @Test
-    void dtoRepaymentMonthsAnnotation_isNotNull() throws Exception {
+    void dtoRepaymentMonthsAnnotation_isOptional() throws Exception {
         var field = ValidateLoanDraftRequestDto.class.getDeclaredField("repaymentMonths");
         field.setAccessible(true);
         var notNull = field.getAnnotation(jakarta.validation.constraints.NotNull.class);
-        assertThat(notNull).isNotNull();
-        assertThat(notNull.message()).contains("Repayment period is required");
+        assertThat(notNull).isNull();
+        var min = field.getAnnotation(jakarta.validation.constraints.Min.class);
+        var max = field.getAnnotation(jakarta.validation.constraints.Max.class);
+        assertThat(min).isNotNull();
+        assertThat(min.value()).isEqualTo(1L);
+        assertThat(max).isNotNull();
+        assertThat(max.value()).isEqualTo(120L);
+    }
+
+    @Test
+    void validateLoanDraft_withoutRepaymentMonths_shouldNotRequireOrDefaultToOne() {
+        var req = loanRequest(new BigDecimal("5000"), null);
+
+        ValidateLoanDraftResponseDto result = service.validateLoanDraft(req, jwt);
+
+        assertThat(result.isValid()).isTrue();
+        assertThat(result.getErrors()).isEmpty();
+        assertThat(result.getRepaymentMonths()).isNull();
+        assertThat(result.getEstimatedMonthlyInstallment()).isNull();
+
+        ArgumentCaptor<LoanRequest> captor = ArgumentCaptor.forClass(LoanRequest.class);
+        verify(loanScoreEngine).evaluate(captor.capture());
+        assertThat(captor.getValue().getRepaymentMonths()).isNull();
+        assertThat(captor.getValue().getMonthlyInstallment()).isNull();
+    }
+
+    @Test
+    void validateLoanDraft_withRepaymentMonths_shouldUseProvidedValue() {
+        var req = loanRequest(new BigDecimal("5000"), 12);
+
+        ValidateLoanDraftResponseDto result = service.validateLoanDraft(req, jwt);
+
+        assertThat(result.isValid()).isTrue();
+        assertThat(result.getRepaymentMonths()).isEqualTo(12);
+        assertThat(result.getEstimatedMonthlyInstallment()).isEqualByComparingTo("416.67");
+
+        ArgumentCaptor<LoanRequest> captor = ArgumentCaptor.forClass(LoanRequest.class);
+        verify(loanScoreEngine).evaluate(captor.capture());
+        assertThat(captor.getValue().getRepaymentMonths()).isEqualTo(12);
+        assertThat(captor.getValue().getMonthlyInstallment()).isEqualByComparingTo("416.67");
     }
 
     // =========================================================================
@@ -381,7 +447,7 @@ class RequestsServiceLoanDraftValidationTest {
     // Helpers
     // =========================================================================
 
-    private ValidateLoanDraftRequestDto loanRequest(BigDecimal amount, int repaymentMonths) {
+    private ValidateLoanDraftRequestDto loanRequest(BigDecimal amount, Integer repaymentMonths) {
         ValidateLoanDraftRequestDto req = new ValidateLoanDraftRequestDto();
         req.setAmount(amount);
         req.setType(VALID_LOAN_TYPE);

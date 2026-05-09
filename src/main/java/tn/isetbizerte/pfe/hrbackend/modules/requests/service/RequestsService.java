@@ -72,7 +72,6 @@ public class RequestsService {
             LocalTime.of(15, 0),
             LocalTime.of(16, 0)
     );
-    private static final int LOAN_REPAYMENT_MONTHS_COMPATIBILITY_VALUE = 1;
     private static final BigDecimal LOAN_TOTAL_PAYBACK_LOWER_TOLERANCE = new BigDecimal("1.00");
     private static final BigDecimal LOAN_MAX_TOTAL_PAYBACK_MULTIPLIER = new BigDecimal("1.20");
 
@@ -295,8 +294,8 @@ public class RequestsService {
      * saving anything, publishing any Kafka/outbox event, or creating history records.
      * Always returns HTTP 200. valid=false signals a rule violation.
      *
-     * repaymentMonths is required (enforced by DTO @NotNull) so that the scoring
-     * preview is meaningful; the official create endpoint accepts it as optional.
+     * repaymentMonths is optional so the preview matches the manual loan form.
+     * When omitted, the draft still validates and HR confirms the final terms later.
      *
      * Scoring is performed on a detached (non-persisted) LoanRequest. The engine
      * outcome is translated:
@@ -350,11 +349,9 @@ public class RequestsService {
                     amount, maxEligibleAmount));
         }
 
-        boolean hasActiveLoan = loanRepo.findByUserOrderByRequestedAtDesc(user).stream()
-                .anyMatch(l -> l.getStatus() == RequestStatus.PENDING
-                        || l.getStatus() == RequestStatus.APPROVED);
-        if (hasActiveLoan) {
-            errors.add("You already have a pending or active loan. You must fully repay your current loan before requesting a new one.");
+        String duplicateLoanReason = getDuplicateLoanBlockReason(user);
+        if (duplicateLoanReason != null) {
+            errors.add(duplicateLoanReason);
         }
 
         if (user.getPerson().getHireDate() != null) {
@@ -768,13 +765,20 @@ public class RequestsService {
     public Map<String, Object> createLoanRequest(Jwt jwt, LoanType loanType,
                                                   BigDecimal amount, Integer repaymentMonths, String reason) {
         User user = authenticatedUserResolver.require(jwt);
+        String duplicateLoanReason = getDuplicateLoanBlockReason(user);
+        if (duplicateLoanReason != null) {
+            throw new BadRequestException(duplicateLoanReason);
+        }
+
         String hardFailReason = getLoanHardFailReason(user, amount);
 
         LoanRequest req = new LoanRequest();
         req.setUser(user);
         req.setLoanType(loanType);
         req.setAmount(amount);
-        req.setRepaymentMonths(repaymentMonths != null ? repaymentMonths : LOAN_REPAYMENT_MONTHS_COMPATIBILITY_VALUE);
+        // Employee submissions never persist the repayment term. HR confirms
+        // the final repayment months later during approval.
+        req.setRepaymentMonths(null);
         req.setReason(reason);
 
         if (hardFailReason != null) {
@@ -829,12 +833,6 @@ public class RequestsService {
                 "SYSTEM-REJECTED: requested amount (%.0f TND) exceeds the maximum allowed (3\u00d7 salary = %.0f TND).",
                 amount, maxAllowed);
 
-        boolean hasActiveLoan = loanRepo.findByUserOrderByRequestedAtDesc(user).stream()
-                .anyMatch(l -> l.getStatus() == RequestStatus.PENDING ||
-                               l.getStatus() == RequestStatus.APPROVED);
-        if (hasActiveLoan)
-            return "SYSTEM-REJECTED: you already have a pending or active loan. You must fully repay your current loan before requesting a new one.";
-
         if (user.getPerson().getHireDate() != null) {
             long monthsEmployed = java.time.temporal.ChronoUnit.MONTHS.between(
                     user.getPerson().getHireDate(), java.time.LocalDate.now());
@@ -842,6 +840,16 @@ public class RequestsService {
                 return String.format(
                     "SYSTEM-REJECTED: you must be employed for at least 6 months before requesting a loan. You have been employed for %d month(s).",
                     monthsEmployed);
+        }
+        return null;
+    }
+
+    private String getDuplicateLoanBlockReason(User user) {
+        boolean hasBlockingLoan = loanRepo.findByUserOrderByRequestedAtDesc(user).stream()
+                .anyMatch(l -> l.getStatus() == RequestStatus.PENDING
+                        || l.getStatus() == RequestStatus.APPROVED);
+        if (hasBlockingLoan) {
+            return "You already have a pending or active loan. You must fully repay your current loan before requesting a new one.";
         }
         return null;
     }
