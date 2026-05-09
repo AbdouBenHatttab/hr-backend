@@ -31,7 +31,7 @@ public class TeamController {
     /**
      * HR creates a new team and assigns a Team Leader.
      * POST /api/hr/teams
-     * Body: { "name": "Backend Team", "description": "...", "teamLeaderId": 2 }
+     * Body: { "name": "Backend Team", "description": "...", "teamLeaderId": 2, "departmentId": 5 }
      */
     @PreAuthorize("hasRole('HR_MANAGER')")
     @PostMapping("/api/hr/teams")
@@ -42,7 +42,8 @@ public class TeamController {
         Map<String, Object> team = teamService.createTeam(
                 request.getName(),
                 request.getDescription(),
-                request.getTeamLeaderId()
+                request.getTeamLeaderId(),
+                request.getDepartmentId()
         );
 
         Map<String, Object> response = new HashMap<>();

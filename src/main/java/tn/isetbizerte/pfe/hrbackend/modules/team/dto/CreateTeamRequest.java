@@ -13,6 +13,8 @@ public class CreateTeamRequest {
     @NotNull(message = "Team leader user ID is required")
     private Long teamLeaderId;
 
+    private Long departmentId;
+
     public CreateTeamRequest() {}
 
     public String getName() { return name; }
@@ -23,4 +25,7 @@ public class CreateTeamRequest {
 
     public Long getTeamLeaderId() { return teamLeaderId; }
     public void setTeamLeaderId(Long teamLeaderId) { this.teamLeaderId = teamLeaderId; }
+
+    public Long getDepartmentId() { return departmentId; }
+    public void setDepartmentId(Long departmentId) { this.departmentId = departmentId; }
 }

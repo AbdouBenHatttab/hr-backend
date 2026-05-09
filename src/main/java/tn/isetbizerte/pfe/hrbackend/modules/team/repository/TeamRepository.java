@@ -27,6 +27,7 @@ public interface TeamRepository extends JpaRepository<Team, Long> {
      */
     @Query("SELECT t FROM Team t " +
            "LEFT JOIN FETCH t.teamLeader tl " +
+           "LEFT JOIN FETCH t.department d " +
            "LEFT JOIN FETCH tl.person " +
            "WHERE t.id = :id")
     Optional<Team> findByIdWithDetails(@Param("id") Long id);
@@ -36,6 +37,7 @@ public interface TeamRepository extends JpaRepository<Team, Long> {
      * Does NOT fetch leader - use findByIdWithDetails separately.
      */
     @Query("SELECT DISTINCT t FROM Team t " +
+           "LEFT JOIN FETCH t.department d " +
            "LEFT JOIN FETCH t.members m " +
            "LEFT JOIN FETCH m.person " +
            "WHERE t.id = :id")
@@ -47,6 +49,7 @@ public interface TeamRepository extends JpaRepository<Team, Long> {
      */
     @Query("SELECT t FROM Team t " +
            "LEFT JOIN FETCH t.teamLeader tl " +
+           "LEFT JOIN FETCH t.department d " +
            "LEFT JOIN FETCH tl.person " +
            "WHERE tl.keycloakId = :keycloakId")
     Optional<Team> findByTeamLeaderKeycloakId(@Param("keycloakId") String keycloakId);
@@ -57,6 +60,7 @@ public interface TeamRepository extends JpaRepository<Team, Long> {
      */
     @Query("SELECT t FROM Team t " +
            "LEFT JOIN FETCH t.teamLeader tl " +
+           "LEFT JOIN FETCH t.department d " +
            "LEFT JOIN FETCH tl.person " +
            "WHERE tl.id = :leaderId")
     Optional<Team> findByTeamLeaderId(@Param("leaderId") Long leaderId);

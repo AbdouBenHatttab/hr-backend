@@ -10,6 +10,8 @@ import tn.isetbizerte.pfe.hrbackend.common.exception.BadRequestException;
 import tn.isetbizerte.pfe.hrbackend.common.exception.ResourceNotFoundException;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.email.HREmailService;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.kafka.producer.NotificationEventProducer;
+import tn.isetbizerte.pfe.hrbackend.modules.department.entity.Department;
+import tn.isetbizerte.pfe.hrbackend.modules.department.repository.DepartmentRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.employee.repository.LeaveRequestRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.team.entity.Team;
 import tn.isetbizerte.pfe.hrbackend.modules.team.repository.TeamRepository;
@@ -34,16 +36,19 @@ public class TeamService {
     private final TeamRepository teamRepository;
     private final UserRepository userRepository;
     private final LeaveRequestRepository leaveRequestRepository;
+    private final DepartmentRepository departmentRepository;
     private final TeamNotificationService teamNotificationService;
 
     @Autowired
     public TeamService(TeamRepository teamRepository,
                        UserRepository userRepository,
                        LeaveRequestRepository leaveRequestRepository,
+                       DepartmentRepository departmentRepository,
                        TeamNotificationService teamNotificationService) {
         this.teamRepository = teamRepository;
         this.userRepository = userRepository;
         this.leaveRequestRepository = leaveRequestRepository;
+        this.departmentRepository = departmentRepository;
         this.teamNotificationService = teamNotificationService;
     }
 
@@ -56,6 +61,7 @@ public class TeamService {
                 teamRepository,
                 userRepository,
                 leaveRequestRepository,
+                null,
                 new TeamNotificationService(notificationEventProducer, emailService)
         );
     }
@@ -64,6 +70,11 @@ public class TeamService {
 
     @Transactional
     public Map<String, Object> createTeam(String name, String description, Long teamLeaderId) {
+        return createTeam(name, description, teamLeaderId, null);
+    }
+
+    @Transactional
+    public Map<String, Object> createTeam(String name, String description, Long teamLeaderId, Long departmentId) {
         String normalizedName = name != null ? name.trim() : "";
         String normalizedDescription = description != null ? description.trim() : null;
 
@@ -82,16 +93,29 @@ public class TeamService {
         if (teamRepository.findByTeamLeader(leader).isPresent())
             throw new BadRequestException("This Team Leader is already assigned to another team.");
 
+        Department department = null;
+        if (departmentId != null) {
+            if (departmentRepository == null) {
+                throw new IllegalStateException("Department repository is not configured.");
+            }
+            department = departmentRepository.findById(departmentId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Department not found with ID: " + departmentId));
+            if (!Boolean.TRUE.equals(department.getActive())) {
+                throw new BadRequestException("Department '" + department.getName() + "' is archived and cannot be assigned.");
+            }
+        }
+
         Team team = new Team();
         team.setName(normalizedName);
         team.setDescription(normalizedDescription);
         team.setTeamLeader(leader);
+        team.setDepartment(department);
         teamRepository.save(team);
         logger.info("Team '{}' created with leader '{}'", normalizedName, leader.getUsername());
 
         // Build response directly from known data - no lazy loading
         return buildTeamResponse(team.getId(), team.getName(), team.getDescription(),
-                team.getCreatedAt(), leader, List.of());
+                team.getCreatedAt(), team.getDepartment(), leader, List.of());
     }
 
     @Transactional
@@ -107,7 +131,7 @@ public class TeamService {
 
         if (oldLeader != null && Objects.equals(oldLeader.getId(), newLeader.getId())) {
             return buildTeamResponse(team.getId(), team.getName(), team.getDescription(),
-                    team.getCreatedAt(), oldLeader, members);
+                    team.getCreatedAt(), team.getDepartment(), oldLeader, members);
         }
 
         if (!Boolean.TRUE.equals(newLeader.getActive()))
@@ -139,7 +163,7 @@ public class TeamService {
         }
 
         return buildTeamResponse(team.getId(), team.getName(), team.getDescription(),
-                team.getCreatedAt(), newLeader, members);
+                team.getCreatedAt(), team.getDepartment(), newLeader, members);
     }
 
     @Transactional
@@ -223,7 +247,7 @@ public class TeamService {
                         : List.of();
 
                 return buildTeamResponse(base.getId(), base.getName(), base.getDescription(),
-                        base.getCreatedAt(), leader, members);
+                        base.getCreatedAt(), base.getDepartment(), leader, members);
             } catch (Exception e) {
                 logger.error("Error loading team {}: {}", id, e.getMessage());
                 return null;
@@ -252,7 +276,7 @@ public class TeamService {
                         : List.of();
 
                 return buildTeamResponse(base.getId(), base.getName(), base.getDescription(),
-                        base.getCreatedAt(), leader, members);
+                        base.getCreatedAt(), base.getDepartment(), leader, members);
             } catch (Exception e) {
                 logger.error("Error loading team {}: {}", id, e.getMessage());
                 return null;
@@ -272,7 +296,7 @@ public class TeamService {
         List<User> members = withMembers.getMembers() != null ? withMembers.getMembers() : List.of();
 
         return buildTeamResponse(withLeader.getId(), withLeader.getName(), withLeader.getDescription(),
-                withLeader.getCreatedAt(), leader, members);
+                withLeader.getCreatedAt(), withLeader.getDepartment(), leader, members);
     }
 
     // TEAM LEADER OPERATIONS
@@ -489,6 +513,7 @@ public class TeamService {
     private Map<String, Object> buildTeamResponse(
             Long id, String name, String description,
             java.time.LocalDateTime createdAt,
+            Department department,
             User leader, List<User> members) {
 
         Map<String, Object> response = new HashMap<>();
@@ -496,6 +521,8 @@ public class TeamService {
         response.put("name",        name);
         response.put("description", description);
         response.put("createdAt",   createdAt);
+        response.put("departmentId", department != null ? department.getId() : null);
+        response.put("departmentName", department != null ? department.getName() : null);
 
         if (leader != null) {
             Map<String, Object> leaderInfo = new HashMap<>();

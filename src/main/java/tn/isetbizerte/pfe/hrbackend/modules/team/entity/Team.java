@@ -1,6 +1,7 @@
 package tn.isetbizerte.pfe.hrbackend.modules.team.entity;
 
 import jakarta.persistence.*;
+import tn.isetbizerte.pfe.hrbackend.modules.department.entity.Department;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
 
 import java.time.LocalDateTime;
@@ -24,6 +25,10 @@ public class Team {
     @OneToOne
     @JoinColumn(name = "leader_id", referencedColumnName = "id")
     private User teamLeader;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "department_id")
+    private Department department;
 
     @OneToMany(mappedBy = "team", fetch = FetchType.LAZY)
     private List<User> members = new ArrayList<>();
@@ -54,6 +59,9 @@ public class Team {
 
     public User getTeamLeader() { return teamLeader; }
     public void setTeamLeader(User teamLeader) { this.teamLeader = teamLeader; }
+
+    public Department getDepartment() { return department; }
+    public void setDepartment(Department department) { this.department = department; }
 
     public List<User> getMembers() { return members; }
     public void setMembers(List<User> members) { this.members = members; }
