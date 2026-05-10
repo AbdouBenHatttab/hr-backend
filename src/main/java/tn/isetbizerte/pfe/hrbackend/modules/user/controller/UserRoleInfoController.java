@@ -64,13 +64,17 @@ public class UserRoleInfoController {
         response.put("active", user.getActive());
         response.put("emailVerified", user.getEmailVerified());
         response.put("registrationDate", user.getRegistrationDate());
+        response.put("email", user.getPerson() != null && user.getPerson().getEmail() != null ? user.getPerson().getEmail() : "");
 
         if (user.getPerson() != null) {
             Person p = user.getPerson();
+            String loginEmail = p.getEmail() != null ? p.getEmail() : "";
+            String contactEmail = normalizeContactEmail(p.getContactEmail(), loginEmail);
             Map<String, Object> personalInfo = new HashMap<>();
             personalInfo.put("firstName",        p.getFirstName());
             personalInfo.put("lastName",         p.getLastName());
-            personalInfo.put("email",            p.getEmail()          != null ? p.getEmail()           : "");
+            personalInfo.put("email",            loginEmail);
+            personalInfo.put("contactEmail",      contactEmail);
             personalInfo.put("phone",            p.getPhone()          != null ? p.getPhone()           : "");
             personalInfo.put("address",          p.getAddress()        != null ? p.getAddress()         : "");
             personalInfo.put("birthDate",        p.getBirthDate()      != null ? p.getBirthDate().toString() : "");
@@ -96,7 +100,7 @@ public class UserRoleInfoController {
 
     /**
      * PATCH /api/me — update own editable profile fields.
-     * Only phone, address, maritalStatus, numberOfChildren can be changed.
+     * Only contactEmail, phone, address, maritalStatus, numberOfChildren can be changed.
      * firstName, lastName, email, username are immutable after registration.
      */
     @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")
@@ -126,7 +130,10 @@ public class UserRoleInfoController {
             p.setMaritalStatus(body.getMaritalStatus());
         }
         if (body.hasField("numberOfChildren") && body.getNumberOfChildren() != null) {
-            p.setNumberOfChildren(body.getNumberOfChildren());
+            p.setNumberOfChildren(validateNumberOfChildren(body.getNumberOfChildren()));
+        }
+        if (body.hasField("contactEmail")) {
+            p.setContactEmail(validateAndNormalizeContactEmail(body.getContactEmail()));
         }
         if (body.hasField("avatarPhoto")) {
             p.setAvatarPhoto(body.getAvatarPhoto());
@@ -140,6 +147,38 @@ public class UserRoleInfoController {
         response.put("success", true);
         response.put("message", "Profile updated successfully");
         return response;
+    }
+
+    private String normalizeContactEmail(String contactEmail, String fallbackEmail) {
+        if (contactEmail == null) {
+            return fallbackEmail;
+        }
+        String trimmed = contactEmail.trim();
+        return trimmed.isEmpty() ? fallbackEmail : trimmed;
+    }
+
+    private String validateAndNormalizeContactEmail(String contactEmail) {
+        if (contactEmail == null) {
+            return null;
+        }
+        String trimmed = contactEmail.trim();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+        if (!trimmed.matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")) {
+            throw new BadRequestException("Contact email must be valid.");
+        }
+        return trimmed;
+    }
+
+    private int validateNumberOfChildren(Integer value) {
+        if (value == null) {
+            return 0;
+        }
+        if (value < 0 || value > 20) {
+            throw new BadRequestException("Number of children must be between 0 and 20.");
+        }
+        return value;
     }
 
     /**

@@ -11,6 +11,7 @@ public class UpdateMyProfileRequest {
     private String address;
     private String maritalStatus;
     private Integer numberOfChildren;
+    private String contactEmail;
     private String avatarPhoto;
     private String avatarColor;
     private final Set<String> presentFields = new HashSet<>();
@@ -49,6 +50,15 @@ public class UpdateMyProfileRequest {
     public void setNumberOfChildren(Integer numberOfChildren) {
         presentFields.add("numberOfChildren");
         this.numberOfChildren = numberOfChildren;
+    }
+
+    public String getContactEmail() {
+        return contactEmail;
+    }
+
+    public void setContactEmail(String contactEmail) {
+        presentFields.add("contactEmail");
+        this.contactEmail = contactEmail;
     }
 
     public String getAvatarPhoto() {

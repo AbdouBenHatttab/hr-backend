@@ -99,7 +99,68 @@ class UserRoleInfoControllerTest {
 
         assertThat(response).containsEntry("success", true);
         assertThat(response.get("username")).isEqualTo("alice");
+        assertThat(response).containsEntry("email", "alice@example.com");
+        assertThat(((Map<String, Object>) response.get("personalInfo"))).containsEntry("contactEmail", "alice@example.com");
         verify(authenticatedUserResolver).resolve(any());
+    }
+
+    @Test
+    void updateMyProfile_savesContactEmailSeparatelyFromLoginEmail() {
+        User user = userWithPerson("alice");
+        when(authenticatedUserResolver.resolve(any())).thenReturn(Optional.of(user));
+
+        UpdateMyProfileRequest request = new UpdateMyProfileRequest();
+        request.setContactEmail("contact@arabsoft.com");
+
+        Map<String, Object> response = controller.updateMyProfile(request, jwt("alice"));
+
+        assertThat(response).containsEntry("success", true);
+        assertThat(user.getPerson().getEmail()).isEqualTo("alice@example.com");
+        assertThat(user.getPerson().getContactEmail()).isEqualTo("contact@arabsoft.com");
+        verify(personRepository).save(user.getPerson());
+    }
+
+    @Test
+    void updateMyProfile_clearsBlankContactEmailToNull() {
+        User user = userWithPerson("alice");
+        when(authenticatedUserResolver.resolve(any())).thenReturn(Optional.of(user));
+
+        UpdateMyProfileRequest request = new UpdateMyProfileRequest();
+        request.setContactEmail("   ");
+
+        controller.updateMyProfile(request, jwt("alice"));
+
+        assertThat(user.getPerson().getContactEmail()).isNull();
+    }
+
+    @Test
+    void updateMyProfile_rejectsInvalidContactEmail() {
+        User user = userWithPerson("alice");
+        when(authenticatedUserResolver.resolve(any())).thenReturn(Optional.of(user));
+
+        UpdateMyProfileRequest request = new UpdateMyProfileRequest();
+        request.setContactEmail("invalid-email");
+
+        assertThatThrownBy(() -> controller.updateMyProfile(request, jwt("alice")))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Contact email must be valid.");
+
+        verify(personRepository, never()).save(any());
+    }
+
+    @Test
+    void updateMyProfile_rejectsChildrenCountOutsideRange() {
+        User user = userWithPerson("alice");
+        when(authenticatedUserResolver.resolve(any())).thenReturn(Optional.of(user));
+
+        UpdateMyProfileRequest request = new UpdateMyProfileRequest();
+        request.setNumberOfChildren(21);
+
+        assertThatThrownBy(() -> controller.updateMyProfile(request, jwt("alice")))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Number of children must be between 0 and 20.");
+
+        verify(personRepository, never()).save(any());
     }
 
     @Test

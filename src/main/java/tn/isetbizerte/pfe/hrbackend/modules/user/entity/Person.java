@@ -30,6 +30,9 @@ public class Person {
     @Column(nullable = false, unique = true)
     private String email;
 
+    @Column(name = "contact_email")
+    private String contactEmail;
+
     private String phone;
 
     private LocalDate birthDate;
@@ -107,6 +110,14 @@ public class Person {
 
     public void setEmail(String email) {
         this.email = email;
+    }
+
+    public String getContactEmail() {
+        return contactEmail;
+    }
+
+    public void setContactEmail(String contactEmail) {
+        this.contactEmail = contactEmail;
     }
 
     public String getPhone() {
