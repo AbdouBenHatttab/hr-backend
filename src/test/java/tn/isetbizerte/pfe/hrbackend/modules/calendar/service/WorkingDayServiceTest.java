@@ -31,6 +31,20 @@ class WorkingDayServiceTest {
     }
 
     @Test
+    void isWorkingDay_excludesSupplementalTunisiaHolidays() {
+        LocalDate festivalSecondDay = LocalDate.of(2026, 3, 21);
+        LocalDate sacrificeFirstDay = LocalDate.of(2026, 5, 28);
+
+        when(holidayRepository.existsByCountryCodeAndHolidayDateAndActiveTrue("TN", festivalSecondDay))
+                .thenReturn(true);
+        when(holidayRepository.existsByCountryCodeAndHolidayDateAndActiveTrue("TN", sacrificeFirstDay))
+                .thenReturn(true);
+
+        assertThat(service.isWorkingDay(festivalSecondDay)).isFalse();
+        assertThat(service.isWorkingDay(sacrificeFirstDay)).isFalse();
+    }
+
+    @Test
     void countWorkingDays_countsOnlyWeekdaysThatAreNotTunisianPublicHolidays() {
         LocalDate start = LocalDate.of(2026, 3, 19);
         LocalDate holiday = LocalDate.of(2026, 3, 20);
