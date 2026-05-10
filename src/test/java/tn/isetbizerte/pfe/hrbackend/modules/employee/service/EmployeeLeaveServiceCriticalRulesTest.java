@@ -547,6 +547,34 @@ class EmployeeLeaveServiceCriticalRulesTest {
     }
 
     @Test
+    void getAllLeaveRequestsForTeamLeader_includesEmployeeProfileFieldsForAvatarAndContact() {
+        User leader = teamLeader("kc-leader");
+        Team team = team(102L, leader);
+        employee.setTeam(team);
+        employee.setPerson(new Person("Doe", "Jane", "jane.login@example.com"));
+        employee.getPerson().setContactEmail("jane.contact@example.com");
+        employee.getPerson().setAvatarPhoto("data:image/png;base64,avatar-data");
+
+        LeaveRequest leave = pendingLeave(75L, employee);
+
+        when(teamRepository.findByTeamLeaderKeycloakId("kc-leader")).thenReturn(Optional.of(team));
+        when(leaveRequestRepository.findAllByTeamIdExcludingLeader(eq(team.getId()), eq("kc-leader"), any()))
+                .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(leave)));
+
+        List<LeaveRequestResponseDto> content = service
+                .getAllLeaveRequestsForTeamLeader("kc-leader", org.springframework.data.domain.PageRequest.of(0, 10))
+                .getContent();
+
+        assertThat(content).hasSize(1);
+        assertThat(content.get(0).getEmployeeId()).isEqualTo(employee.getId());
+        assertThat(content.get(0).getEmployeeFullName()).isEqualTo("Jane Doe");
+        assertThat(content.get(0).getEmployeeUsername()).isEqualTo("employee");
+        assertThat(content.get(0).getEmployeeEmail()).isEqualTo("jane.login@example.com");
+        assertThat(content.get(0).getEmployeeContactEmail()).isEqualTo("jane.contact@example.com");
+        assertThat(content.get(0).getEmployeeAvatarPhoto()).isEqualTo("data:image/png;base64,avatar-data");
+    }
+
+    @Test
     void updateMyLeaveRequest_allowsOwnerWhilePendingTeamLeaderReview() {
         LeaveRequest leave = new LeaveRequest();
         leave.setId(60L);

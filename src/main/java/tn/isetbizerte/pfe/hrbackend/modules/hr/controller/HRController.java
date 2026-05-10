@@ -1,9 +1,11 @@
 package tn.isetbizerte.pfe.hrbackend.modules.hr.controller;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
@@ -12,6 +14,9 @@ import tn.isetbizerte.pfe.hrbackend.modules.hr.dto.AssignRoleResponse;
 import tn.isetbizerte.pfe.hrbackend.modules.hr.dto.CompleteUserSetupRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.hr.service.DashboardRequestSummaryService;
 import tn.isetbizerte.pfe.hrbackend.modules.hr.service.HRService;
+import tn.isetbizerte.pfe.hrbackend.modules.calendar.service.HolidaySyncService;
+import tn.isetbizerte.pfe.hrbackend.modules.calendar.service.HolidayProviderPlanLimitException;
+import tn.isetbizerte.pfe.hrbackend.modules.calendar.service.HolidayProviderFetchException;
 
 import java.util.*;
 
@@ -21,10 +26,14 @@ public class HRController {
 
     private final HRService hrService;
     private final DashboardRequestSummaryService dashboardRequestSummaryService;
+    private final HolidaySyncService holidaySyncService;
 
-    public HRController(HRService hrService, DashboardRequestSummaryService dashboardRequestSummaryService) {
+    public HRController(HRService hrService,
+                        DashboardRequestSummaryService dashboardRequestSummaryService,
+                        HolidaySyncService holidaySyncService) {
         this.hrService = hrService;
         this.dashboardRequestSummaryService = dashboardRequestSummaryService;
+        this.holidaySyncService = holidaySyncService;
     }
 
     /**
@@ -191,5 +200,67 @@ public class HRController {
                 jwt.getClaimAsString("preferred_username")
         );
         return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Sync public holidays into the database.
+     *
+     * POST /api/hr/holidays/sync?countryCode=TN&year=2026
+     */
+    @PreAuthorize("hasRole('HR_MANAGER')")
+    @PostMapping("/holidays/sync")
+    public ResponseEntity<Map<String, Object>> syncPublicHolidays(
+            @RequestParam(defaultValue = "TN") String countryCode,
+            @RequestParam int year,
+            @AuthenticationPrincipal Jwt jwt) {
+
+        String normalizedCountryCode = countryCode == null ? "TN" : countryCode.trim().toUpperCase(java.util.Locale.ROOT);
+        try {
+            HolidaySyncService.HolidaySyncResult result = holidaySyncService.syncCountryYearDetailed(normalizedCountryCode, year);
+            Map<String, Object> response = new HashMap<>();
+            response.put("message", result.fallbackUsed()
+                    ? "HolidayAPI free plan cannot access this year. Use fallback provider or configure premium access."
+                    : result.message());
+            response.put("requestedBy", jwt.getClaimAsString("preferred_username"));
+            response.put("countryCode", normalizedCountryCode);
+            response.put("year", year);
+            response.put("syncedCount", result.syncedCount());
+            response.put("providerUsed", result.providerUsed());
+            response.put("fallbackUsed", result.fallbackUsed());
+            return ResponseEntity.ok(response);
+        } catch (HolidayProviderPlanLimitException ex) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", false);
+            response.put("message", ex.getMessage());
+            response.put("requestedBy", jwt.getClaimAsString("preferred_username"));
+            response.put("countryCode", normalizedCountryCode);
+            response.put("year", year);
+            response.put("syncedCount", 0);
+            response.put("providerUsed", "HOLIDAY_API");
+            response.put("fallbackUsed", false);
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(response);
+        } catch (HolidayProviderFetchException ex) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", false);
+            response.put("message", "Public holiday sync failed. Please use the fallback provider or configure premium access.");
+            response.put("requestedBy", jwt.getClaimAsString("preferred_username"));
+            response.put("countryCode", normalizedCountryCode);
+            response.put("year", year);
+            response.put("syncedCount", 0);
+            response.put("providerUsed", "HOLIDAY_API");
+            response.put("fallbackUsed", false);
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(response);
+        } catch (RuntimeException ex) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", false);
+            response.put("message", "Public holiday sync failed. Please use the fallback provider or configure premium access.");
+            response.put("requestedBy", jwt.getClaimAsString("preferred_username"));
+            response.put("countryCode", normalizedCountryCode);
+            response.put("year", year);
+            response.put("syncedCount", 0);
+            response.put("providerUsed", "UNKNOWN");
+            response.put("fallbackUsed", false);
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(response);
+        }
     }
 }

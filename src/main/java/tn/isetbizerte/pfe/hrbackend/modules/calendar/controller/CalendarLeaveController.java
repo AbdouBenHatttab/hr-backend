@@ -10,15 +10,20 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.format.annotation.DateTimeFormat.ISO;
+import tn.isetbizerte.pfe.hrbackend.modules.calendar.dto.PublicHolidayDto;
 import tn.isetbizerte.pfe.hrbackend.modules.calendar.dto.CalendarLeaveDto;
+import tn.isetbizerte.pfe.hrbackend.modules.calendar.entity.PublicHoliday;
+import tn.isetbizerte.pfe.hrbackend.modules.calendar.repository.PublicHolidayRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.calendar.dto.WorkingDaysEstimateDto;
 import tn.isetbizerte.pfe.hrbackend.modules.calendar.service.CalendarLeaveService;
 import tn.isetbizerte.pfe.hrbackend.modules.calendar.service.WorkingDayService;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Locale;
 
 @RestController
 @RequestMapping("/api/calendar")
@@ -26,11 +31,14 @@ public class CalendarLeaveController {
 
     private final CalendarLeaveService calendarLeaveService;
     private final WorkingDayService workingDayService;
+    private final PublicHolidayRepository publicHolidayRepository;
 
     public CalendarLeaveController(CalendarLeaveService calendarLeaveService,
-                                   WorkingDayService workingDayService) {
+                                   WorkingDayService workingDayService,
+                                   PublicHolidayRepository publicHolidayRepository) {
         this.calendarLeaveService = calendarLeaveService;
         this.workingDayService = workingDayService;
+        this.publicHolidayRepository = publicHolidayRepository;
     }
 
     @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")
@@ -83,6 +91,35 @@ public class CalendarLeaveController {
         return ResponseEntity.ok(response);
     }
 
+    @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")
+    @GetMapping("/holidays")
+    public ResponseEntity<Map<String, Object>> getPublicHolidays(
+            @RequestParam(defaultValue = "TN") String countryCode,
+            @RequestParam @DateTimeFormat(iso = ISO.DATE) LocalDate start,
+            @RequestParam @DateTimeFormat(iso = ISO.DATE) LocalDate end
+    ) {
+        String normalizedCountryCode = normalizeCountryCode(countryCode);
+        List<PublicHolidayDto> holidays = publicHolidayRepository
+                .findAllByCountryCodeAndHolidayDateBetweenAndActiveTrueOrderByHolidayDateAsc(
+                        normalizedCountryCode,
+                        start,
+                        end
+                )
+                .stream()
+                .map(this::toDto)
+                .toList();
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("success", true);
+        response.put("message", "Public holidays retrieved successfully");
+        response.put("countryCode", normalizedCountryCode);
+        response.put("start", start);
+        response.put("end", end);
+        response.put("count", holidays.size());
+        response.put("data", holidays);
+        return ResponseEntity.ok(response);
+    }
+
     private List<tn.isetbizerte.pfe.hrbackend.common.enums.LeaveStatus> parseStatuses(String status) {
         if (status == null || status.isBlank()) {
             return null;
@@ -95,5 +132,20 @@ public class CalendarLeaveController {
             result.add(tn.isetbizerte.pfe.hrbackend.common.enums.LeaveStatus.valueOf(trimmed.toUpperCase()));
         }
         return result.isEmpty() ? null : result;
+    }
+
+    private PublicHolidayDto toDto(PublicHoliday holiday) {
+        return new PublicHolidayDto(
+                holiday.getHolidayDate(),
+                holiday.getName(),
+                holiday.getCountryCode(),
+                holiday.getYear(),
+                holiday.getTentative(),
+                holiday.getSource()
+        );
+    }
+
+    private String normalizeCountryCode(String countryCode) {
+        return (countryCode == null ? "TN" : countryCode.trim().toUpperCase(Locale.ROOT));
     }
 }

@@ -5,6 +5,7 @@ import org.springframework.stereotype.Repository;
 import tn.isetbizerte.pfe.hrbackend.modules.calendar.entity.PublicHoliday;
 
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 
 @Repository
@@ -14,4 +15,12 @@ public interface PublicHolidayRepository extends JpaRepository<PublicHoliday, Lo
     Optional<PublicHoliday> findBySourceAndSourceKey(String source, String sourceKey);
 
     Optional<PublicHoliday> findByCountryCodeAndHolidayDateAndSource(String countryCode, LocalDate holidayDate, String source);
+
+    Optional<PublicHoliday> findByCountryCodeAndHolidayDateAndNameAndSource(String countryCode, LocalDate holidayDate, String name, String source);
+
+    List<PublicHoliday> findAllByCountryCodeAndHolidayDateBetweenAndActiveTrueOrderByHolidayDateAsc(
+            String countryCode,
+            LocalDate start,
+            LocalDate end
+    );
 }

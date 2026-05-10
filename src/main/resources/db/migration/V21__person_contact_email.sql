@@ -1,0 +1,2 @@
+ALTER TABLE persons
+    ADD COLUMN IF NOT EXISTS contact_email VARCHAR(255);

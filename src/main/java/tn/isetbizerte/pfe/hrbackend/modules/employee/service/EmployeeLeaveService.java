@@ -634,10 +634,18 @@ public class EmployeeLeaveService {
 
         LeaveRequestResponseDto dto = new LeaveRequestResponseDto();
         dto.setId(leaveRequest.getId());
-        dto.setEmployeeFullName(leaveRequest.getEmployeeFullName());
-        dto.setEmployeeEmail(leaveRequest.getEmployeeEmail());
-        if (leaveRequest.getUser() != null) {
-            dto.setEmployeeUsername(leaveRequest.getUser().getUsername());
+        User user = leaveRequest.getUser();
+        Person person = user != null ? user.getPerson() : null;
+        if (user != null) {
+            dto.setEmployeeId(user.getId());
+            dto.setEmployeeUsername(user.getUsername());
+            dto.setEmployeeFullName(resolveFullName(user));
+            dto.setEmployeeEmail(person != null ? person.getEmail() : null);
+            dto.setEmployeeContactEmail(resolveContactEmail(person));
+            dto.setEmployeeAvatarPhoto(person != null ? person.getAvatarPhoto() : null);
+        } else {
+            dto.setEmployeeFullName(leaveRequest.getEmployeeFullName());
+            dto.setEmployeeEmail(leaveRequest.getEmployeeEmail());
         }
         dto.setLeaveType(leaveRequest.getLeaveType());
         dto.setStartDate(leaveRequest.getStartDate());
@@ -724,6 +732,18 @@ public class EmployeeLeaveService {
         } catch (IllegalArgumentException ignored) {
             return null;
         }
+    }
+
+    private String resolveContactEmail(Person person) {
+        if (person == null) {
+            return null;
+        }
+        String contactEmail = person.getContactEmail();
+        if (contactEmail == null) {
+            return null;
+        }
+        String trimmed = contactEmail.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     private String nullToBlank(String value) {

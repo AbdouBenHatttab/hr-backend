@@ -10,9 +10,12 @@ import java.time.LocalDateTime;
 public class LeaveRequestResponseDto {
 
     private Long id;
+    private Long employeeId;
     private String employeeFullName;
     private String employeeEmail;
+    private String employeeContactEmail;
     private String employeeUsername;
+    private String employeeAvatarPhoto;
     private LeaveType leaveType;
     private LocalDate startDate;
     private LocalDate endDate;
@@ -48,6 +51,14 @@ public class LeaveRequestResponseDto {
         this.id = id;
     }
 
+    public Long getEmployeeId() {
+        return employeeId;
+    }
+
+    public void setEmployeeId(Long employeeId) {
+        this.employeeId = employeeId;
+    }
+
     public String getEmployeeFullName() {
         return employeeFullName;
     }
@@ -64,8 +75,24 @@ public class LeaveRequestResponseDto {
         this.employeeEmail = employeeEmail;
     }
 
+    public String getEmployeeContactEmail() {
+        return employeeContactEmail;
+    }
+
+    public void setEmployeeContactEmail(String employeeContactEmail) {
+        this.employeeContactEmail = employeeContactEmail;
+    }
+
     public String getEmployeeUsername() { return employeeUsername; }
     public void setEmployeeUsername(String employeeUsername) { this.employeeUsername = employeeUsername; }
+
+    public String getEmployeeAvatarPhoto() {
+        return employeeAvatarPhoto;
+    }
+
+    public void setEmployeeAvatarPhoto(String employeeAvatarPhoto) {
+        this.employeeAvatarPhoto = employeeAvatarPhoto;
+    }
 
     public LeaveType getLeaveType() {
         return leaveType;
