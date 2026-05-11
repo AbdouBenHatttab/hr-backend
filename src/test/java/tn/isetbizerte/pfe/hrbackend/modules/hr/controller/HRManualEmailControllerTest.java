@@ -12,16 +12,17 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.validation.beanvalidation.LocalValidatorFactoryBean;
-import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.support.WebDataBinderFactory;
 import org.springframework.web.context.request.NativeWebRequest;
 import org.springframework.web.method.support.HandlerMethodArgumentResolver;
 import org.springframework.web.method.support.ModelAndViewContainer;
+import org.springframework.data.domain.PageImpl;
+import tn.isetbizerte.pfe.hrbackend.modules.hr.dto.HrManualEmailLogResponse;
 import tn.isetbizerte.pfe.hrbackend.common.exception.GlobalExceptionHandler;
 import tn.isetbizerte.pfe.hrbackend.modules.hr.dto.SendHrManualEmailResponse;
 import tn.isetbizerte.pfe.hrbackend.modules.hr.service.HrManualEmailService;
 
-import java.util.Arrays;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -29,6 +30,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -77,6 +79,36 @@ class HRManualEmailControllerTest {
                 .andExpect(jsonPath("$.recipientEmail").value("employee@example.com"));
 
         verify(hrManualEmailService).sendManualEmail(any(), any());
+    }
+
+    @Test
+    void hrManagerCanListManualEmailLogs() throws Exception {
+        when(hrManualEmailService.getManualEmailLogs(any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(new PageImpl<>(List.of(logResponse(55L, "employee@example.com", "hr.manager", "ArabSoft Human Resources"))));
+
+        mockMvc.perform(get("/api/hr/emails/logs")
+                        .param("page", "0")
+                        .param("size", "10")
+                        .param("status", "SENT")
+                        .param("recipient", "employee@example.com")
+                        .param("sender", "hr.manager")
+                        .param("referenceType", "DOCUMENT_REQUEST")
+                        .param("dateFrom", "2026-05-10")
+                        .param("dateTo", "2026-05-11"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.message").value("Manual HR email logs retrieved successfully"))
+                .andExpect(jsonPath("$.requestedBy").value("hr.manager"))
+                .andExpect(jsonPath("$.totalCount").value(1))
+                .andExpect(jsonPath("$.logs[0].id").value(55))
+                .andExpect(jsonPath("$.logs[0].recipientEmail").value("employee@example.com"))
+                .andExpect(jsonPath("$.logs[0].sentByUsername").value("hr.manager"))
+                .andExpect(jsonPath("$.logs[0].sentByDisplayName").value("ArabSoft Human Resources"))
+                .andExpect(jsonPath("$.logs[0].status").value("SENT"))
+                .andExpect(jsonPath("$.logs[0].bodyPreview").value("Quarterly follow-up"))
+                .andExpect(jsonPath("$.logs[0].subject").value("Quarterly follow-up"))
+                .andExpect(jsonPath("$.logs[0].errorMessage").doesNotExist());
+
+        verify(hrManualEmailService).getManualEmailLogs(any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -137,6 +169,24 @@ class HRManualEmailControllerTest {
         response.setRecipientEmail("employee@example.com");
         response.setSentByUserId(7L);
         response.setSentByUsername("hr.manager");
+        return response;
+    }
+
+    private HrManualEmailLogResponse logResponse(Long id, String recipientEmail, String senderUsername, String senderDisplayName) {
+        HrManualEmailLogResponse response = new HrManualEmailLogResponse();
+        response.setId(id);
+        response.setRecipientUserId(42L);
+        response.setRecipientEmail(recipientEmail);
+        response.setSentByUserId(7L);
+        response.setSentByUsername(senderUsername);
+        response.setSentByDisplayName(senderDisplayName);
+        response.setSubject("Quarterly follow-up");
+        response.setBodyPreview("Quarterly follow-up");
+        response.setReferenceType("DOCUMENT_REQUEST");
+        response.setReferenceId(77L);
+        response.setStatus("SENT");
+        response.setCreatedAt(java.time.LocalDateTime.of(2026, 5, 11, 9, 15));
+        response.setSentAt(java.time.LocalDateTime.of(2026, 5, 11, 9, 15));
         return response;
     }
 

@@ -5,17 +5,23 @@ import jakarta.mail.MessagingException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.mail.MailException;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.util.HtmlUtils;
 import tn.isetbizerte.pfe.hrbackend.common.enums.TypeRole;
 import tn.isetbizerte.pfe.hrbackend.common.exception.BadRequestException;
 import tn.isetbizerte.pfe.hrbackend.common.exception.ResourceNotFoundException;
 import tn.isetbizerte.pfe.hrbackend.common.exception.UnauthorizedException;
+import tn.isetbizerte.pfe.hrbackend.modules.hr.dto.HrManualEmailLogResponse;
 import tn.isetbizerte.pfe.hrbackend.modules.hr.dto.SendHrManualEmailRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.hr.dto.SendHrManualEmailResponse;
 import tn.isetbizerte.pfe.hrbackend.modules.hr.entity.HrManualEmailLog;
@@ -28,6 +34,10 @@ import tn.isetbizerte.pfe.hrbackend.modules.user.service.AuthenticatedUserResolv
 
 import java.io.UnsupportedEncodingException;
 import java.time.LocalDateTime;
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Locale;
+import java.util.stream.Collectors;
 
 @Service
 public class HrManualEmailService {
@@ -127,6 +137,51 @@ public class HrManualEmailService {
         }
     }
 
+    @Transactional(readOnly = true)
+    public Page<HrManualEmailLogResponse> getManualEmailLogs(Jwt jwt,
+                                                             String status,
+                                                             String recipientSearch,
+                                                             String senderSearch,
+                                                             String referenceType,
+                                                             LocalDate dateFrom,
+                                                             LocalDate dateTo,
+                                                             Pageable pageable) {
+        User requester = authenticatedUserResolver.require(jwt);
+        if (requester.getRole() != TypeRole.HR_MANAGER) {
+            throw new UnauthorizedException("Only HR_MANAGER can view manual HR email logs.");
+        }
+
+        List<HrManualEmailLogResponse> filtered = logRepository.findAll(Sort.by(Sort.Direction.DESC, "createdAt"))
+                .stream()
+                .sorted((left, right) -> {
+                    LocalDateTime leftCreatedAt = left.getCreatedAt();
+                    LocalDateTime rightCreatedAt = right.getCreatedAt();
+                    if (leftCreatedAt == null && rightCreatedAt == null) {
+                        return 0;
+                    }
+                    if (leftCreatedAt == null) {
+                        return 1;
+                    }
+                    if (rightCreatedAt == null) {
+                        return -1;
+                    }
+                    return rightCreatedAt.compareTo(leftCreatedAt);
+                })
+                .filter(log -> matchesStatus(log, status))
+                .filter(log -> matchesRecipientSearch(log, recipientSearch))
+                .filter(log -> matchesSenderSearch(log, senderSearch))
+                .filter(log -> matchesReferenceType(log, referenceType))
+                .filter(log -> matchesCreatedAt(log, dateFrom, dateTo))
+                .map(this::toLogResponse)
+                .collect(Collectors.toList());
+
+        int start = (int) Math.min(pageable.getOffset(), filtered.size());
+        int end = Math.min(start + pageable.getPageSize(), filtered.size());
+        List<HrManualEmailLogResponse> pageContent = filtered.subList(start, end);
+
+        return new PageImpl<>(pageContent, pageable, filtered.size());
+    }
+
     private SendHrManualEmailResponse toResponse(HrManualEmailLog saved, String message) {
         SendHrManualEmailResponse response = new SendHrManualEmailResponse();
         response.setLogId(saved.getId());
@@ -137,6 +192,25 @@ public class HrManualEmailService {
         response.setSentByUserId(saved.getSentByUserId());
         response.setSentByUsername(saved.getSentByUsername());
         response.setSentAt(saved.getSentAt());
+        return response;
+    }
+
+    private HrManualEmailLogResponse toLogResponse(HrManualEmailLog logEntry) {
+        HrManualEmailLogResponse response = new HrManualEmailLogResponse();
+        response.setId(logEntry.getId());
+        response.setRecipientUserId(logEntry.getRecipientUserId());
+        response.setRecipientEmail(logEntry.getRecipientEmail());
+        response.setSentByUserId(logEntry.getSentByUserId());
+        response.setSentByUsername(logEntry.getSentByUsername());
+        response.setSentByDisplayName(logEntry.getSentByDisplayName());
+        response.setSubject(logEntry.getSubject());
+        response.setBodyPreview(logEntry.getBodyPreview());
+        response.setReferenceType(logEntry.getReferenceType());
+        response.setReferenceId(logEntry.getReferenceId());
+        response.setStatus(logEntry.getStatus() != null ? logEntry.getStatus().name() : null);
+        response.setErrorMessage(logEntry.getErrorMessage());
+        response.setCreatedAt(logEntry.getCreatedAt());
+        response.setSentAt(logEntry.getSentAt());
         return response;
     }
 
@@ -238,6 +312,66 @@ public class HrManualEmailService {
         }
         String trimmed = referenceType.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private boolean matchesStatus(HrManualEmailLog logEntry, String statusFilter) {
+        String normalized = normalizeFilter(statusFilter);
+        if (normalized == null) {
+            return true;
+        }
+        return logEntry.getStatus() != null && logEntry.getStatus().name().equalsIgnoreCase(normalized);
+    }
+
+    private boolean matchesRecipientSearch(HrManualEmailLog logEntry, String recipientSearch) {
+        String normalized = normalizeFilter(recipientSearch);
+        if (normalized == null) {
+            return true;
+        }
+        String recipientEmail = logEntry.getRecipientEmail();
+        return recipientEmail != null && recipientEmail.toLowerCase(Locale.ROOT).contains(normalized);
+    }
+
+    private boolean matchesSenderSearch(HrManualEmailLog logEntry, String senderSearch) {
+        String normalized = normalizeFilter(senderSearch);
+        if (normalized == null) {
+            return true;
+        }
+        String username = logEntry.getSentByUsername();
+        String displayName = logEntry.getSentByDisplayName();
+        return (username != null && username.toLowerCase(Locale.ROOT).contains(normalized))
+                || (displayName != null && displayName.toLowerCase(Locale.ROOT).contains(normalized));
+    }
+
+    private boolean matchesReferenceType(HrManualEmailLog logEntry, String referenceType) {
+        String normalized = normalizeFilter(referenceType);
+        if (normalized == null) {
+            return true;
+        }
+        String logReferenceType = logEntry.getReferenceType();
+        return logReferenceType != null && logReferenceType.trim().toLowerCase(Locale.ROOT).equals(normalized);
+    }
+
+    private boolean matchesCreatedAt(HrManualEmailLog logEntry, LocalDate dateFrom, LocalDate dateTo) {
+        if (dateFrom == null && dateTo == null) {
+            return true;
+        }
+        LocalDateTime createdAt = logEntry.getCreatedAt();
+        if (createdAt == null) {
+            return false;
+        }
+        LocalDate createdDate = createdAt.toLocalDate();
+        if (dateFrom != null && createdDate.isBefore(dateFrom)) {
+            return false;
+        }
+        return dateTo == null || !createdDate.isAfter(dateTo);
+    }
+
+    private String normalizeFilter(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed.toLowerCase(Locale.ROOT);
     }
 
     private String buildBodyPreview(String message) {
