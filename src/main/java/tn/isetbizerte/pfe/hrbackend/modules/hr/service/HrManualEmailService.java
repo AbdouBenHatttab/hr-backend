@@ -5,6 +5,7 @@ import jakarta.mail.MessagingException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.mail.MailException;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
@@ -99,7 +100,12 @@ public class HrManualEmailService {
             }
             helper.setTo(recipientEmail);
             helper.setSubject(subject);
-            helper.setText(buildHtmlBody(senderDisplay, recipientPerson, subject, message, request.getReferenceType(), request.getReferenceId()), true);
+            helper.setText(buildHtmlBody(recipientPerson, subject, message), true);
+
+            ClassPathResource logo = new ClassPathResource("static/images/logo.jpg");
+            if (logo.exists()) {
+                helper.addInline("arabsoftLogo", logo);
+            }
 
             mailSender.send(mimeMessage);
 
@@ -134,15 +140,19 @@ public class HrManualEmailService {
         return response;
     }
 
-    private String buildHtmlBody(String senderDisplay, Person recipientPerson, String subject, String message,
-                                 String referenceType, Long referenceId) {
+    private String buildHtmlBody(Person recipientPerson, String subject, String message) {
         String recipientName = resolvePersonName(recipientPerson);
         String safeRecipientName = HtmlUtils.htmlEscape(recipientName);
         String safeSubject = HtmlUtils.htmlEscape(subject);
         String safeMessage = HtmlUtils.htmlEscape(message)
                 .replace("\r\n", "\n")
                 .replace("\n", "<br/>");
-        String safeReference = HtmlUtils.htmlEscape(buildReferenceLine(referenceType, referenceId));
+        String footerContact = replyToEmail != null && !replyToEmail.isBlank()
+                ? "Need help? Reply to this email or contact ArabSoft HR at " + HtmlUtils.htmlEscape(replyToEmail) + "."
+                : "Need help? Reply to this email or contact ArabSoft HR.";
+        String logoTag = new ClassPathResource("static/images/logo.jpg").exists()
+                ? "<img src=\"cid:arabsoftLogo\" alt=\"ArabSoft\" width=\"96\" style=\"display:block;margin:0 auto 14px;\">"
+                : "<div style=\"margin:0 auto 14px;width:96px;height:96px;border-radius:24px;background:#0F172A;color:#fff;font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:center;letter-spacing:0.12em;\">ARABSOFT</div>";
         return """
                 <!DOCTYPE html>
                 <html>
@@ -152,35 +162,33 @@ public class HrManualEmailService {
                   <table width="600" cellpadding="0" cellspacing="0"
                          style="background:white;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.08);">
                     <tr>
-                      <td style="background:#0F172A;padding:32px 40px;">
-                        <p style="margin:0;font-size:11px;color:#64748B;text-transform:uppercase;letter-spacing:0.1em;">
+                      <td style="background:#0F172A;padding:32px 40px;text-align:center;">
+                        %s
+                        <p style="margin:0;font-size:11px;color:#94A3B8;text-transform:uppercase;letter-spacing:0.16em;">
                           ArabSoft Human Resources
                         </p>
-                        <div style="border-top:1px solid #1E293B;margin:20px 0;"></div>
-                        <p style="margin:0;font-size:22px;font-weight:700;color:#FFFFFF;">%s</p>
-                        <p style="margin:6px 0 0;font-size:14px;color:#94A3B8;">Manual HR message</p>
+                        <p style="margin:10px 0 0;font-size:22px;font-weight:700;color:#FFFFFF;">%s</p>
+                        <p style="margin:6px 0 0;font-size:14px;color:#CBD5E1;">Message from ArabSoft Human Resources</p>
                       </td>
                     </tr>
                     <tr>
                       <td style="padding:36px 40px;">
-                        <p style="font-size:15px;color:#374151;line-height:1.8;">
+                        <p style="margin:0 0 14px;font-size:15px;color:#374151;line-height:1.8;">
                           Dear <strong>%s</strong>,
                         </p>
-                        <div style="font-size:15px;color:#374151;line-height:1.8;">
+                        <div style="font-size:15px;color:#374151;line-height:1.8;white-space:normal;">
                           %s
                         </div>
-                        %s
-                        <div style="margin-top:28px;padding-top:18px;border-top:1px solid #E5E7EB;">
-                          <p style="margin:0;font-size:13px;color:#6B7280;">
-                            %s
-                          </p>
-                        </div>
+                        <p style="margin:28px 0 0;font-size:15px;color:#374151;line-height:1.8;">
+                          Regards,<br/>ArabSoft HR
+                        </p>
                       </td>
                     </tr>
                     <tr>
-                      <td style="background:#F8FAFC;border-top:1px solid #E2E8F0;padding:24px 40px;">
-                        <p style="margin:0;font-size:13px;font-weight:700;color:#0F172A;">%s</p>
-                        <p style="margin:4px 0 0;font-size:12px;color:#64748B;">Human Resources</p>
+                      <td style="background:#F8FAFC;border-top:1px solid #E2E8F0;padding:22px 40px;">
+                        <p style="margin:0;font-size:12px;color:#64748B;line-height:1.7;">
+                          %s
+                        </p>
                       </td>
                     </tr>
                   </table>
@@ -189,36 +197,12 @@ public class HrManualEmailService {
                 </body>
                 </html>
                 """.formatted(
+                logoTag,
                 safeSubject,
                 safeRecipientName,
                 safeMessage,
-                safeReference.isBlank() ? "" : "<p style=\"margin-top:18px;font-size:13px;color:#6B7280;\">"
-                        + safeReference + "</p>",
-                HtmlUtils.htmlEscape("Sent by " + senderDisplay),
-                HtmlUtils.htmlEscape(fromDisplayName)
+                HtmlUtils.htmlEscape(footerContact)
         );
-    }
-
-    private String buildReferenceLine(String referenceType, Long referenceId) {
-        String normalizedType = normalizeReferenceType(referenceType);
-        if ((normalizedType == null || normalizedType.isBlank()) && referenceId == null) {
-            return "";
-        }
-        if (normalizedType != null && !normalizedType.isBlank() && referenceId != null) {
-            return "Reference: " + normalizedType + " #" + referenceId;
-        }
-        if (normalizedType != null && !normalizedType.isBlank()) {
-            return "Reference: " + normalizedType;
-        }
-        return "Reference: #" + referenceId;
-    }
-
-    private String normalizeReferenceType(String referenceType) {
-        if (referenceType == null) {
-            return null;
-        }
-        String trimmed = referenceType.trim();
-        return trimmed.isEmpty() ? null : trimmed;
     }
 
     private String resolveDisplayName(User user) {
@@ -246,6 +230,14 @@ public class HrManualEmailService {
             return fullName;
         }
         return "Employee";
+    }
+
+    private String normalizeReferenceType(String referenceType) {
+        if (referenceType == null) {
+            return null;
+        }
+        String trimmed = referenceType.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     private String buildBodyPreview(String message) {

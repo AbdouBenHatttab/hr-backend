@@ -1,6 +1,7 @@
 package tn.isetbizerte.pfe.hrbackend.modules.hr.service;
 
 import jakarta.mail.Message;
+import jakarta.mail.Multipart;
 import jakarta.mail.internet.InternetAddress;
 import jakarta.mail.internet.MimeMessage;
 import org.junit.jupiter.api.BeforeEach;
@@ -109,6 +110,15 @@ class HrManualEmailServiceTest {
         assertThat(((InternetAddress) sent.getReplyTo()[0]).getAddress()).isEqualTo("arabsoft.hr.office@gmail.com");
         assertThat(((InternetAddress) sent.getRecipients(Message.RecipientType.TO)[0]).getAddress()).isEqualTo("employee@example.com");
         assertThat(sent.getSubject()).isEqualTo("Missing document information");
+
+        String html = extractHtml(sent);
+        assertThat(html).contains("Message from ArabSoft Human Resources");
+        assertThat(html).contains("Dear <strong>Mona Ali</strong>");
+        assertThat(html).contains("Need help? Reply to this email or contact ArabSoft HR at arabsoft.hr.office@gmail.com.");
+        assertThat(html).doesNotContain("Manual HR message");
+        assertThat(html).doesNotContain("Reference:");
+        assertThat(html).doesNotContain("Sent by");
+        assertThat(html).contains("cid:arabsoftLogo");
     }
 
     @Test
@@ -183,5 +193,34 @@ class HrManualEmailServiceTest {
                 .subject(subject)
                 .claim("preferred_username", preferredUsername)
                 .build();
+    }
+
+    private String extractHtml(MimeMessage message) throws Exception {
+        Object content = message.getContent();
+        if (content instanceof String text) {
+            return text;
+        }
+        if (content instanceof Multipart multipart) {
+            for (int i = 0; i < multipart.getCount(); i++) {
+                Object partContent = multipart.getBodyPart(i).getContent();
+                if (partContent instanceof String textPart) {
+                    String html = textPart.trim();
+                    if (html.contains("<html") || html.contains("ArabSoft Human Resources")) {
+                        return html;
+                    }
+                } else if (partContent instanceof Multipart nested) {
+                    for (int j = 0; j < nested.getCount(); j++) {
+                        Object nestedContent = nested.getBodyPart(j).getContent();
+                        if (nestedContent instanceof String nestedText) {
+                            String html = nestedText.trim();
+                            if (html.contains("<html") || html.contains("ArabSoft Human Resources")) {
+                                return html;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        throw new IllegalStateException("HTML body not found in message");
     }
 }
