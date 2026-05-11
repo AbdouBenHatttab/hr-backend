@@ -25,6 +25,12 @@ public class EmailNotificationService {
     @Value("${spring.mail.username:noreply@arabsoft.com}")
     private String fromEmail;
 
+    @Value("${app.mail.from-name:ArabSoft Human Resources}")
+    private String fromDisplayName;
+
+    @Value("${app.mail.reply-to:}")
+    private String replyToEmail;
+
     @Value("${app.company.name:ArabSoft}")
     private String companyName;
 
@@ -50,7 +56,10 @@ public class EmailNotificationService {
 
             MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
 
-            helper.setFrom(fromEmail);
+            helper.setFrom(fromEmail, fromDisplayName);
+            if (replyToEmail != null && !replyToEmail.isBlank()) {
+                helper.setReplyTo(replyToEmail);
+            }
             helper.setTo(event.getEmail());
             helper.setSubject("Welcome to ArabSoft - Your account is ready");
 

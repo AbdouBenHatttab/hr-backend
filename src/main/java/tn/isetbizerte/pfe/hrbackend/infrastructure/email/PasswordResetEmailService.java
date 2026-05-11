@@ -11,6 +11,7 @@ import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
 import tn.isetbizerte.pfe.hrbackend.common.event.PasswordResetEvent;
 
+import java.io.UnsupportedEncodingException;
 import java.time.format.DateTimeFormatter;
 
 @Service
@@ -20,15 +21,21 @@ public class PasswordResetEmailService {
 
     private final JavaMailSender mailSender;
     private final String fromEmail;
+    private final String fromDisplayName;
+    private final String replyToEmail;
     private final String companyName;
 
     public PasswordResetEmailService(
             JavaMailSender mailSender,
             @Value("${spring.mail.username}") String fromEmail,
+            @Value("${app.mail.from-name:ArabSoft Human Resources}") String fromDisplayName,
+            @Value("${app.mail.reply-to:}") String replyToEmail,
             @Value("${app.company.name:ArabSoft}") String companyName
     ) {
         this.mailSender = mailSender;
         this.fromEmail = fromEmail;
+        this.fromDisplayName = fromDisplayName;
+        this.replyToEmail = replyToEmail;
         this.companyName = companyName;
     }
 
@@ -38,7 +45,10 @@ public class PasswordResetEmailService {
         try {
             MimeMessage mimeMessage = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, true, "UTF-8");
-            helper.setFrom(fromEmail);
+            helper.setFrom(fromEmail, fromDisplayName);
+            if (replyToEmail != null && !replyToEmail.isBlank()) {
+                helper.setReplyTo(replyToEmail);
+            }
             helper.setTo(event.getEmail());
             helper.setSubject("🔐 Password Reset Code – " + companyName);
 
@@ -62,7 +72,7 @@ public class PasswordResetEmailService {
 
             logger.info("Password reset email sent successfully to '{}'", event.getEmail());
 
-        } catch (MessagingException e) {
+        } catch (MessagingException | UnsupportedEncodingException e) {
             logger.error("Failed to send password reset email to '{}'", event.getEmail(), e);
             throw new RuntimeException("Failed to send password reset email", e);
         }
