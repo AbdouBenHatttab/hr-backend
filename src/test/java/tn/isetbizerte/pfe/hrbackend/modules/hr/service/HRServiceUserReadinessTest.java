@@ -110,7 +110,7 @@ class HRServiceUserReadinessTest {
     }
 
     @Test
-    void teamLeaderWithoutLedTeam_returnsMissingLedTeam() {
+    void teamLeaderWithoutLedTeam_isValidWithoutSetupIssues() {
         User leader = user(4L, "leader", TypeRole.TEAM_LEADER);
         completeEmployment(leader);
         when(userService.getAllUsers()).thenReturn(List.of(leader));
@@ -120,8 +120,8 @@ class HRServiceUserReadinessTest {
 
         Map<String, Object> response = firstUser();
 
-        assertThat(response).containsEntry("setupStatus", "INCOMPLETE");
-        assertThat(response.get("setupIssues")).isEqualTo(List.of("MISSING_LED_TEAM"));
+        assertThat(response).containsEntry("setupStatus", "COMPLETE");
+        assertThat(response.get("setupIssues")).isEqualTo(List.of());
         assertThat(response.get("teamInfo")).isNull();
     }
 

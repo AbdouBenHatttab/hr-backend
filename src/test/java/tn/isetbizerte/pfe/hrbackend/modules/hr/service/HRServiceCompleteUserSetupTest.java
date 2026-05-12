@@ -114,6 +114,26 @@ class HRServiceCompleteUserSetupTest {
     }
 
     @Test
+    void teamLeaderSetup_allowsMissingLedTeamWithoutAssigningTeam() {
+        User user = user(18L, "leaderless", TypeRole.NEW_USER, false);
+        when(userService.findById(18L)).thenReturn(Optional.of(user));
+
+        Map<String, Object> response = service.completeUserSetup(18L, request("TEAM_LEADER", null, null), "kc-hr", "hr");
+
+        assertThat(response).containsEntry("success", true)
+                .containsEntry("newRole", "TEAM_LEADER")
+                .containsEntry("ledTeamId", null);
+        assertThat(user.getRole()).isEqualTo(TypeRole.TEAM_LEADER);
+        assertThat(user.getTeam()).isNull();
+        assertThat(user.getPerson().getSalary()).isEqualByComparingTo("4000");
+        verify(keycloakAdminService).assignRoleToUser("kc-leaderless", "TEAM_LEADER");
+        verify(teamRepository, never()).findByIdWithDetails(anyLong());
+        verify(teamRepository, never()).findByTeamLeader(user);
+        verify(userService).saveUser(user);
+        verify(userService).savePerson(user.getPerson());
+    }
+
+    @Test
     void teamLeaderSetup_allowsSameCurrentLeaderNoOp() {
         User user = user(18L, "existing-leader", TypeRole.TEAM_LEADER, true);
         Team ledTeam = team(4L, "Platform", user);

@@ -240,8 +240,10 @@ public class HRService {
         if (newRole == TypeRole.EMPLOYEE) {
             employeeTeam = loadTeamRequiredForEmployee(request.getTeamId());
         } else if (newRole == TypeRole.TEAM_LEADER) {
-            ledTeam = loadTeamRequiredForLeadership(request.getLedTeamId());
-            validateLeadershipTarget(user, ledTeam);
+            if (request.getLedTeamId() != null) {
+                ledTeam = loadTeamRequiredForLeadership(request.getLedTeamId());
+                validateLeadershipTarget(user, ledTeam);
+            }
         }
 
         boolean keycloakUpdateSuccess = keycloakAdminService.assignRoleToUser(keycloakUserId, newRole.name());
@@ -280,7 +282,7 @@ public class HRService {
             userService.saveUser(user);
             userService.savePerson(person);
 
-            if (newRole == TypeRole.TEAM_LEADER) {
+            if (newRole == TypeRole.TEAM_LEADER && ledTeam != null) {
                 ledTeam.setTeamLeader(user);
                 touchTeam(ledTeam);
             }
@@ -491,9 +493,6 @@ public class HRService {
         }
 
         if (role == TypeRole.TEAM_LEADER) {
-            if (request.getLedTeamId() == null) {
-                throw new BadRequestException("Led team is required for TEAM_LEADER setup.");
-            }
             if (request.getTeamId() != null) {
                 throw new BadRequestException("TEAM_LEADER setup must not include teamId.");
             }
@@ -773,10 +772,6 @@ public class HRService {
 
         if (user.getRole() == TypeRole.EMPLOYEE && teamInfo == null) {
             issues.add("MISSING_TEAM");
-        }
-        if (user.getRole() == TypeRole.TEAM_LEADER
-                && (teamInfo == null || !"Team Leader".equals(teamInfo.get("teamRole")))) {
-            issues.add("MISSING_LED_TEAM");
         }
         if ((user.getRole() == TypeRole.EMPLOYEE || user.getRole() == TypeRole.TEAM_LEADER)
                 && isMissingRequiredContractCopy(requiredDocuments)) {
