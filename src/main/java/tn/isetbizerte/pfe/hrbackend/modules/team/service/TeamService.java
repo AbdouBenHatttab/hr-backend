@@ -84,14 +84,17 @@ public class TeamService {
         if (teamRepository.existsByNameIgnoreCase(normalizedName))
             throw new BadRequestException("A team with this name already exists.");
 
-        User leader = userRepository.findById(teamLeaderId)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + teamLeaderId));
+        User leader = null;
+        if (teamLeaderId != null) {
+            leader = userRepository.findById(teamLeaderId)
+                    .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + teamLeaderId));
 
-        if (leader.getRole() != TypeRole.TEAM_LEADER)
-            throw new BadRequestException("User is not a TEAM_LEADER. Assign the TEAM_LEADER role first.");
+            if (leader.getRole() != TypeRole.TEAM_LEADER)
+                throw new BadRequestException("User is not a TEAM_LEADER. Assign the TEAM_LEADER role first.");
 
-        if (teamRepository.findByTeamLeader(leader).isPresent())
-            throw new BadRequestException("This Team Leader is already assigned to another team.");
+            if (teamRepository.findByTeamLeader(leader).isPresent())
+                throw new BadRequestException("This Team Leader is already assigned to another team.");
+        }
 
         Department department = null;
         if (departmentId != null) {
@@ -111,7 +114,7 @@ public class TeamService {
         team.setTeamLeader(leader);
         team.setDepartment(department);
         teamRepository.save(team);
-        logger.info("Team '{}' created with leader '{}'", normalizedName, leader.getUsername());
+        logger.info("Team '{}' created with leader '{}'", normalizedName, leader != null ? leader.getUsername() : "none");
 
         // Build response directly from known data - no lazy loading
         return buildTeamResponse(team.getId(), team.getName(), team.getDescription(),

@@ -29,7 +29,7 @@ public class TeamController {
     // HR ENDPOINTS  to  /api/hr/teams
 
     /**
-     * HR creates a new team and assigns a Team Leader.
+     * HR creates a new team and optionally assigns a Team Leader.
      * POST /api/hr/teams
      * Body: { "name": "Backend Team", "description": "...", "teamLeaderId": 2, "departmentId": 5 }
      */

@@ -1,7 +1,6 @@
 package tn.isetbizerte.pfe.hrbackend.modules.team.dto;
 
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 
 public class CreateTeamRequest {
 
@@ -10,7 +9,6 @@ public class CreateTeamRequest {
 
     private String description;
 
-    @NotNull(message = "Team leader user ID is required")
     private Long teamLeaderId;
 
     private Long departmentId;

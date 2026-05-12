@@ -87,7 +87,27 @@ class TeamServiceTest {
     }
 
     @Test
-    void createTeam_uniqueTeamSucceeds() {
+    void createTeam_allowsMissingLeader() {
+        when(teamRepository.existsByNameIgnoreCase("Ops")).thenReturn(false);
+        when(teamRepository.save(any(Team.class))).thenAnswer(invocation -> {
+            Team team = invocation.getArgument(0);
+            team.setId(8L);
+            return team;
+        });
+
+        Map<String, Object> response = teamService.createTeam("Ops", null, null);
+
+        assertThat(response.get("id")).isEqualTo(8L);
+        assertThat(response.get("name")).isEqualTo("Ops");
+        assertThat(response.get("teamLeader")).isNull();
+        assertThat(response.get("teamLeaderCount")).isEqualTo(0);
+        assertThat(response.get("totalPeopleCount")).isEqualTo(0);
+        verify(userRepository, never()).findById(any());
+        verify(teamRepository, never()).findByTeamLeader(any());
+    }
+
+    @Test
+    void createTeam_withValidLeaderSucceeds() {
         User leader = teamLeader(3L, "lead-three");
         when(teamRepository.existsByNameIgnoreCase("Ops")).thenReturn(false);
         when(userRepository.findById(3L)).thenReturn(Optional.of(leader));
@@ -102,6 +122,67 @@ class TeamServiceTest {
 
         assertThat(response.get("id")).isEqualTo(8L);
         assertThat(response.get("name")).isEqualTo("Ops");
+        assertThat(response.get("teamLeader")).isInstanceOf(Map.class);
+    }
+
+    @Test
+    void createTeam_rejectsNonTeamLeaderProvidedLeader() {
+        User employee = employee(3L, "employee");
+        when(teamRepository.existsByNameIgnoreCase("Ops")).thenReturn(false);
+        when(userRepository.findById(3L)).thenReturn(Optional.of(employee));
+
+        assertThatThrownBy(() -> teamService.createTeam("Ops", null, 3L))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("User is not a TEAM_LEADER. Assign the TEAM_LEADER role first.");
+
+        verify(teamRepository, never()).save(any());
+    }
+
+    @Test
+    void createTeam_rejectsLeaderAlreadyAssignedToAnotherTeam() {
+        User leader = teamLeader(3L, "lead-three");
+        Team otherTeam = team(9L, "Other Team", leader);
+        when(teamRepository.existsByNameIgnoreCase("Ops")).thenReturn(false);
+        when(userRepository.findById(3L)).thenReturn(Optional.of(leader));
+        when(teamRepository.findByTeamLeader(leader)).thenReturn(Optional.of(otherTeam));
+
+        assertThatThrownBy(() -> teamService.createTeam("Ops", null, 3L))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("This Team Leader is already assigned to another team.");
+
+        verify(teamRepository, never()).save(any());
+    }
+
+    @Test
+    void getTeamById_handlesLeaderlessTeam() {
+        Team leaderless = team(20L, "Leaderless", null);
+        leaderless.setMembers(List.of());
+        when(teamRepository.findByIdWithDetails(20L)).thenReturn(Optional.of(leaderless));
+        when(teamRepository.findByIdWithMembers(20L)).thenReturn(Optional.of(leaderless));
+
+        Map<String, Object> response = teamService.getTeamById(20L);
+
+        assertThat(response.get("id")).isEqualTo(20L);
+        assertThat(response.get("name")).isEqualTo("Leaderless");
+        assertThat(response.containsKey("teamLeader")).isFalse();
+        assertThat(response.get("teamLeaderCount")).isEqualTo(0);
+        assertThat(response.get("totalPeopleCount")).isEqualTo(0);
+    }
+
+    @Test
+    void getAllTeams_handlesLeaderlessTeam() {
+        Team leaderless = team(20L, "Leaderless", null);
+        leaderless.setMembers(List.of());
+        when(teamRepository.findAll()).thenReturn(List.of(leaderless));
+        when(teamRepository.findByIdWithDetails(20L)).thenReturn(Optional.of(leaderless));
+        when(teamRepository.findByIdWithMembers(20L)).thenReturn(Optional.of(leaderless));
+
+        List<Map<String, Object>> response = teamService.getAllTeams();
+
+        assertThat(response).hasSize(1);
+        assertThat(response.get(0).containsKey("teamLeader")).isFalse();
+        assertThat(response.get(0).get("teamLeaderCount")).isEqualTo(0);
+        assertThat(response.get(0).get("totalPeopleCount")).isEqualTo(0);
     }
 
     @Test
