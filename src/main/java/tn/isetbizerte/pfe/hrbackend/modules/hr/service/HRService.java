@@ -227,6 +227,8 @@ public class HRService {
             throw new BadRequestException("User has no Keycloak ID associated. Cannot update role in Keycloak.");
         }
 
+        validateRoleTransitionPolicy(oldRole, newRole);
+
         Department department = requireSetupDepartment(request.getDepartmentId());
         JobTitle jobTitle = requireSetupJobTitle(request.getJobTitleId());
         if (request.getHireDate() == null) {
@@ -462,6 +464,25 @@ public class HRService {
             throw new BadRequestException("NEW_USER is not a valid target role for setup.");
         }
         return role;
+    }
+
+    private void validateRoleTransitionPolicy(TypeRole oldRole, TypeRole newRole) {
+        if (oldRole == null) {
+            throw new BadRequestException("User has no current role. Cannot change role through HR setup.");
+        }
+
+        boolean allowed = switch (oldRole) {
+            case NEW_USER -> newRole == TypeRole.EMPLOYEE
+                    || newRole == TypeRole.TEAM_LEADER
+                    || newRole == TypeRole.HR_MANAGER;
+            case EMPLOYEE -> newRole == TypeRole.TEAM_LEADER;
+            case TEAM_LEADER -> newRole == TypeRole.EMPLOYEE;
+            case HR_MANAGER -> false;
+        };
+
+        if (!allowed) {
+            throw new BadRequestException("Role transition not allowed.");
+        }
     }
 
     private Department requireSetupDepartment(Long departmentId) {

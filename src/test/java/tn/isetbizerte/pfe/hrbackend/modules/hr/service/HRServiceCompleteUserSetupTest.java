@@ -134,19 +134,17 @@ class HRServiceCompleteUserSetupTest {
     }
 
     @Test
-    void teamLeaderSetup_allowsSameCurrentLeaderNoOp() {
+    void teamLeaderSetup_rejectsSameRoleTransitionWhenAlreadyLeader() {
         User user = user(18L, "existing-leader", TypeRole.TEAM_LEADER, true);
-        Team ledTeam = team(4L, "Platform", user);
         when(userService.findById(18L)).thenReturn(Optional.of(user));
-        when(teamRepository.findByTeamLeader(user)).thenReturn(Optional.of(ledTeam));
-        when(teamRepository.findByIdWithDetails(4L)).thenReturn(Optional.of(ledTeam));
 
-        service.completeUserSetup(18L, request("TEAM_LEADER", null, 4L), "kc-hr", "hr");
+        assertThatThrownBy(() -> service.completeUserSetup(18L, request("TEAM_LEADER", null, null), "kc-hr", "hr"))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Role transition not allowed.");
 
-        assertThat(user.getRole()).isEqualTo(TypeRole.TEAM_LEADER);
-        assertThat(user.getTeam()).isNull();
-        assertThat(ledTeam.getTeamLeader()).isSameAs(user);
-        verify(keycloakAdminService).assignRoleToUser("kc-existing-leader", "TEAM_LEADER");
+        verify(keycloakAdminService, never()).assignRoleToUser(anyString(), anyString());
+        verify(userService, never()).saveUser(any());
+        verify(userService, never()).savePerson(any());
     }
 
     @Test
@@ -178,6 +176,130 @@ class HRServiceCompleteUserSetupTest {
         assertThat(user.getTeam()).isNull();
         assertThat(user.getPerson().getSalary()).isEqualByComparingTo("3500");
         verify(keycloakAdminService).assignRoleToUser("kc-new-hr", "HR_MANAGER");
+    }
+
+    @Test
+    void completeUserSetup_allowsNewUserToHrManager() {
+        User user = user(121L, "new-hr-alt", TypeRole.NEW_USER, false);
+        when(userService.findById(121L)).thenReturn(Optional.of(user));
+        when(teamRepository.existsByTeamLeader(user)).thenReturn(false);
+
+        Map<String, Object> response = service.completeUserSetup(121L, request("HR_MANAGER", null, null), "kc-admin", "admin");
+
+        assertThat(response).containsEntry("success", true)
+                .containsEntry("newRole", "HR_MANAGER");
+        assertThat(user.getRole()).isEqualTo(TypeRole.HR_MANAGER);
+        verify(keycloakAdminService).assignRoleToUser("kc-new-hr-alt", "HR_MANAGER");
+        verify(userService).saveUser(user);
+        verify(userService).savePerson(user.getPerson());
+    }
+
+    @Test
+    void completeUserSetup_blocksEmployeeToHrManager() {
+        User user = user(122L, "employee-to-hr", TypeRole.EMPLOYEE, true);
+        when(userService.findById(122L)).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> service.completeUserSetup(122L, request("HR_MANAGER", null, null), "kc-hr", "hr"))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Role transition not allowed.");
+
+        verify(keycloakAdminService, never()).assignRoleToUser(anyString(), anyString());
+        verify(userService, never()).saveUser(any());
+        verify(userService, never()).savePerson(any());
+    }
+
+    @Test
+    void completeUserSetup_blocksTeamLeaderToHrManager() {
+        User user = user(123L, "leader-to-hr", TypeRole.TEAM_LEADER, true);
+        when(userService.findById(123L)).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> service.completeUserSetup(123L, request("HR_MANAGER", null, null), "kc-hr", "hr"))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Role transition not allowed.");
+
+        verify(keycloakAdminService, never()).assignRoleToUser(anyString(), anyString());
+        verify(userService, never()).saveUser(any());
+        verify(userService, never()).savePerson(any());
+    }
+
+    @Test
+    void completeUserSetup_blocksHrManagerToEmployee() {
+        User user = user(124L, "hr-to-employee", TypeRole.HR_MANAGER, true);
+        when(userService.findById(124L)).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> service.completeUserSetup(124L, request("EMPLOYEE", 3L, null), "kc-hr2", "hr2"))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Role transition not allowed.");
+
+        verify(keycloakAdminService, never()).assignRoleToUser(anyString(), anyString());
+        verify(userService, never()).saveUser(any());
+        verify(userService, never()).savePerson(any());
+    }
+
+    @Test
+    void completeUserSetup_blocksHrManagerToTeamLeader() {
+        User user = user(125L, "hr-to-leader", TypeRole.HR_MANAGER, true);
+        when(userService.findById(125L)).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> service.completeUserSetup(125L, request("TEAM_LEADER", null, 4L), "kc-hr2", "hr2"))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Role transition not allowed.");
+
+        verify(keycloakAdminService, never()).assignRoleToUser(anyString(), anyString());
+        verify(userService, never()).saveUser(any());
+        verify(userService, never()).savePerson(any());
+    }
+
+    @Test
+    void completeUserSetup_blocksSelfRoleChange() {
+        User user = user(126L, "self", TypeRole.EMPLOYEE, true);
+        when(userService.findById(126L)).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> service.completeUserSetup(126L, request("TEAM_LEADER", null, null), "kc-self", "self"))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("You cannot change your own role or HR-managed setup.");
+
+        verify(keycloakAdminService, never()).assignRoleToUser(anyString(), anyString());
+        verify(userService, never()).saveUser(any());
+        verify(userService, never()).savePerson(any());
+    }
+
+    @Test
+    void completeUserSetup_allowsEmployeeToTeamLeaderWhenNotTeamMember() {
+        User user = user(127L, "employee-to-leader", TypeRole.EMPLOYEE, true);
+        when(userService.findById(127L)).thenReturn(Optional.of(user));
+        when(teamRepository.existsByTeamLeader(user)).thenReturn(false);
+
+        Map<String, Object> response = service.completeUserSetup(127L, request("TEAM_LEADER", null, null), "kc-hr", "hr");
+
+        assertThat(response).containsEntry("success", true)
+                .containsEntry("newRole", "TEAM_LEADER")
+                .containsEntry("ledTeamId", null);
+        assertThat(user.getRole()).isEqualTo(TypeRole.TEAM_LEADER);
+        assertThat(user.getTeam()).isNull();
+        verify(keycloakAdminService).assignRoleToUser("kc-employee-to-leader", "TEAM_LEADER");
+        verify(userService).saveUser(user);
+        verify(userService).savePerson(user.getPerson());
+    }
+
+    @Test
+    void completeUserSetup_allowsTeamLeaderToEmployeeWhenNotLeadingTeam() {
+        User user = user(128L, "leader-to-employee", TypeRole.TEAM_LEADER, true);
+        Team team = team(3L, "Support", user(200L, "other-leader", TypeRole.TEAM_LEADER, true));
+        when(userService.findById(128L)).thenReturn(Optional.of(user));
+        when(teamRepository.existsByTeamLeader(user)).thenReturn(false);
+        when(teamRepository.findByIdWithDetails(3L)).thenReturn(Optional.of(team));
+
+        Map<String, Object> response = service.completeUserSetup(128L, request("EMPLOYEE", 3L, null), "kc-hr", "hr");
+
+        assertThat(response).containsEntry("success", true)
+                .containsEntry("newRole", "EMPLOYEE")
+                .containsEntry("teamId", 3L);
+        assertThat(user.getRole()).isEqualTo(TypeRole.EMPLOYEE);
+        assertThat(user.getTeam()).isSameAs(team);
+        verify(keycloakAdminService).assignRoleToUser("kc-leader-to-employee", "EMPLOYEE");
+        verify(userService).saveUser(user);
+        verify(userService).savePerson(user.getPerson());
     }
 
     @Test
@@ -225,12 +347,13 @@ class HRServiceCompleteUserSetupTest {
         User leader = user(16L, "leader", TypeRole.TEAM_LEADER, true);
         Team currentLedTeam = team(9L, "Current", leader);
         when(userService.findById(16L)).thenReturn(Optional.of(leader));
-        when(teamRepository.findByIdWithDetails(4L)).thenReturn(Optional.of(team(4L, "Other", null)));
+        when(teamRepository.existsByTeamLeader(leader)).thenReturn(true);
+        when(teamRepository.findByIdWithDetails(4L)).thenReturn(Optional.of(team(4L, "Other", user(21L, "other-leader", TypeRole.TEAM_LEADER, true))));
         when(teamRepository.findByTeamLeader(leader)).thenReturn(Optional.of(currentLedTeam));
 
-        assertThatThrownBy(() -> service.completeUserSetup(16L, request("TEAM_LEADER", null, 4L), "kc-hr", "hr"))
+        assertThatThrownBy(() -> service.completeUserSetup(16L, request("EMPLOYEE", 4L, null), "kc-hr", "hr"))
                 .isInstanceOf(BadRequestException.class)
-                .hasMessage("This Team Leader is already assigned to another team.");
+                .hasMessage("This user currently leads a team. Reassign or remove team leadership before assigning EMPLOYEE.");
 
         verify(keycloakAdminService, never()).assignRoleToUser(anyString(), anyString());
     }
