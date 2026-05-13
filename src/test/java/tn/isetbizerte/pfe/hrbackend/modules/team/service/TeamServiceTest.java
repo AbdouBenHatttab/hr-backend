@@ -5,11 +5,15 @@ import org.junit.jupiter.api.Test;
 import tn.isetbizerte.pfe.hrbackend.common.event.NotificationEvent;
 import tn.isetbizerte.pfe.hrbackend.common.enums.TypeRole;
 import tn.isetbizerte.pfe.hrbackend.common.exception.BadRequestException;
+import tn.isetbizerte.pfe.hrbackend.common.exception.ResourceNotFoundException;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.email.HREmailService;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.kafka.producer.NotificationEventProducer;
+import tn.isetbizerte.pfe.hrbackend.modules.department.entity.Department;
+import tn.isetbizerte.pfe.hrbackend.modules.department.repository.DepartmentRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.employee.repository.LeaveRequestRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.team.entity.Team;
 import tn.isetbizerte.pfe.hrbackend.modules.team.repository.TeamRepository;
+import tn.isetbizerte.pfe.hrbackend.modules.team.service.TeamNotificationService;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.Person;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
 import tn.isetbizerte.pfe.hrbackend.modules.user.repository.UserRepository;
@@ -28,19 +32,26 @@ class TeamServiceTest {
     private TeamRepository teamRepository;
     private UserRepository userRepository;
     private LeaveRequestRepository leaveRequestRepository;
+    private DepartmentRepository departmentRepository;
     private NotificationEventProducer notificationEventProducer;
     private HREmailService emailService;
+    private TeamNotificationService teamNotificationService;
     private TeamService teamService;
+    private TeamService teamServiceWithDepartment;
 
     @BeforeEach
     void setUp() {
         teamRepository = mock(TeamRepository.class);
         userRepository = mock(UserRepository.class);
         leaveRequestRepository = mock(LeaveRequestRepository.class);
+        departmentRepository = mock(DepartmentRepository.class);
         notificationEventProducer = mock(NotificationEventProducer.class);
         emailService = mock(HREmailService.class);
+        teamNotificationService = mock(TeamNotificationService.class);
         teamService = new TeamService(teamRepository, userRepository, leaveRequestRepository,
                 notificationEventProducer, emailService);
+        teamServiceWithDepartment = new TeamService(teamRepository, userRepository, leaveRequestRepository,
+                departmentRepository, teamNotificationService);
     }
 
     @Test
@@ -151,6 +162,117 @@ class TeamServiceTest {
                 .hasMessage("This Team Leader is already assigned to another team.");
 
         verify(teamRepository, never()).save(any());
+    }
+
+    @Test
+    void updateTeamMetadata_updatesNameDepartmentDescriptionWithoutChangingLeaderOrMembers() {
+        User leader = teamLeader(3L, "lead-three");
+        User member = employee(10L, "member");
+        Team team = team(20L, "Ops", leader);
+        team.setDescription("Old description");
+        member.setTeam(team);
+        team.setMembers(List.of(member));
+
+        Department department = department(4L, "Engineering", true);
+        when(teamRepository.findByIdWithDetails(20L)).thenReturn(Optional.of(team));
+        when(teamRepository.findByIdWithMembers(20L)).thenReturn(Optional.of(team));
+        when(teamRepository.existsByNameIgnoreCaseAndIdNot("Platform Team", 20L)).thenReturn(false);
+        when(departmentRepository.findById(4L)).thenReturn(Optional.of(department));
+        when(teamRepository.save(any(Team.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Map<String, Object> response = teamServiceWithDepartment.updateTeamMetadata(20L, updateRequest("Platform Team", 4L, "  Handles backend services  "));
+
+        assertThat(team.getName()).isEqualTo("Platform Team");
+        assertThat(team.getDescription()).isEqualTo("Handles backend services");
+        assertThat(team.getDepartment()).isEqualTo(department);
+        assertThat(team.getTeamLeader()).isEqualTo(leader);
+        assertThat(team.getMembers()).containsExactly(member);
+        assertThat(response.get("name")).isEqualTo("Platform Team");
+        assertThat(response.get("departmentId")).isEqualTo(4L);
+        assertThat(response.get("departmentName")).isEqualTo("Engineering");
+        assertThat(response.get("teamLeader")).isInstanceOf(Map.class);
+        assertThat(response.get("employeeMemberCount")).isEqualTo(1);
+        verify(teamRepository).save(team);
+    }
+
+    @Test
+    void updateTeamMetadata_rejectsBlankTeamName() {
+        Team team = team(20L, "Ops", teamLeader(3L, "lead-three"));
+        when(teamRepository.findByIdWithDetails(20L)).thenReturn(Optional.of(team));
+        when(teamRepository.findByIdWithMembers(20L)).thenReturn(Optional.of(team));
+
+        assertThatThrownBy(() -> teamServiceWithDepartment.updateTeamMetadata(20L, updateRequest("   ", 4L, null)))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Team name is required");
+    }
+
+    @Test
+    void updateTeamMetadata_rejectsDuplicateNameUsedByAnotherTeam() {
+        Team team = team(20L, "Ops", teamLeader(3L, "lead-three"));
+        when(teamRepository.findByIdWithDetails(20L)).thenReturn(Optional.of(team));
+        when(teamRepository.findByIdWithMembers(20L)).thenReturn(Optional.of(team));
+        when(teamRepository.existsByNameIgnoreCaseAndIdNot("Platform Team", 20L)).thenReturn(true);
+
+        assertThatThrownBy(() -> teamServiceWithDepartment.updateTeamMetadata(20L, updateRequest("Platform Team", 4L, null)))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("A team with this name already exists.");
+    }
+
+    @Test
+    void updateTeamMetadata_allowsKeepingTheSameTeamName() {
+        Team team = team(20L, "Ops", teamLeader(3L, "lead-three"));
+        when(teamRepository.findByIdWithDetails(20L)).thenReturn(Optional.of(team));
+        when(teamRepository.findByIdWithMembers(20L)).thenReturn(Optional.of(team));
+        when(teamRepository.existsByNameIgnoreCaseAndIdNot("Ops", 20L)).thenReturn(false);
+        when(departmentRepository.findById(4L)).thenReturn(Optional.of(department(4L, "Engineering", true)));
+        when(teamRepository.save(any(Team.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Map<String, Object> response = teamServiceWithDepartment.updateTeamMetadata(20L, updateRequest("Ops", 4L, "Ops team"));
+
+        assertThat(response.get("name")).isEqualTo("Ops");
+        assertThat(team.getName()).isEqualTo("Ops");
+        assertThat(team.getDescription()).isEqualTo("Ops team");
+    }
+
+    @Test
+    void updateTeamMetadata_rejectsMissingDepartment() {
+        Team team = team(20L, "Ops", teamLeader(3L, "lead-three"));
+        when(teamRepository.findByIdWithDetails(20L)).thenReturn(Optional.of(team));
+        when(teamRepository.findByIdWithMembers(20L)).thenReturn(Optional.of(team));
+
+        assertThatThrownBy(() -> teamServiceWithDepartment.updateTeamMetadata(20L, updateRequest("Platform Team", null, null)))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessage("Department is required");
+    }
+
+    @Test
+    void updateTeamMetadata_rejectsInvalidDepartment() {
+        Team team = team(20L, "Ops", teamLeader(3L, "lead-three"));
+        when(teamRepository.findByIdWithDetails(20L)).thenReturn(Optional.of(team));
+        when(teamRepository.findByIdWithMembers(20L)).thenReturn(Optional.of(team));
+        when(teamRepository.existsByNameIgnoreCaseAndIdNot("Platform Team", 20L)).thenReturn(false);
+        when(departmentRepository.findById(4L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> teamServiceWithDepartment.updateTeamMetadata(20L, updateRequest("Platform Team", 4L, null)))
+                .isInstanceOf(ResourceNotFoundException.class)
+                .hasMessage("Department not found with ID: 4");
+    }
+
+    @Test
+    void updateTeamMetadata_allowsLeaderlessTeamToBeEdited() {
+        Team team = team(21L, "Leaderless", null);
+        when(teamRepository.findByIdWithDetails(21L)).thenReturn(Optional.of(team));
+        when(teamRepository.findByIdWithMembers(21L)).thenReturn(Optional.of(team));
+        when(teamRepository.existsByNameIgnoreCaseAndIdNot("Support", 21L)).thenReturn(false);
+        when(departmentRepository.findById(4L)).thenReturn(Optional.of(department(4L, "Engineering", true)));
+        when(teamRepository.save(any(Team.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Map<String, Object> response = teamServiceWithDepartment.updateTeamMetadata(21L, updateRequest("Support", 4L, null));
+
+        assertThat(team.getName()).isEqualTo("Support");
+        assertThat(team.getTeamLeader()).isNull();
+        assertThat(response.containsKey("teamLeader")).isFalse();
+        assertThat(response.get("teamLeaderCount")).isEqualTo(0);
     }
 
     @Test
@@ -519,5 +641,21 @@ class TeamServiceTest {
         team.setName(name);
         team.setTeamLeader(leader);
         return team;
+    }
+
+    private Department department(Long id, String name, boolean active) {
+        Department department = new Department();
+        department.setId(id);
+        department.setName(name);
+        department.setActive(active);
+        return department;
+    }
+
+    private tn.isetbizerte.pfe.hrbackend.modules.team.dto.UpdateTeamRequest updateRequest(String name, Long departmentId, String description) {
+        tn.isetbizerte.pfe.hrbackend.modules.team.dto.UpdateTeamRequest request = new tn.isetbizerte.pfe.hrbackend.modules.team.dto.UpdateTeamRequest();
+        request.setName(name);
+        request.setDepartmentId(departmentId);
+        request.setDescription(description);
+        return request;
     }
 }

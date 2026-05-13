@@ -14,6 +14,7 @@ import tn.isetbizerte.pfe.hrbackend.modules.department.entity.Department;
 import tn.isetbizerte.pfe.hrbackend.modules.department.repository.DepartmentRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.employee.repository.LeaveRequestRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.team.entity.Team;
+import tn.isetbizerte.pfe.hrbackend.modules.team.dto.UpdateTeamRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.team.repository.TeamRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.User;
 import tn.isetbizerte.pfe.hrbackend.modules.user.repository.UserRepository;
@@ -119,6 +120,48 @@ public class TeamService {
         // Build response directly from known data - no lazy loading
         return buildTeamResponse(team.getId(), team.getName(), team.getDescription(),
                 team.getCreatedAt(), team.getDepartment(), leader, List.of());
+    }
+
+    @Transactional
+    public Map<String, Object> updateTeamMetadata(Long teamId, UpdateTeamRequest request) {
+        Team team = teamRepository.findByIdWithDetails(teamId)
+                .orElseThrow(() -> new ResourceNotFoundException("Team not found: " + teamId));
+        Team withMembers = teamRepository.findByIdWithMembers(teamId).orElse(team);
+        List<User> members = withMembers.getMembers() != null ? withMembers.getMembers() : List.of();
+
+        String normalizedName = request.getName() != null ? request.getName().trim() : "";
+        if (normalizedName.isBlank())
+            throw new BadRequestException("Team name is required");
+
+        if (teamRepository.existsByNameIgnoreCaseAndIdNot(normalizedName, teamId))
+            throw new BadRequestException("A team with this name already exists.");
+
+        Long departmentId = request.getDepartmentId();
+        if (departmentId == null)
+            throw new BadRequestException("Department is required");
+
+        if (departmentRepository == null) {
+            throw new IllegalStateException("Department repository is not configured.");
+        }
+
+        Department department = departmentRepository.findById(departmentId)
+                .orElseThrow(() -> new ResourceNotFoundException("Department not found with ID: " + departmentId));
+        if (!Boolean.TRUE.equals(department.getActive())) {
+            throw new BadRequestException("Department '" + department.getName() + "' is archived and cannot be assigned.");
+        }
+
+        String normalizedDescription = request.getDescription() != null ? request.getDescription().trim() : null;
+        if (normalizedDescription != null && normalizedDescription.isBlank()) {
+            normalizedDescription = null;
+        }
+
+        team.setName(normalizedName);
+        team.setDescription(normalizedDescription);
+        team.setDepartment(department);
+        touchTeam(team);
+
+        return buildTeamResponse(team.getId(), team.getName(), team.getDescription(),
+                team.getCreatedAt(), team.getDepartment(), team.getTeamLeader(), members);
     }
 
     @Transactional

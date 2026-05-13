@@ -11,6 +11,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import tn.isetbizerte.pfe.hrbackend.modules.team.dto.AddMemberRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.team.dto.CreateTeamRequest;
+import tn.isetbizerte.pfe.hrbackend.modules.team.dto.UpdateTeamRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.team.dto.UpdateTeamLeaderRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.team.service.TeamService;
 
@@ -87,6 +88,23 @@ public class TeamController {
         Map<String, Object> response = new HashMap<>();
         response.put("success", true);
         response.put("data", teamService.getTeamById(teamId));
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * HR edits team metadata.
+     * PATCH /api/hr/teams/{teamId}
+     * Body: { "name": "Backend Team", "departmentId": 2, "description": "Handles backend services" }
+     */
+    @PreAuthorize("hasRole('HR_MANAGER')")
+    @PatchMapping("/api/hr/teams/{teamId}")
+    public ResponseEntity<Map<String, Object>> updateTeamMetadata(
+            @PathVariable Long teamId,
+            @Valid @RequestBody UpdateTeamRequest request) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("success", true);
+        response.put("message", "Team updated successfully");
+        response.put("data", teamService.updateTeamMetadata(teamId, request));
         return ResponseEntity.ok(response);
     }
 
