@@ -3,6 +3,7 @@ package tn.isetbizerte.pfe.hrbackend.modules.requests.repository;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
 import tn.isetbizerte.pfe.hrbackend.common.enums.RequestStatus;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.entity.DocumentRequest;
@@ -18,6 +19,14 @@ public interface DocumentRequestRepository extends JpaRepository<DocumentRequest
     List<DocumentRequest> findAllByOrderByRequestedAtDesc();
     Page<DocumentRequest> findAllByOrderByRequestedAtDesc(Pageable pageable);
     Optional<DocumentRequest> findByVerificationToken(String token);
+
+    @Query("SELECT dr FROM DocumentRequest dr " +
+           "JOIN FETCH dr.user u " +
+           "LEFT JOIN FETCH u.person " +
+           "LEFT JOIN FETCH u.team " +
+           "ORDER BY dr.requestedAt DESC")
+    List<DocumentRequest> findAllForReportExport();
+
     long countByStatus(RequestStatus status);
     long countByUserAndStatus(User user, RequestStatus status);
     long countByStatusAndDocumentTypeNotAndAttachmentStoragePathIsNull(

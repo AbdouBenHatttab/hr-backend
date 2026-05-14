@@ -25,6 +25,14 @@ public interface AuthorizationRequestRepository extends JpaRepository<Authorizat
     List<AuthorizationRequest> findAllByOrderByRequestedAtDesc();
     Page<AuthorizationRequest> findAllByOrderByRequestedAtDesc(Pageable pageable);
     Optional<AuthorizationRequest> findByVerificationToken(String token);
+
+    @Query("SELECT ar FROM AuthorizationRequest ar " +
+           "JOIN FETCH ar.user u " +
+           "LEFT JOIN FETCH u.person " +
+           "LEFT JOIN FETCH u.team " +
+           "ORDER BY ar.requestedAt DESC")
+    List<AuthorizationRequest> findAllForReportExport();
+
     long countByStatus(RequestStatus status);
     long countByUserAndStatus(User user, RequestStatus status);
 

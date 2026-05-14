@@ -23,6 +23,14 @@ public interface LoanRequestRepository extends JpaRepository<LoanRequest, Long> 
     List<LoanRequest> findAllByOrderByRequestedAtDesc();
     Page<LoanRequest> findAllByOrderByRequestedAtDesc(Pageable pageable);
     Optional<LoanRequest> findByVerificationToken(String token);
+
+    @Query("SELECT lr FROM LoanRequest lr " +
+           "JOIN FETCH lr.user u " +
+           "LEFT JOIN FETCH u.person " +
+           "LEFT JOIN FETCH u.team " +
+           "ORDER BY lr.requestedAt DESC")
+    List<LoanRequest> findAllForReportExport();
+
     long countByStatus(RequestStatus status);
     long countByUserAndStatus(User user, RequestStatus status);
     long countByStatusAndAttachmentStoragePathIsNull(RequestStatus status);

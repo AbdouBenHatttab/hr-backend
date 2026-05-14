@@ -34,6 +34,13 @@ public interface LeaveRequestRepository extends JpaRepository<LeaveRequest, Long
     List<LeaveRequest> findByStatus(LeaveStatus status);
     List<LeaveRequest> findByUserAndStatus(User user, LeaveStatus status);
 
+    @Query("SELECT lr FROM LeaveRequest lr " +
+           "JOIN FETCH lr.user u " +
+           "LEFT JOIN FETCH u.person " +
+           "LEFT JOIN FETCH u.team " +
+           "ORDER BY lr.requestDate DESC")
+    List<LeaveRequest> findAllForReportExport();
+
     long countByStatusAndTeamLeaderDecisionAndHrDecision(
             LeaveStatus status,
             tn.isetbizerte.pfe.hrbackend.common.enums.ApprovalDecision teamLeaderDecision,
