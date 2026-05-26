@@ -49,7 +49,10 @@ services:
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_INTERNAL://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
     depends_on:
       - zookeeper
@@ -65,6 +68,52 @@ services:
       - "5050:80"
     depends_on:
       - postgres
+
+  arabsoft-ai-service:
+    container_name: arabsoft-ai-service
+    restart: always
+    build:
+      context: ../arabsoft-ai-service
+    env_file:
+      - ../arabsoft-ai-service/.env
+    ports:
+      - "8000:8000"
+
+  hr-backend:
+    container_name: hr-backend
+    restart: always
+    build:
+      context: .
+    env_file:
+      - .env
+    environment:
+      SERVER_PORT: 8081
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/hr_db
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: admin
+      KEYCLOAK_AUTH_SERVER_URL: http://keycloak:8080
+      KEYCLOAK_ISSUER_URI: http://keycloak:8080/realms/hr-realm
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      AI_SERVICE_BASE_URL: http://arabsoft-ai-service:8000
+    ports:
+      - "8081:8081"
+    depends_on:
+      - postgres
+      - keycloak
+      - kafka
+      - arabsoft-ai-service
+
+  hr-frontend:
+    container_name: hr-frontend
+    restart: always
+    build:
+      context: ../hr-frontend
+    environment:
+      VITE_API_URL: http://localhost:8081
+    ports:
+      - "5173:5173"
+    depends_on:
+      - hr-backend
 
 volumes:
   postgres_data:
