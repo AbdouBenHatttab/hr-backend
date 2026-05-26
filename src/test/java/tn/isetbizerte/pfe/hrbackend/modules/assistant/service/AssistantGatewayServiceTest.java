@@ -77,7 +77,7 @@ class AssistantGatewayServiceTest {
                 List.of(new AiServiceResponse.RelatedPage("Leave Balance", "/leave/balance")),
                 "The assistant provides guidance only.",
                 true,
-                null, null, null, List.of()
+                null, null, null, List.of(), List.of()
         );
 
         when(aiServiceRestTemplate.postForObject(
@@ -152,7 +152,7 @@ class AssistantGatewayServiceTest {
 
         AiServiceResponse aiResponse = new AiServiceResponse(
                 "Guidance.", List.of(), List.of(), List.of(), "Disclaimer.", true,
-                null, null, null, List.of()
+                null, null, null, List.of(), List.of()
         );
 
         when(aiServiceRestTemplate.postForObject(anyString(), any(AiServiceRequest.class), eq(AiServiceResponse.class)))
@@ -176,7 +176,7 @@ class AssistantGatewayServiceTest {
 
         AiServiceResponse aiResponse = new AiServiceResponse(
                 "Guidance.", List.of(), List.of(), List.of(), "Disclaimer.", true,
-                null, null, null, List.of()
+                null, null, null, List.of(), List.of()
         );
 
         when(aiServiceRestTemplate.postForObject(anyString(), any(AiServiceRequest.class), eq(AiServiceResponse.class)))
@@ -213,19 +213,30 @@ class AssistantGatewayServiceTest {
                         0L,
                         0L,
                         5,
+                        0,
+                        5,
+                        "NORMAL",
                         0L,
                         0L,
                         0L,
                         0L,
                         false,
-                        true
+                        true,
+                        List.of(new SafeAssistantContext.TaskEvidenceSummary(
+                                "Review docs",
+                                "Portal",
+                                "IN_PROGRESS",
+                                "HIGH",
+                                java.time.LocalDate.of(2026, 6, 13),
+                                "HIGH_PRIORITY_DUE_DURING_LEAVE"
+                        ))
                 )
         );
         when(contextBuilder.build(jwt, 130L)).thenReturn(ctxWithDecision);
 
         AiServiceResponse aiResponse = new AiServiceResponse(
                 "Guidance.", List.of(), List.of(), List.of(), "Disclaimer.", true,
-                null, null, null, List.of()
+                null, null, null, List.of(), List.of()
         );
 
         when(aiServiceRestTemplate.postForObject(anyString(), any(AiServiceRequest.class), eq(AiServiceResponse.class)))
@@ -234,6 +245,8 @@ class AssistantGatewayServiceTest {
                     assertThat(req.context()).isNotNull();
                     assertThat(req.context().teamLeaveDecision()).isNotNull();
                     assertThat(req.context().teamLeaveDecision().available()).isTrue();
+                    assertThat(req.context().teamLeaveDecision().taskEvidence()).hasSize(1);
+                    assertThat(req.context().teamLeaveDecision().taskEvidence().get(0).title()).isEqualTo("Review docs");
                     return aiResponse;
                 });
 

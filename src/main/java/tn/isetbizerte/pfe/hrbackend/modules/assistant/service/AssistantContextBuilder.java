@@ -7,6 +7,8 @@ import org.springframework.stereotype.Service;
 import tn.isetbizerte.pfe.hrbackend.common.enums.ApprovalDecision;
 import tn.isetbizerte.pfe.hrbackend.common.enums.LeaveType;
 import tn.isetbizerte.pfe.hrbackend.common.enums.LeaveStatus;
+import tn.isetbizerte.pfe.hrbackend.common.enums.TaskPriority;
+import tn.isetbizerte.pfe.hrbackend.common.enums.TaskStatus;
 import tn.isetbizerte.pfe.hrbackend.common.enums.TypeRole;
 import tn.isetbizerte.pfe.hrbackend.common.exception.ResourceNotFoundException;
 import tn.isetbizerte.pfe.hrbackend.modules.assistant.dto.SafeAssistantContext;
@@ -16,6 +18,8 @@ import tn.isetbizerte.pfe.hrbackend.modules.employee.repository.LeaveRequestRepo
 import tn.isetbizerte.pfe.hrbackend.modules.employee.service.LeaveBalanceService;
 import tn.isetbizerte.pfe.hrbackend.modules.hr.dto.RequestActionSummary;
 import tn.isetbizerte.pfe.hrbackend.modules.hr.service.DashboardRequestSummaryService;
+import tn.isetbizerte.pfe.hrbackend.modules.task.entity.Task;
+import tn.isetbizerte.pfe.hrbackend.modules.task.repository.TaskRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.team.entity.Team;
 import tn.isetbizerte.pfe.hrbackend.modules.team.repository.TeamRepository;
 import tn.isetbizerte.pfe.hrbackend.modules.user.entity.Person;
@@ -26,6 +30,10 @@ import tn.isetbizerte.pfe.hrbackend.modules.user.service.AuthenticatedUserResolv
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Objects;
+import java.util.Comparator;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * AssistantContextBuilder
@@ -64,6 +72,7 @@ public class AssistantContextBuilder {
     private final DashboardRequestSummaryService dashboardRequestSummaryService;
     private final TeamRepository teamRepository;
     private final LeaveRequestRepository leaveRequestRepository;
+    private final TaskRepository taskRepository;
     private final UserRepository userRepository;
 
     public AssistantContextBuilder(
@@ -72,6 +81,7 @@ public class AssistantContextBuilder {
             DashboardRequestSummaryService dashboardRequestSummaryService,
             TeamRepository teamRepository,
             LeaveRequestRepository leaveRequestRepository,
+            TaskRepository taskRepository,
             UserRepository userRepository
     ) {
         this.authenticatedUserResolver = authenticatedUserResolver;
@@ -79,6 +89,7 @@ public class AssistantContextBuilder {
         this.dashboardRequestSummaryService = dashboardRequestSummaryService;
         this.teamRepository = teamRepository;
         this.leaveRequestRepository = leaveRequestRepository;
+        this.taskRepository = taskRepository;
         this.userRepository = userRepository;
     }
 
@@ -330,6 +341,9 @@ case TEAM_LEADER -> new SafeAssistantContext(
 
             OverlapCounts overlapCounts = resolveOverlapCounts(leaderTeamId, leave);
             Integer teamMemberCount = resolveTeamMemberCount(leaderTeamId);
+            CoverageCounts coverageCounts = resolveTeamCoverageCounts(leaderTeamId, leave, teamMemberCount);
+            WorkloadCounts workloadCounts = resolveWorkloadCounts(employee);
+            List<SafeAssistantContext.TaskEvidenceSummary> taskEvidence = resolveTaskEvidence(employee, leave);
 
             return new SafeAssistantContext.TeamLeaveDecisionContext(
                     true,
@@ -346,12 +360,16 @@ case TEAM_LEADER -> new SafeAssistantContext(
                     overlapCounts.approved(),
                     overlapCounts.pending(),
                     teamMemberCount,
-                    0L,
-                    0L,
-                    0L,
-                    0L,
-                    false,
-                    overlapCounts.available()
+                    coverageCounts.unavailableTeamMemberCount(),
+                    coverageCounts.availableTeamMemberCount(),
+                    coverageCounts.teamCoverageStatus(),
+                    workloadCounts.activeTaskCount(),
+                    workloadCounts.dueSoonTaskCount(),
+                    workloadCounts.overdueTaskCount(),
+                    workloadCounts.highPriorityTaskCount(),
+                    workloadCounts.available(),
+                    overlapCounts.available(),
+                    taskEvidence
             );
         } catch (Exception e) {
             logger.warn("Could not load Team Leader leave decision context for assistant: {}", e.getMessage());
@@ -400,6 +418,9 @@ case TEAM_LEADER -> new SafeAssistantContext(
 
             OverlapCounts overlapCounts = resolveOverlapCounts(leaderTeamId, leave);
             Integer teamMemberCount = resolveTeamMemberCount(leaderTeamId);
+            CoverageCounts coverageCounts = resolveTeamCoverageCounts(leaderTeamId, leave, teamMemberCount);
+            WorkloadCounts workloadCounts = resolveWorkloadCounts(employee);
+            List<SafeAssistantContext.TaskEvidenceSummary> taskEvidence = resolveTaskEvidence(employee, leave);
 
             return new SafeAssistantContext.TeamLeaveDecisionContext(
                     true,
@@ -416,12 +437,16 @@ case TEAM_LEADER -> new SafeAssistantContext(
                     overlapCounts.approved(),
                     overlapCounts.pending(),
                     teamMemberCount,
-                    0L,
-                    0L,
-                    0L,
-                    0L,
-                    false,
-                    overlapCounts.available()
+                    coverageCounts.unavailableTeamMemberCount(),
+                    coverageCounts.availableTeamMemberCount(),
+                    coverageCounts.teamCoverageStatus(),
+                    workloadCounts.activeTaskCount(),
+                    workloadCounts.dueSoonTaskCount(),
+                    workloadCounts.overdueTaskCount(),
+                    workloadCounts.highPriorityTaskCount(),
+                    workloadCounts.available(),
+                    overlapCounts.available(),
+                    taskEvidence
             );
         } catch (Exception e) {
             logger.warn("Could not load Team Leader leave decision context for assistant: {}", e.getMessage());
@@ -433,7 +458,7 @@ case TEAM_LEADER -> new SafeAssistantContext(
             Long selectedLeaveRequestId,
             String reason
     ) {
-        return new SafeAssistantContext.TeamLeaveDecisionContext(
+            return new SafeAssistantContext.TeamLeaveDecisionContext(
                 false,
                 reason,
                 selectedLeaveRequestId,
@@ -448,13 +473,146 @@ case TEAM_LEADER -> new SafeAssistantContext(
                 0L,
                 0L,
                 null,
+                null,
+                null,
+                "UNKNOWN",
                 0L,
                 0L,
                 0L,
                 0L,
                 false,
-                false
+                false,
+                List.of()
         );
+    }
+
+    private WorkloadCounts resolveWorkloadCounts(User employee) {
+        if (employee == null || employee.getId() == null) {
+            return new WorkloadCounts(0L, 0L, 0L, 0L, false);
+        }
+
+        try {
+            List<Task> tasks = taskRepository.findByAssigneeId(employee.getId());
+            if (tasks == null) {
+                return new WorkloadCounts(0L, 0L, 0L, 0L, false);
+            }
+
+            LocalDate today = LocalDate.now();
+            LocalDate dueSoonUntil = today.plusDays(7);
+
+            long active = tasks.stream()
+                    .filter(this::isOpenTask)
+                    .count();
+            long dueSoon = tasks.stream()
+                    .filter(this::isOpenTask)
+                    .filter(task -> task.getDueDate() != null
+                            && !task.getDueDate().isBefore(today)
+                            && !task.getDueDate().isAfter(dueSoonUntil))
+                    .count();
+            long overdue = tasks.stream()
+                    .filter(this::isOpenTask)
+                    .filter(task -> task.getDueDate() != null
+                            && task.getDueDate().isBefore(today))
+                    .count();
+            long highPriority = tasks.stream()
+                    .filter(this::isOpenTask)
+                    .filter(task -> task.getPriority() == TaskPriority.HIGH)
+                    .count();
+
+            return new WorkloadCounts(active, dueSoon, overdue, highPriority, true);
+        } catch (Exception e) {
+            logger.warn("Could not load workload context for assistant leave decision: {}", e.getMessage());
+            return new WorkloadCounts(0L, 0L, 0L, 0L, false);
+        }
+    }
+
+    private List<SafeAssistantContext.TaskEvidenceSummary> resolveTaskEvidence(User employee, LeaveRequest selectedLeave) {
+        if (employee == null || employee.getId() == null || selectedLeave == null) {
+            return List.of();
+        }
+
+        try {
+            LocalDate today = LocalDate.now();
+            LocalDate dueSoonUntil = today.plusDays(7);
+            LocalDate leaveStart = selectedLeave.getStartDate();
+            LocalDate leaveEnd = selectedLeave.getEndDate();
+
+            List<Task> tasks = taskRepository.findByAssigneeId(employee.getId());
+            if (tasks == null || tasks.isEmpty()) {
+                return List.of();
+            }
+
+            return tasks.stream()
+                    .filter(this::isOpenTask)
+                    .map(task -> new TaskEvidenceCandidate(task, taskImpact(task, today, dueSoonUntil, leaveStart, leaveEnd)))
+                    .filter(candidate -> candidate.impact != null)
+                    .sorted(Comparator
+                            .comparingInt((TaskEvidenceCandidate candidate) -> impactRank(candidate.impact))
+                            .thenComparing(candidate -> candidate.task.getDueDate(), Comparator.nullsLast(Comparator.naturalOrder()))
+                            .thenComparing(candidate -> String.valueOf(candidate.task.getTitle()).toLowerCase())
+                    )
+                    .limit(5)
+                    .map(candidate -> mapTaskEvidence(candidate.task, candidate.impact))
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            logger.warn("Could not load task evidence for assistant leave decision context: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    private SafeAssistantContext.TaskEvidenceSummary mapTaskEvidence(Task task, String impact) {
+        return new SafeAssistantContext.TaskEvidenceSummary(
+                task.getTitle(),
+                task.getProject() != null ? task.getProject().getName() : null,
+                task.getStatus() != null ? task.getStatus().name() : null,
+                task.getPriority() != null ? task.getPriority().name() : null,
+                task.getDueDate(),
+                impact
+        );
+    }
+
+    private String taskImpact(Task task,
+                              LocalDate today,
+                              LocalDate dueSoonUntil,
+                              LocalDate leaveStart,
+                              LocalDate leaveEnd) {
+        LocalDate dueDate = task.getDueDate();
+        if (dueDate == null) {
+            return "ACTIVE_ASSIGNED_TASK";
+        }
+        if (dueDate.isBefore(today)) {
+            return "OVERDUE";
+        }
+
+        boolean dueDuringLeave = leaveStart != null && leaveEnd != null
+                && !dueDate.isBefore(leaveStart)
+                && !dueDate.isAfter(leaveEnd);
+
+        if (dueDuringLeave && task.getPriority() == TaskPriority.HIGH) {
+            return "HIGH_PRIORITY_DUE_DURING_LEAVE";
+        }
+        if (dueDuringLeave) {
+            return "DUE_DURING_LEAVE";
+        }
+        if (!dueDate.isBefore(today) && !dueDate.isAfter(dueSoonUntil)) {
+            return "DUE_SOON";
+        }
+        return "ACTIVE";
+    }
+
+    private int impactRank(String impact) {
+        if ("OVERDUE".equals(impact)) return 0;
+        if ("HIGH_PRIORITY_DUE_DURING_LEAVE".equals(impact)) return 1;
+        if ("DUE_DURING_LEAVE".equals(impact)) return 2;
+        if ("DUE_SOON".equals(impact)) return 3;
+        if ("ACTIVE_ASSIGNED_TASK".equals(impact)) return 4;
+        return 5;
+    }
+
+    private record TaskEvidenceCandidate(Task task, String impact) {}
+
+    private boolean isOpenTask(Task task) {
+        return task != null && task.getStatus() != TaskStatus.DONE;
     }
 
     private OverlapCounts resolveOverlapCounts(Long teamId, LeaveRequest selectedLeave) {
@@ -492,6 +650,48 @@ case TEAM_LEADER -> new SafeAssistantContext(
         }
     }
 
+    private CoverageCounts resolveTeamCoverageCounts(Long teamId, LeaveRequest selectedLeave, Integer teamMemberCount) {
+        try {
+            List<LeaveRequest> overlaps = leaveRequestRepository.findByTeamIdAndDateRangeAndStatusIn(
+                    teamId,
+                    selectedLeave.getStartDate(),
+                    selectedLeave.getEndDate(),
+                    List.of(LeaveStatus.PENDING, LeaveStatus.APPROVED)
+            );
+
+            Long selectedEmployeeId = selectedLeave.getUser() != null ? selectedLeave.getUser().getId() : null;
+            Set<Long> unavailableMemberIds = overlaps.stream()
+                    .filter(lr -> lr.getUser() != null)
+                    .map(LeaveRequest::getUser)
+                    .map(User::getId)
+                    .filter(Objects::nonNull)
+                    .filter(id -> selectedEmployeeId == null || !selectedEmployeeId.equals(id))
+                    .collect(Collectors.toSet());
+
+            Integer unavailableTeamMemberCount = unavailableMemberIds.size();
+            if (teamMemberCount == null) {
+                return new CoverageCounts(unavailableTeamMemberCount, null, "UNKNOWN");
+            }
+
+            int availableTeamMemberCount = Math.max(teamMemberCount - unavailableTeamMemberCount, 0);
+            String teamCoverageStatus = computeTeamCoverageStatus(teamMemberCount, availableTeamMemberCount, unavailableTeamMemberCount);
+            return new CoverageCounts(unavailableTeamMemberCount, availableTeamMemberCount, teamCoverageStatus);
+        } catch (Exception e) {
+            logger.warn("Could not load team coverage for assistant leave decision context: {}", e.getMessage());
+            return new CoverageCounts(null, null, "UNKNOWN");
+        }
+    }
+
+    private String computeTeamCoverageStatus(int teamMemberCount, int availableTeamMemberCount, int unavailableTeamMemberCount) {
+        if (availableTeamMemberCount <= 1) {
+            return "CRITICAL";
+        }
+        if (unavailableTeamMemberCount > 0 || availableTeamMemberCount * 2 < teamMemberCount) {
+            return "TIGHT";
+        }
+        return "NORMAL";
+    }
+
     private String computeApprovalStage(LeaveRequest leave) {
         if (leave.getStatus() == LeaveStatus.CANCELLED_BY_EMPLOYEE) return "CANCELLED_BY_EMPLOYEE";
         if (leave.getStatus() == LeaveStatus.REJECTED) return "REJECTED";
@@ -507,6 +707,14 @@ case TEAM_LEADER -> new SafeAssistantContext(
     }
 
     private record OverlapCounts(long approved, long pending, boolean available) {}
+    private record CoverageCounts(Integer unavailableTeamMemberCount,
+                                  Integer availableTeamMemberCount,
+                                  String teamCoverageStatus) {}
+    private record WorkloadCounts(long activeTaskCount,
+                                  long dueSoonTaskCount,
+                                  long overdueTaskCount,
+                                  long highPriorityTaskCount,
+                                  boolean available) {}
 
     // ---------------------------------------------------------------------------
     // HR_MANAGER context

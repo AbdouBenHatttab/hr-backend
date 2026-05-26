@@ -140,7 +140,19 @@ public class AssistantGatewayService {
                 aiResponse.draft(),
                 aiResponse.draftType(),
                 aiResponse.draftFields(),
-                aiResponse.missingFields() != null ? aiResponse.missingFields() : List.of()
+                aiResponse.missingFields() != null ? aiResponse.missingFields() : List.of(),
+                aiResponse.taskEvidence() != null
+                        ? aiResponse.taskEvidence().stream()
+                        .map(item -> new AssistantChatResponse.TaskEvidence(
+                                item.title(),
+                                item.projectName(),
+                                item.status(),
+                                item.priority(),
+                                item.dueDate(),
+                                item.impact()
+                        ))
+                        .collect(Collectors.toList())
+                        : List.of()
         );
     }
 }

@@ -5,9 +5,11 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import tn.isetbizerte.pfe.hrbackend.modules.task.dto.CreateProjectRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.task.dto.CreateTaskRequest;
+import tn.isetbizerte.pfe.hrbackend.modules.task.dto.CreateTaskValidation;
 import tn.isetbizerte.pfe.hrbackend.modules.task.dto.TaskAssignmentPreviewRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.task.dto.UpdateProjectRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.task.dto.UpdateTaskRequest;
@@ -81,7 +83,7 @@ public class TaskController {
     @PostMapping("/api/leader/projects/{projectId}/tasks")
     public ResponseEntity<Map<String, Object>> createTask(
             @PathVariable Long projectId,
-            @Valid @RequestBody CreateTaskRequest req,
+            @Validated(CreateTaskValidation.class) @RequestBody CreateTaskRequest req,
             @AuthenticationPrincipal Jwt jwt) {
         Map<String, Object> res = new HashMap<>();
         res.put("success", true);

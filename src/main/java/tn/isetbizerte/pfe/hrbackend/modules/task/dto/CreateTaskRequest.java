@@ -8,9 +8,10 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
+@ValidPreviewTaskRequest(groups = PreviewTaskValidation.class)
 public class CreateTaskRequest {
 
-    @NotBlank(message = "Task title is required")
+    @NotBlank(message = "Task title is required", groups = CreateTaskValidation.class)
     private String title;
 
     private String description;

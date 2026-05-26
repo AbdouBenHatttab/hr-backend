@@ -105,6 +105,20 @@ public record SafeAssistantContext(
     ) {}
 
     /**
+     * Safe task evidence summary for Team Leader leave decision support.
+     * Contains only task metadata that is already visible to the Team Leader.
+     * Never includes task descriptions, comments, assignee identifiers, or raw entities.
+     */
+    public record TaskEvidenceSummary(
+            String title,
+            String projectName,
+            String status,
+            String priority,
+            java.time.LocalDate dueDate,
+            String impact
+    ) {}
+
+    /**
      * Safe HR management context.
      * Contains only platform-wide aggregate counts — never individual employee data.
      *
@@ -135,6 +149,9 @@ public record SafeAssistantContext(
      * Contains only data already visible to the Team Leader and aggregate counts.
      * Never includes email, keycloakId, JWT, salary, private profile data, raw entities,
      * or systemRecommendation approve/reject wording.
+     *
+     * teamCoverageStatus is a safe qualitative summary derived from team size and the
+     * number of distinct team members overlapping the selected leave window.
      */
     public record TeamLeaveDecisionContext(
             boolean available,
@@ -151,11 +168,15 @@ public record SafeAssistantContext(
             long overlappingApprovedLeaves,
             long overlappingPendingLeaves,
             Integer teamMemberCount,
+            Integer unavailableTeamMemberCount,
+            Integer availableTeamMemberCount,
+            String teamCoverageStatus,
             long activeTaskCount,
             long dueSoonTaskCount,
             long overdueTaskCount,
             long highPriorityTaskCount,
             boolean workloadContextAvailable,
-            boolean overlapContextAvailable
+            boolean overlapContextAvailable,
+            java.util.List<TaskEvidenceSummary> taskEvidence
     ) {}
 }

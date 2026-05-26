@@ -62,10 +62,6 @@ public class RequestReportService {
             p.put("processedAt",        req.getProcessedAt() != null ? req.getProcessedAt().format(DATETIME_FMT) : "");
             p.put("hrNote",             req.getHrNote() != null ? req.getHrNote() : "");
             p.put("logoStream",         logo);
-            if (req.getVerificationToken() != null) {
-                String url = baseUrl + "/verify/" + req.getVerificationToken();
-                p.put("qrCodeStream", qr(url));
-            }
             return fill(documentReport, p);
         } catch (Exception e) { throw new IllegalStateException("Failed to generate document PDF", e); }
     }

@@ -1,5 +1,6 @@
 package tn.isetbizerte.pfe.hrbackend.modules.assistant.dto;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
@@ -32,12 +33,22 @@ public record AssistantChatResponse(
         String draft,
         String draftType,
         Map<String, Object> draftFields,
-        List<String> missingFields
+        List<String> missingFields,
+        List<TaskEvidence> taskEvidence
 ) {
     /**
      * A navigable platform page suggested alongside the assistant answer.
      */
     public record RelatedPage(String label, String route) {}
+
+    public record TaskEvidence(
+            String title,
+            String projectName,
+            String status,
+            String priority,
+            LocalDate dueDate,
+            String impact
+    ) {}
 
     /**
      * Static factory for a safe fallback response when the AI service is
@@ -54,6 +65,7 @@ public record AssistantChatResponse(
                 null,
                 null,
                 null,
+                List.of(),
                 List.of()
         );
     }

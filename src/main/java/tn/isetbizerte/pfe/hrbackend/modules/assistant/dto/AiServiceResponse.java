@@ -1,5 +1,6 @@
 package tn.isetbizerte.pfe.hrbackend.modules.assistant.dto;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
@@ -27,11 +28,21 @@ public record AiServiceResponse(
         String draft,
         String draftType,
         Map<String, Object> draftFields,
-        List<String> missingFields
+        List<String> missingFields,
+        List<TaskEvidence> taskEvidence
 ) {
     /**
      * Nested page record matching the FastAPI relatedPages shape:
      * [{ "label": "...", "route": "..." }]
      */
     public record RelatedPage(String label, String route) {}
+
+    public record TaskEvidence(
+            String title,
+            String projectName,
+            String status,
+            String priority,
+            LocalDate dueDate,
+            String impact
+    ) {}
 }
