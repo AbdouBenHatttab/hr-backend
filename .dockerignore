@@ -1,0 +1,12 @@
+target
+.git
+.idea
+*.log
+node_modules
+uploads
+build
+dist
+.env
+.env.*
+*.iml
+.venv
