@@ -95,6 +95,9 @@ public class HrReportExportService {
         this.clock = clock;
     }
 
+    /**
+     * Builds the HR workbook from existing workflow records without changing request state.
+     */
     public byte[] exportExcel(HrReportExportRequest request, Jwt jwt) {
         User requester = authenticatedUserResolver.require(jwt);
         if (requester.getRole() != TypeRole.HR_MANAGER) {

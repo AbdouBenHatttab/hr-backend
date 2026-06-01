@@ -10,6 +10,9 @@ import java.time.LocalTime;
 import java.util.List;
 import java.util.Locale;
 
+/**
+ * Applies text and cell sanitization rules before workbook values are exposed.
+ */
 final class HrReportExportSanitizer {
 
     private HrReportExportSanitizer() {

@@ -6,6 +6,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.Map;
 
+/**
+ * Manages persisted outbox state used to replay notification and event side effects safely.
+ */
 @Service
 public class OutboxEventService {
 

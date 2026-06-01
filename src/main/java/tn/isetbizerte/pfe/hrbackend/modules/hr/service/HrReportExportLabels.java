@@ -11,6 +11,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.stream.Collectors;
 
+/**
+ * Provides pure label, date, and scalar formatting helpers for HR report exports.
+ */
 final class HrReportExportLabels {
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("dd/MM/yyyy");

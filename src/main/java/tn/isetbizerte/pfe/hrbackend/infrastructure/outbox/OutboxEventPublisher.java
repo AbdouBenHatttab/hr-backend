@@ -14,6 +14,9 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 
+/**
+ * Publishes durable outbox events with retry tracking when Kafka delivery is temporarily unavailable.
+ */
 @Component
 @Slf4j
 public class OutboxEventPublisher {

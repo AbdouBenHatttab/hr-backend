@@ -9,6 +9,9 @@ import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
+/**
+ * Validates uploaded files before storage using extension and detected content-type checks.
+ */
 public final class UploadFileValidator {
 
     private static final long MAX_BYTES = 15L * 1024L * 1024L;

@@ -9,6 +9,9 @@ import org.apache.poi.ss.usermodel.IndexedColors;
 import org.apache.poi.ss.usermodel.VerticalAlignment;
 import org.apache.poi.ss.usermodel.Workbook;
 
+/**
+ * Creates the Apache POI styles used by the HR report workbook.
+ */
 final class HrReportExcelStyleHelper {
 
     private HrReportExcelStyleHelper() {

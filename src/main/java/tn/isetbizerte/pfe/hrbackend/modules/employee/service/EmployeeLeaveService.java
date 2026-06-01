@@ -348,8 +348,7 @@ public class EmployeeLeaveService {
     }
 
     /**
-     * Team Leader approves or rejects a leave request.
-     * Security: Team Leader can ONLY act on requests from employees in their team.
+     * Applies the Team Leader review step that must precede the final HR leave decision.
      */
     @CacheEvict(value = "calendarLeaves", allEntries = true)
     @Transactional
@@ -449,8 +448,7 @@ public class EmployeeLeaveService {
     }
 
     /**
-     * HR Manager approves or rejects a leave request.
-     * Sets hrDecision and recalculates overall status.
+     * Applies the final HR leave decision after the Team Leader review step.
      */
     @CacheEvict(value = "calendarLeaves", allEntries = true)
     @Transactional

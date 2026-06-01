@@ -44,6 +44,10 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.oauth2.jwt.Jwt;
 
+/**
+ * Coordinates employee administrative request workflows while preserving HR-owned decisions,
+ * audit history, file boundaries, and notification side effects.
+ */
 @Service
 @Slf4j
 public class RequestsService {
@@ -499,6 +503,9 @@ public class RequestsService {
                 .map(this::mapDocument);
     }
 
+    /**
+     * Applies the HR document decision and records audit/notification side effects within the same workflow boundary.
+     */
     @Transactional
     public Map<String, Object> decideDocument(Long id, boolean approve, String hrNote, String decidedByKeycloakId) {
         DocumentRequest req = documentRepo.findById(id)
@@ -960,6 +967,9 @@ public class RequestsService {
         return decideLoan(id, approve, hrNote, repaymentMonths, approvedAmount, monthlyPayback, null, decidedByKeycloakId);
     }
 
+    /**
+     * Applies the HR loan decision and records audit/notification side effects within the same workflow boundary.
+     */
     @Transactional
     public Map<String, Object> decideLoan(Long id, boolean approve, String hrNote,
                                           Integer repaymentMonths, BigDecimal approvedAmount,
@@ -1462,6 +1472,9 @@ public class RequestsService {
                 .map(this::mapAuth);
     }
 
+    /**
+     * Applies the HR authorization decision and records audit/notification side effects within the same workflow boundary.
+     */
     @Transactional
     public Map<String, Object> decideAuth(Long id, boolean approve, String hrNote, String decidedByKeycloakId) {
         normalizeLegacyAuthorizationTypes();
