@@ -73,9 +73,6 @@ public class AuthService {
         this.objectMapper = objectMapper;
     }
 
-    /**
-     * Get admin access token from Keycloak
-     */
     private String getAdminToken() {
         String tokenUrl = keycloakServerUrl + "/realms/master/protocol/openid-connect/token";
 
@@ -123,7 +120,6 @@ public class AuthService {
         userPayload.put("enabled", true);
         userPayload.put("emailVerified", true);
 
-        // Set password
         Map<String, Object> credential = new HashMap<>();
         credential.put("type", "password");
         credential.put("value", registerRequest.getPassword());
@@ -482,9 +478,6 @@ public class AuthService {
         }
     }
 
-    /**
-     * Process token response from Keycloak
-     */
     private LoginResponse processTokenResponse(Map<String, Object> tokenData, String username) {
         try {
             String accessToken = (String) tokenData.get("access_token");

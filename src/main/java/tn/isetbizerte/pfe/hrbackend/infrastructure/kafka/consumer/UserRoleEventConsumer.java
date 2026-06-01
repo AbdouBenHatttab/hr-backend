@@ -48,7 +48,6 @@ public class UserRoleEventConsumer {
                 return;
             }
 
-            // Use new professional email service
             hrEmailService.sendRoleAssigned(
                     event.getEmail(), event.getFirstName(), event.getLastName(),
                     event.getUsername(), event.getOldRole(), event.getNewRole(),

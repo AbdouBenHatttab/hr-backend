@@ -52,7 +52,7 @@ public class PasswordResetController {
      */
     @PostMapping("/reset-password")
     public ResponseEntity<Map<String, Object>> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
-        logger.info("🔐 Password reset attempt with token");
+        logger.info("Password reset attempt with token");
 
         passwordResetService.resetPassword(request.getToken(), request.getNewPassword());
 

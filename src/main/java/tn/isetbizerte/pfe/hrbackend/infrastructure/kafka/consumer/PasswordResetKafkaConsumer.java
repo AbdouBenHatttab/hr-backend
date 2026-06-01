@@ -37,7 +37,6 @@ public class PasswordResetKafkaConsumer {
         try {
             PasswordResetEvent event = objectMapper.readValue(eventJson, PasswordResetEvent.class);
             logger.info("Parsed password reset event for '{}'", event.getEmail());
-            // Use new professional email service
             String expiresAt = event.getExpiryTime() != null
                     ? event.getExpiryTime().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm 'on' dd/MM/yyyy"))
                     : "15 minutes from now";
@@ -51,4 +50,3 @@ public class PasswordResetKafkaConsumer {
         }
     }
 }
-

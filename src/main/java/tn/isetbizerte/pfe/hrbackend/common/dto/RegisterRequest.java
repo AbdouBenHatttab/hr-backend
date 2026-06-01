@@ -29,7 +29,6 @@ public class RegisterRequest {
 
     public RegisterRequest() {}
 
-    // Getters and Setters
     public String getUsername() {
         return username;
     }

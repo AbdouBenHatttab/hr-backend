@@ -50,7 +50,7 @@ public class PasswordResetEmailService {
                 helper.setReplyTo(replyToEmail);
             }
             helper.setTo(event.getEmail());
-            helper.setSubject("🔐 Password Reset Code – " + companyName);
+            helper.setSubject("Password Reset Code - " + companyName);
 
             String fullName = event.getFirstName() + " " + event.getLastName();
 

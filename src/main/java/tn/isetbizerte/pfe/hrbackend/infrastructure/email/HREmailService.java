@@ -307,7 +307,7 @@ public class HREmailService {
                 taskEmailTemplate.buildTaskCompletedBody(name, taskTitle, projectName, completedBy, frontendUrl, fromDisplayName));
     }
 
-    // 10 - DOCUMENT READY
+    // DOCUMENT READY
 
     public boolean sendDocumentReady(String email, String firstName, String lastName,
                                      String referenceId) {
@@ -353,7 +353,7 @@ public class HREmailService {
         }
     }
 
-    // 10 - AUTHORIZATION DECISION
+    // AUTHORIZATION DECISION
 
     public boolean sendAuthorizationDecision(String email, String firstName, String lastName,
                                              String authorizationType, LocalDate startDate,

@@ -25,7 +25,7 @@ public class LeaveReportService {
     @Value("${app.company.name:HR Management System}")
     private String companyName;
 
-    // Compiled ONCE at startup - not on every request
+    // The Jasper template is compiled once during service initialization.
     private JasperReport compiledReport;
 
     @PostConstruct
