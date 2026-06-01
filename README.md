@@ -1,7 +1,7 @@
 # HR Backend (Spring Boot)
 
 ## Overview
-HR Nexus backend service built with Spring Boot. Provides REST APIs, auth via Keycloak, persistence with PostgreSQL, and eventing via Kafka.
+ArabSoft backend service built with Spring Boot. Provides REST APIs, auth via Keycloak, persistence with PostgreSQL, and eventing via Kafka.
 
 ## Recent Features
 - Refresh token endpoint: `POST /public/auth/refresh`

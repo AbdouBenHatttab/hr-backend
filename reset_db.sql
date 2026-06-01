@@ -1,5 +1,5 @@
 -- ============================================================
--- HR-Nexus Database Clean Reset
+-- ArabSoft Database Clean Reset
 -- Keeps ONLY the HR Manager account (alice_manager)
 -- Run this in pgAdmin Query Tool on your hr_db database
 -- ============================================================

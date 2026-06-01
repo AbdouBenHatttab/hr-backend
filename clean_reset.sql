@@ -1,5 +1,5 @@
 -- ============================================================
--- HR-Nexus Clean Reset — Run in pgAdmin Query Tool on hr_db
+-- ArabSoft Clean Reset — Run in pgAdmin Query Tool on hr_db
 -- Deletes ALL app data except alice_manager (HR)
 -- Does NOT touch Keycloak tables
 -- ============================================================
