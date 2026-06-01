@@ -17,6 +17,10 @@ import tn.isetbizerte.pfe.hrbackend.modules.user.service.AuthenticatedUserResolv
 import java.io.IOException;
 import java.util.Optional;
 
+/**
+ * Per-request filter that rejects authenticated but deactivated accounts before they
+ * reach any controller.
+ */
 @Component
 public class ActiveUserFilter extends OncePerRequestFilter {
 

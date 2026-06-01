@@ -37,6 +37,10 @@ import org.springframework.data.domain.Pageable;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+/**
+ * Leave request workflow service: enforces working-day, balance, overlap and
+ * cancellation-stage rules. Backend is authoritative for these calculations.
+ */
 @Service
 @Slf4j
 public class EmployeeLeaveService {

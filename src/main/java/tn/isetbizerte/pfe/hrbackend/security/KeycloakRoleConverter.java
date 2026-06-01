@@ -18,6 +18,10 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+/**
+ * Converts Keycloak JWT realm roles into Spring authorities and links the token to the
+ * local User record.
+ */
 @Component
 public class KeycloakRoleConverter implements Converter<Jwt, Collection<GrantedAuthority>> {
 

@@ -11,6 +11,11 @@ import org.springframework.security.oauth2.server.resource.web.authentication.Be
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.cors.CorsConfigurationSource;
 
+/**
+ * Central HTTP security policy: maps URL namespaces to ArabSoft roles (NEW_USER, EMPLOYEE,
+ * TEAM_LEADER, HR_MANAGER), enforces stateless JWT (Keycloak) auth, and registers the
+ * active-user filter. Authoritative API access boundary.
+ */
 @Configuration
 @EnableMethodSecurity
 public class SecurityConfig {

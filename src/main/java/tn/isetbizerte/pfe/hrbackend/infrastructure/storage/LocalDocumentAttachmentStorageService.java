@@ -11,6 +11,10 @@ import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.UUID;
 
+/**
+ * Local filesystem store for document attachments. Sanitizes file names and confines
+ * writes to the configured base directory.
+ */
 @Service
 public class LocalDocumentAttachmentStorageService implements DocumentAttachmentStorageService {
 
@@ -66,6 +70,7 @@ public class LocalDocumentAttachmentStorageService implements DocumentAttachment
         return p;
     }
 
+    /** Normalizes an unsafe uploaded file name before it is written to local storage. */
     private static String sanitizeFileName(String name) {
         if (name == null) return "";
         String trimmed = name.trim();

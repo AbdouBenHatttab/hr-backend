@@ -50,6 +50,10 @@ import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+/**
+ * Generates HR report exports (Excel/PDF): row aggregation, styling, and sanitization.
+ * Read-only — produces export artifacts only, performs no workflow transitions.
+ */
 @Service
 @Transactional(readOnly = true)
 public class HrReportExportService {

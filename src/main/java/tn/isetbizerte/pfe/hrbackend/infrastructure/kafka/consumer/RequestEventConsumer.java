@@ -21,6 +21,10 @@ import tn.isetbizerte.pfe.hrbackend.modules.user.repository.UserRepository;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
+/**
+ * Consumes request lifecycle events from Kafka and triggers notification/email side effects.
+ * Idempotent via the processed-event inbox to tolerate redelivery.
+ */
 @Service
 @Slf4j
 public class RequestEventConsumer {

@@ -1092,6 +1092,9 @@ public class RequestsService {
         return mapLoan(req);
     }
 
+    /**
+     * Schedules the HR loan-decision meeting and records the workflow transition and history entry.
+     */
     @Transactional
     public Map<String, Object> scheduleLoanMeeting(Long id, LocalDateTime meetingAt, String meetingNote, String decidedByKeycloakId) {
         LoanRequest req = loanRepo.findById(id)
@@ -1185,6 +1188,9 @@ public class RequestsService {
         }
     }
 
+    /**
+     * Cancels a loan after the scheduled meeting, recording the reason and history entry.
+     */
     @Transactional
     public Map<String, Object> cancelLoanAfterMeeting(Long id, String reason, String canceledByKeycloakId) {
         LoanRequest req = loanRepo.findByIdForUpdate(id)
@@ -1246,6 +1252,9 @@ public class RequestsService {
         return mapLoan(req);
     }
 
+    /**
+     * Stores an HR-supplied loan attachment after validation; HR-only boundary.
+     */
     @Transactional
     public Map<String, Object> uploadLoanAttachment(Long id, String decidedByKeycloakId, String originalFileName, String contentType, byte[] bytes) {
         LoanRequest req = loanRepo.findById(id)
@@ -1306,6 +1315,9 @@ public class RequestsService {
         return req;
     }
 
+    /**
+     * Reads the stored loan attachment bytes for controlled download.
+     */
     public byte[] readLoanAttachment(LoanRequest req) {
         try {
             return attachmentStorage.read(req.getAttachmentStoragePath());

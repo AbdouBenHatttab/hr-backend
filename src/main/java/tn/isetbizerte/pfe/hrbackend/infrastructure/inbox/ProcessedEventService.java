@@ -6,6 +6,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 
+/**
+ * Inbox idempotency guard: records handled event IDs so redelivered Kafka events do not
+ * fire duplicate side effects.
+ */
 @Service
 public class ProcessedEventService {
 
