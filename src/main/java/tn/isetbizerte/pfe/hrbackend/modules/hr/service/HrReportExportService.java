@@ -35,7 +35,6 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.YearMonth;
-import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.EnumSet;
@@ -55,9 +54,6 @@ import java.util.stream.Collectors;
 @Transactional(readOnly = true)
 public class HrReportExportService {
 
-    private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("dd/MM/yyyy");
-    private static final DateTimeFormatter DATETIME_FMT = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
-    private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm");
     private static final String DEFAULT_TITLE = "ArabSoft HR Reports";
 
     private final LeaveRequestRepository leaveRequestRepository;
@@ -147,7 +143,7 @@ public class HrReportExportService {
                 .toList();
 
         try (Workbook workbook = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-            WorkbookStyles styles = createWorkbookStyles(workbook);
+            HrReportWorkbookStyles styles = HrReportExcelStyleHelper.createWorkbookStyles(workbook);
             createSummarySheet(workbook, filteredRows, allRows, normalizedRequest, styles);
             createLeafSheetIfIncluded(workbook, filteredRows, normalizedRequest, styles);
             createDocumentSheetIfIncluded(workbook, filteredRows, normalizedRequest, styles);
@@ -218,7 +214,7 @@ public class HrReportExportService {
             Long pendingAgeDays = derivePendingAgeDays(submittedAt, statusGroup);
             String decisionActorId = firstNonBlank(request.getApprovedBy(), request.getRejectedBy(), request.getCanceledBy());
             String decisionActorLabel = resolveActorLabel(decisionActorId, actorLabelCache);
-            String decisionReason = cleanWorkflowText(request.getDecisionReason());
+            String decisionReason = HrReportExportSanitizer.cleanWorkflowText(request.getDecisionReason());
             String hrNote = statusGroup == HrReportExportRequest.StatusGroup.PENDING ? null : decisionReason;
             String rejectionReason = statusGroup == HrReportExportRequest.StatusGroup.REJECTED ? decisionReason : null;
             String cancellationReason = statusGroup == HrReportExportRequest.StatusGroup.CANCELLED ? decisionReason : null;
@@ -253,8 +249,8 @@ public class HrReportExportService {
             row.setMonthKey(buildMonthKey(submittedAt));
             row.setAgingBucket(buildAgingBucket(pendingAgeDays));
             row.setProcessingBucket(buildProcessingBucket(processingDays));
-            row.setDepartmentGroup(safeGroup(cleanProfileValue(employee.departmentName()), "No department"));
-            row.setTeamGroup(safeGroup(cleanProfileValue(employee.teamName()), "No team"));
+            row.setDepartmentGroup(HrReportExportSanitizer.safeGroup(HrReportExportSanitizer.cleanProfileValue(employee.departmentName()), "No department"));
+            row.setTeamGroup(HrReportExportSanitizer.safeGroup(HrReportExportSanitizer.cleanProfileValue(employee.teamName()), "No team"));
             row.setIsPending(statusGroup == HrReportExportRequest.StatusGroup.PENDING);
             row.setIsApproved(statusGroup == HrReportExportRequest.StatusGroup.APPROVED);
             row.setIsRejected(statusGroup == HrReportExportRequest.StatusGroup.REJECTED);
@@ -283,7 +279,7 @@ public class HrReportExportService {
             boolean waitingForHrFile = isDocumentWaitingForHrFile(request);
             boolean readyForDownload = isDocumentReadyForDownload(request);
             String fulfillmentStatus = readableDocumentFulfillmentStatus(request);
-            String decisionNote = cleanWorkflowText(request.getHrNote());
+            String decisionNote = HrReportExportSanitizer.cleanWorkflowText(request.getHrNote());
             String rejectionReason = statusGroup == HrReportExportRequest.StatusGroup.REJECTED ? decisionNote : null;
             String cancellationReason = statusGroup == HrReportExportRequest.StatusGroup.CANCELLED ? decisionNote : null;
             HrReportRowDto row = baseRow(
@@ -302,7 +298,7 @@ public class HrReportExportService {
                     pendingAgeDays,
                     decisionActorId,
                     decisionActorLabel,
-                    cleanWorkflowText(request.getNotes()),
+                    HrReportExportSanitizer.cleanWorkflowText(request.getNotes()),
                     decisionNote,
                     rejectionReason,
                     cancellationReason
@@ -315,8 +311,8 @@ public class HrReportExportService {
             row.setMonthKey(buildMonthKey(submittedAt));
             row.setAgingBucket(buildAgingBucket(pendingAgeDays));
             row.setProcessingBucket(buildProcessingBucket(processingDays));
-            row.setDepartmentGroup(safeGroup(cleanProfileValue(employee.departmentName()), "No department"));
-            row.setTeamGroup(safeGroup(cleanProfileValue(employee.teamName()), "No team"));
+            row.setDepartmentGroup(HrReportExportSanitizer.safeGroup(HrReportExportSanitizer.cleanProfileValue(employee.departmentName()), "No department"));
+            row.setTeamGroup(HrReportExportSanitizer.safeGroup(HrReportExportSanitizer.cleanProfileValue(employee.teamName()), "No team"));
             row.setIsPending(statusGroup == HrReportExportRequest.StatusGroup.PENDING);
             row.setIsApproved(statusGroup == HrReportExportRequest.StatusGroup.APPROVED);
             row.setIsRejected(statusGroup == HrReportExportRequest.StatusGroup.REJECTED);
@@ -347,8 +343,8 @@ public class HrReportExportService {
             boolean needsHrFile = statusGroup == HrReportExportRequest.StatusGroup.APPROVED
                     && request.getAttachmentUploadedAt() == null;
             String meetingStatus = request.getMeetingAt() != null ? "Scheduled" : null;
-            String decisionReason = cleanWorkflowText(request.getHrDecisionReason());
-            String cancellationReason = statusGroup == HrReportExportRequest.StatusGroup.CANCELLED ? cleanWorkflowText(request.getCancellationReason()) : null;
+            String decisionReason = HrReportExportSanitizer.cleanWorkflowText(request.getHrDecisionReason());
+            String cancellationReason = statusGroup == HrReportExportRequest.StatusGroup.CANCELLED ? HrReportExportSanitizer.cleanWorkflowText(request.getCancellationReason()) : null;
 
             HrReportRowDto row = baseRow(
                     request.getId(),
@@ -366,8 +362,8 @@ public class HrReportExportService {
                     pendingAgeDays,
                     decisionActorId,
                     decisionActorLabel,
-                    cleanWorkflowText(request.getReason()),
-                    cleanWorkflowText(request.getHrNote()),
+                    HrReportExportSanitizer.cleanWorkflowText(request.getReason()),
+                    HrReportExportSanitizer.cleanWorkflowText(request.getHrNote()),
                     statusGroup == HrReportExportRequest.StatusGroup.REJECTED ? decisionReason : null,
                     cancellationReason
             );
@@ -383,8 +379,8 @@ public class HrReportExportService {
             row.setMonthKey(buildMonthKey(submittedAt));
             row.setAgingBucket(buildAgingBucket(pendingAgeDays));
             row.setProcessingBucket(buildProcessingBucket(processingDays));
-            row.setDepartmentGroup(safeGroup(cleanProfileValue(employee.departmentName()), "No department"));
-            row.setTeamGroup(safeGroup(cleanProfileValue(employee.teamName()), "No team"));
+            row.setDepartmentGroup(HrReportExportSanitizer.safeGroup(HrReportExportSanitizer.cleanProfileValue(employee.departmentName()), "No department"));
+            row.setTeamGroup(HrReportExportSanitizer.safeGroup(HrReportExportSanitizer.cleanProfileValue(employee.teamName()), "No team"));
             row.setIsPending(statusGroup == HrReportExportRequest.StatusGroup.PENDING);
             row.setIsApproved(statusGroup == HrReportExportRequest.StatusGroup.APPROVED);
             row.setIsRejected(statusGroup == HrReportExportRequest.StatusGroup.REJECTED);
@@ -410,7 +406,7 @@ public class HrReportExportService {
             Long pendingAgeDays = derivePendingAgeDays(submittedAt, statusGroup);
             String decisionActorId = firstNonBlank(request.getApprovedBy(), request.getRejectedBy(), request.getCanceledBy());
             String decisionActorLabel = resolveActorLabel(decisionActorId, actorLabelCache);
-            String decisionNote = cleanWorkflowText(request.getHrNote());
+            String decisionNote = HrReportExportSanitizer.cleanWorkflowText(request.getHrNote());
             String rejectionReason = statusGroup == HrReportExportRequest.StatusGroup.REJECTED ? decisionNote : null;
             String cancellationReason = statusGroup == HrReportExportRequest.StatusGroup.CANCELLED ? decisionNote : null;
             HrReportRowDto row = baseRow(
@@ -429,7 +425,7 @@ public class HrReportExportService {
                     pendingAgeDays,
                     decisionActorId,
                     decisionActorLabel,
-                    cleanWorkflowText(request.getReason()),
+                    HrReportExportSanitizer.cleanWorkflowText(request.getReason()),
                     decisionNote,
                     rejectionReason,
                     cancellationReason
@@ -444,8 +440,8 @@ public class HrReportExportService {
             row.setMonthKey(buildMonthKey(submittedAt));
             row.setAgingBucket(buildAgingBucket(pendingAgeDays));
             row.setProcessingBucket(buildProcessingBucket(processingDays));
-            row.setDepartmentGroup(safeGroup(cleanProfileValue(employee.departmentName()), "No department"));
-            row.setTeamGroup(safeGroup(cleanProfileValue(employee.teamName()), "No team"));
+            row.setDepartmentGroup(HrReportExportSanitizer.safeGroup(HrReportExportSanitizer.cleanProfileValue(employee.departmentName()), "No department"));
+            row.setTeamGroup(HrReportExportSanitizer.safeGroup(HrReportExportSanitizer.cleanProfileValue(employee.teamName()), "No team"));
             row.setIsPending(statusGroup == HrReportExportRequest.StatusGroup.PENDING);
             row.setIsApproved(statusGroup == HrReportExportRequest.StatusGroup.APPROVED);
             row.setIsRejected(statusGroup == HrReportExportRequest.StatusGroup.REJECTED);
@@ -651,77 +647,8 @@ public class HrReportExportService {
         return request.getAttachmentStoragePath() != null && !request.getAttachmentStoragePath().isBlank();
     }
 
-    private String safeGroup(String value, String fallback) {
-        return value == null || value.isBlank() ? fallback : value;
-    }
-
-    private String cleanProfileValue(String value) {
-        return cleanTextValue(value);
-    }
-
-    private boolean isSentinelValue(String value) {
-        if (value == null) {
-            return true;
-        }
-        String cleaned = value.trim();
-        if (cleaned.isBlank()) {
-            return true;
-        }
-        String lower = cleaned.toLowerCase(Locale.ROOT);
-        if (lower.equals("n/a")
-                || lower.equals("na")
-                || lower.equals("null")
-                || lower.equals("none")
-                || lower.equals("undefined")
-                || lower.equals("unknown")
-                || lower.equals("not specified")
-                || lower.equals("not applicable")
-                || lower.equals("-")
-                || lower.equals("--")) {
-            return true;
-        }
-        if (cleaned.matches("\\d{1,3}")) {
-            return true;
-        }
-        return lower.contains("placeholder")
-                || lower.contains("system evaluation")
-                || lower.contains("system recommendation")
-                || lower.contains("recommendation")
-                || lower.contains("not yet assigned to a team")
-                || lower.contains("team check skipped")
-                || lower.contains("no issues found")
-                || lower.contains("team nearing capacity")
-                || lower.contains("workload manageable");
-    }
-
-    private String cleanWorkflowText(String value) {
-        String cleaned = cleanTextValue(value);
-        if (cleaned == null) {
-            return null;
-        }
-        String lower = cleaned.toLowerCase(Locale.ROOT);
-        if (lower.contains("not yet assigned to a team")
-                || lower.contains("team check skipped")
-                || lower.contains("no issues found")
-                || lower.contains("team nearing capacity")
-                || lower.contains("system evaluation")
-                || lower.contains("system recommendation")
-                || lower.contains("recommendation")
-                || lower.contains("workload manageable")) {
-            return null;
-        }
-        return cleaned;
-    }
-
-    private String cleanTextValue(String value) {
-        if (isSentinelValue(value)) {
-            return null;
-        }
-        return value.trim();
-    }
-
     private String readableStatusLabel(String status) {
-        if (isSentinelValue(status)) {
+        if (HrReportExportSanitizer.isSentinelValue(status)) {
             return null;
         }
         String normalized = status.trim().toUpperCase(Locale.ROOT);
@@ -737,7 +664,7 @@ public class HrReportExportService {
     }
 
     private String readableStageLabel(String stage) {
-        if (isSentinelValue(stage)) {
+        if (HrReportExportSanitizer.isSentinelValue(stage)) {
             return null;
         }
         String normalized = stage.trim().toUpperCase(Locale.ROOT);
@@ -790,19 +717,19 @@ public class HrReportExportService {
     }
 
     private String readableLeaveType(String value) {
-        return cleanTextValue(formatEnum(value));
+        return HrReportExportSanitizer.cleanTextValue(formatEnum(value));
     }
 
     private String readableDocumentType(String value) {
-        return cleanTextValue(formatEnum(value));
+        return HrReportExportSanitizer.cleanTextValue(formatEnum(value));
     }
 
     private String readableLoanType(String value) {
-        return cleanTextValue(formatEnum(value));
+        return HrReportExportSanitizer.cleanTextValue(formatEnum(value));
     }
 
     private String readableAuthorizationType(String value) {
-        return cleanTextValue(formatEnum(value));
+        return HrReportExportSanitizer.cleanTextValue(formatEnum(value));
     }
 
     private String readableDocumentStage(String fulfillmentStatus) {
@@ -830,7 +757,7 @@ public class HrReportExportService {
     }
 
     private String formatEnum(String enumName) {
-        if (isSentinelValue(enumName)) {
+        if (HrReportExportSanitizer.isSentinelValue(enumName)) {
             return null;
         }
         String[] parts = enumName.split("_");
@@ -888,7 +815,7 @@ public class HrReportExportService {
     }
 
     private void createSummarySheet(Workbook workbook, List<HrReportRowDto> rows, List<HrReportRowDto> allRows,
-                                    HrReportExportRequest request, WorkbookStyles styles) {
+                                    HrReportExportRequest request, HrReportWorkbookStyles styles) {
         Sheet sheet = workbook.createSheet("Summary");
         int rowIndex = 0;
 
@@ -905,7 +832,7 @@ public class HrReportExportService {
         setSummaryColumnWidths(sheet);
     }
 
-    private int writeTitleSection(Sheet sheet, int startRow, HrReportExportRequest request, WorkbookStyles styles) {
+    private int writeTitleSection(Sheet sheet, int startRow, HrReportExportRequest request, HrReportWorkbookStyles styles) {
         Row titleRow = sheet.createRow(startRow++);
         Cell titleCell = titleRow.createCell(0);
         titleCell.setCellValue(request.getTitle() != null ? request.getTitle() : DEFAULT_TITLE);
@@ -921,12 +848,12 @@ public class HrReportExportService {
         Row generatedRow = sheet.createRow(startRow++);
         generatedRow.createCell(0).setCellValue("Generated at");
         generatedRow.getCell(0).setCellStyle(styles.sectionLabelStyle());
-        generatedRow.createCell(1).setCellValue(LocalDateTime.now(clock).format(DATETIME_FMT));
+        generatedRow.createCell(1).setCellValue(HrReportExportLabels.formatDateTime(LocalDateTime.now(clock)));
         generatedRow.getCell(1).setCellStyle(styles.textStyle());
         return startRow + 1;
     }
 
-    private int writeReportScopeSection(Sheet sheet, int startRow, HrReportExportRequest request, WorkbookStyles styles) {
+    private int writeReportScopeSection(Sheet sheet, int startRow, HrReportExportRequest request, HrReportWorkbookStyles styles) {
         List<List<Object>> values = List.<List<Object>>of(
                 List.<Object>of("Source", resolveSourceScopeLabel(request))
         );
@@ -934,7 +861,7 @@ public class HrReportExportService {
     }
 
     private int writeAppliedFiltersSection(Sheet sheet, int startRow, HrReportExportRequest request,
-                                           List<HrReportRowDto> allRows, WorkbookStyles styles) {
+                                           List<HrReportRowDto> allRows, HrReportWorkbookStyles styles) {
         List<List<Object>> values = List.<List<Object>>of(
                 List.<Object>of("Date basis", resolveDateBasisLabel(request)),
                 List.<Object>of("Period", resolvePeriodLabel(request)),
@@ -945,7 +872,7 @@ public class HrReportExportService {
         return writeLabeledPairsSection(sheet, startRow, "Applied filters", values, styles);
     }
 
-    private int writeMetricsSection(Sheet sheet, int startRow, List<HrReportRowDto> rows, WorkbookStyles styles) {
+    private int writeMetricsSection(Sheet sheet, int startRow, List<HrReportRowDto> rows, HrReportWorkbookStyles styles) {
         List<List<Object>> metrics = List.<List<Object>>of(
                 List.<Object>of("Total requests", rows.size()),
                 List.<Object>of("Pending", count(rows, HrReportRowDto::isPending)),
@@ -960,7 +887,7 @@ public class HrReportExportService {
         return writeTableSection(sheet, startRow, "Key metrics", List.of("Metric", "Value"), metrics, styles, 0, 1);
     }
 
-    private int writeStatusBreakdownSection(Sheet sheet, int startRow, List<HrReportRowDto> rows, WorkbookStyles styles) {
+    private int writeStatusBreakdownSection(Sheet sheet, int startRow, List<HrReportRowDto> rows, HrReportWorkbookStyles styles) {
         Map<HrReportExportRequest.StatusGroup, Long> counts = rows.stream()
                 .collect(Collectors.groupingBy(row -> row.statusGroup() != null ? row.statusGroup() : HrReportExportRequest.StatusGroup.PENDING,
                         LinkedHashMap::new, Collectors.counting()));
@@ -973,7 +900,7 @@ public class HrReportExportService {
         return writeTableSection(sheet, startRow, "Status breakdown", List.of("Status", "Count"), tableRows, styles, 0, 1);
     }
 
-    private int writeSourceBreakdownSection(Sheet sheet, int startRow, List<HrReportRowDto> rows, WorkbookStyles styles) {
+    private int writeSourceBreakdownSection(Sheet sheet, int startRow, List<HrReportRowDto> rows, HrReportWorkbookStyles styles) {
         Map<HrReportExportRequest.SourceType, Long> counts = rows.stream()
                 .collect(Collectors.groupingBy(row -> row.sourceType() != null ? row.sourceType() : HrReportExportRequest.SourceType.LEAVE,
                         LinkedHashMap::new, Collectors.counting()));
@@ -986,9 +913,9 @@ public class HrReportExportService {
         return writeTableSection(sheet, startRow, "Source type breakdown", List.of("Source type", "Count"), tableRows, styles, 0, 1);
     }
 
-    private int writeDepartmentWorkloadSection(Sheet sheet, int startRow, List<HrReportRowDto> rows, WorkbookStyles styles) {
+    private int writeDepartmentWorkloadSection(Sheet sheet, int startRow, List<HrReportRowDto> rows, HrReportWorkbookStyles styles) {
         Map<String, List<HrReportRowDto>> byDepartment = rows.stream()
-                .collect(Collectors.groupingBy(row -> safeGroup(row.departmentGroup(), "No department"), LinkedHashMap::new, Collectors.toList()));
+                .collect(Collectors.groupingBy(row -> HrReportExportSanitizer.safeGroup(row.departmentGroup(), "No department"), LinkedHashMap::new, Collectors.toList()));
         List<List<Object>> tableRows = byDepartment.entrySet().stream()
                 .sorted((left, right) -> Long.compare(right.getValue().size(), left.getValue().size()))
                 .limit(10)
@@ -1005,12 +932,12 @@ public class HrReportExportService {
                 List.of("Department", "Total", "Pending", "Approved", "Rejected/Cancelled"), tableRows, styles, 0, 1);
     }
 
-    private int writePendingAgingSummarySection(Sheet sheet, int startRow, List<HrReportRowDto> rows, WorkbookStyles styles) {
+    private int writePendingAgingSummarySection(Sheet sheet, int startRow, List<HrReportRowDto> rows, HrReportWorkbookStyles styles) {
         List<HrReportRowDto> pending = rows.stream()
                 .filter(row -> Boolean.TRUE.equals(row.isPending()))
                 .toList();
         Map<String, Long> counts = pending.stream()
-                .collect(Collectors.groupingBy(row -> safeGroup(row.agingBucket(), "Unknown"), LinkedHashMap::new, Collectors.counting()));
+                .collect(Collectors.groupingBy(row -> HrReportExportSanitizer.safeGroup(row.agingBucket(), "Unknown"), LinkedHashMap::new, Collectors.counting()));
         List<List<Object>> tableRows = List.<List<Object>>of(
                 List.<Object>of("0-2 days", counts.getOrDefault("0-2 days", 0L)),
                 List.<Object>of("3-7 days", counts.getOrDefault("3-7 days", 0L)),
@@ -1020,18 +947,18 @@ public class HrReportExportService {
         return writeTableSection(sheet, startRow, "Pending aging", List.of("Bucket", "Count"), tableRows, styles, 0, 1);
     }
 
-    private int writeAttentionPreviewSection(Sheet sheet, int startRow, List<HrReportRowDto> rows, WorkbookStyles styles) {
+    private int writeAttentionPreviewSection(Sheet sheet, int startRow, List<HrReportRowDto> rows, HrReportWorkbookStyles styles) {
         List<List<Object>> tableRows = rows.stream()
                 .filter(row -> Boolean.TRUE.equals(row.isPending()) || Boolean.TRUE.equals(row.isStalePending()))
-                .sorted((left, right) -> compareLongs(right.pendingAgeDays(), left.pendingAgeDays()))
+                .sorted((left, right) -> HrReportExportLabels.compareLongs(right.pendingAgeDays(), left.pendingAgeDays()))
                 .limit(10)
                 .map(row -> List.<Object>of(
-                        safe(row.employeeName()),
-                        safe(row.requestSubtype()),
-                        safeGroup(row.departmentGroup(), "No department"),
-                        safeGroup(row.teamGroup(), "No team"),
+                        HrReportExportLabels.safe(row.employeeName()),
+                        HrReportExportLabels.safe(row.requestSubtype()),
+                        HrReportExportSanitizer.safeGroup(row.departmentGroup(), "No department"),
+                        HrReportExportSanitizer.safeGroup(row.teamGroup(), "No team"),
                         row.pendingAgeDays() != null ? row.pendingAgeDays() + " days" : "",
-                        formatDateTime(row.submittedAt())
+                        HrReportExportLabels.formatDateTime(row.submittedAt())
                 ))
                 .toList();
         return writeTableSection(sheet, startRow, "Attention items / stale pending preview",
@@ -1040,12 +967,12 @@ public class HrReportExportService {
     }
 
     private int writeLabeledPairsSection(Sheet sheet, int startRow, String title, List<List<Object>> rows,
-                                         WorkbookStyles styles) {
+                                         HrReportWorkbookStyles styles) {
         return writeTableSection(sheet, startRow, title, List.of("Label", "Value"), rows, styles, 0, 1);
     }
 
     private int writeTableSection(Sheet sheet, int startRow, String title, List<String> headers,
-                                  List<List<Object>> rows, WorkbookStyles styles, int labelColumn, int valueColumn) {
+                                  List<List<Object>> rows, HrReportWorkbookStyles styles, int labelColumn, int valueColumn) {
         int rowIndex = startRow;
         Row sectionRow = sheet.createRow(rowIndex++);
         Cell sectionCell = sectionRow.createCell(0);
@@ -1076,7 +1003,7 @@ public class HrReportExportService {
         return rowIndex + 1;
     }
 
-    private void createLeafSheetIfIncluded(Workbook workbook, List<HrReportRowDto> rows, HrReportExportRequest request, WorkbookStyles styles) {
+    private void createLeafSheetIfIncluded(Workbook workbook, List<HrReportRowDto> rows, HrReportExportRequest request, HrReportWorkbookStyles styles) {
         if (!shouldIncludeSheet(request, "LEAVES")) {
             return;
         }
@@ -1087,11 +1014,11 @@ public class HrReportExportService {
                 "Decision actor", "Employee reason", "HR note", "Rejection reason", "Cancellation reason",
                 "Leave type", "Start date", "End date", "Deducted working days", "TL decision", "HR decision"
         ), List.of(
-                DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.DATE, DetailColumnKind.TEXT, DetailColumnKind.TEXT,
-                DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.TEXT,
-                DetailColumnKind.DATETIME, DetailColumnKind.DATETIME, DetailColumnKind.OPTIONAL_NUMBER, DetailColumnKind.TEXT,
-                DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.TEXT,
-                DetailColumnKind.TEXT, DetailColumnKind.DATE, DetailColumnKind.DATE, DetailColumnKind.NUMBER, DetailColumnKind.TEXT, DetailColumnKind.TEXT
+                HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.DATE, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT,
+                HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT,
+                HrReportDetailColumnKind.DATETIME, HrReportDetailColumnKind.DATETIME, HrReportDetailColumnKind.OPTIONAL_NUMBER, HrReportDetailColumnKind.TEXT,
+                HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT,
+                HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.DATE, HrReportDetailColumnKind.DATE, HrReportDetailColumnKind.NUMBER, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT
         ), (row, reportRow) -> {
             int c = 0;
             writeTextCell(row, c++, reportRow.employeeName(), styles, false);
@@ -1102,7 +1029,7 @@ public class HrReportExportService {
             writeTextCell(row, c++, reportRow.teamName(), styles, false);
             writeTextCell(row, c++, reportRow.jobTitle(), styles, false);
             writeTextCell(row, c++, reportRow.role(), styles, false);
-            writeTextCell(row, c++, displaySourceType(reportRow.sourceType()), styles, false);
+            writeTextCell(row, c++, HrReportExportLabels.displaySourceType(reportRow.sourceType()), styles, false);
             writeTextCell(row, c++, reportRow.requestSubtype(), styles, false);
             writeTextCell(row, c++, reportRow.status(), styles, false);
             writeTextCell(row, c++, reportRow.stage(), styles, false);
@@ -1123,7 +1050,7 @@ public class HrReportExportService {
         }, styles, Set.of(16, 17, 18, 19));
     }
 
-    private void createDocumentSheetIfIncluded(Workbook workbook, List<HrReportRowDto> rows, HrReportExportRequest request, WorkbookStyles styles) {
+    private void createDocumentSheetIfIncluded(Workbook workbook, List<HrReportRowDto> rows, HrReportExportRequest request, HrReportWorkbookStyles styles) {
         if (!shouldIncludeSheet(request, "DOCUMENTS")) {
             return;
         }
@@ -1134,11 +1061,11 @@ public class HrReportExportService {
                 "Decision actor", "Employee reason", "HR note", "Rejection reason", "Cancellation reason",
                 "Document type", "Fulfillment status", "Waiting for HR file", "Ready for download"
         ), List.of(
-                DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.DATE, DetailColumnKind.TEXT, DetailColumnKind.TEXT,
-                DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.TEXT,
-                DetailColumnKind.DATETIME, DetailColumnKind.DATETIME, DetailColumnKind.OPTIONAL_NUMBER, DetailColumnKind.TEXT,
-                DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.TEXT,
-                DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.TEXT
+                HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.DATE, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT,
+                HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT,
+                HrReportDetailColumnKind.DATETIME, HrReportDetailColumnKind.DATETIME, HrReportDetailColumnKind.OPTIONAL_NUMBER, HrReportDetailColumnKind.TEXT,
+                HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT,
+                HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT
         ), (row, reportRow) -> {
             int c = 0;
             writeTextCell(row, c++, reportRow.employeeName(), styles, false);
@@ -1149,7 +1076,7 @@ public class HrReportExportService {
             writeTextCell(row, c++, reportRow.teamName(), styles, false);
             writeTextCell(row, c++, reportRow.jobTitle(), styles, false);
             writeTextCell(row, c++, reportRow.role(), styles, false);
-            writeTextCell(row, c++, displaySourceType(reportRow.sourceType()), styles, false);
+            writeTextCell(row, c++, HrReportExportLabels.displaySourceType(reportRow.sourceType()), styles, false);
             writeTextCell(row, c++, reportRow.requestSubtype(), styles, false);
             writeTextCell(row, c++, reportRow.status(), styles, false);
             writeTextCell(row, c++, reportRow.stage(), styles, false);
@@ -1163,12 +1090,12 @@ public class HrReportExportService {
             writeTextCell(row, c++, reportRow.cancellationReason(), styles, true);
             writeTextCell(row, c++, reportRow.documentType(), styles, false);
             writeTextCell(row, c++, reportRow.fulfillmentStatus(), styles, false);
-            writeTextCell(row, c++, safeBoolean(reportRow.waitingForHrFile()), styles, false);
-            writeTextCell(row, c++, safeBoolean(reportRow.readyForDownload()), styles, false);
+            writeTextCell(row, c++, HrReportExportLabels.safeBoolean(reportRow.waitingForHrFile()), styles, false);
+            writeTextCell(row, c++, HrReportExportLabels.safeBoolean(reportRow.readyForDownload()), styles, false);
         }, styles, Set.of(16, 17, 18, 19));
     }
 
-    private void createLoanSheetIfIncluded(Workbook workbook, List<HrReportRowDto> rows, HrReportExportRequest request, WorkbookStyles styles) {
+    private void createLoanSheetIfIncluded(Workbook workbook, List<HrReportRowDto> rows, HrReportExportRequest request, HrReportWorkbookStyles styles) {
         if (!shouldIncludeSheet(request, "LOANS")) {
             return;
         }
@@ -1180,12 +1107,12 @@ public class HrReportExportService {
                 "Loan type", "Requested amount", "Approved amount", "Repayment months", "Monthly installment",
                 "Meeting date", "Meeting status", "Risk score"
         ), List.of(
-                DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.DATE, DetailColumnKind.TEXT, DetailColumnKind.TEXT,
-                DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.TEXT,
-                DetailColumnKind.DATETIME, DetailColumnKind.DATETIME, DetailColumnKind.OPTIONAL_NUMBER, DetailColumnKind.TEXT,
-                DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.TEXT,
-                DetailColumnKind.TEXT, DetailColumnKind.NUMBER, DetailColumnKind.OPTIONAL_NUMBER, DetailColumnKind.NUMBER,
-                DetailColumnKind.NUMBER, DetailColumnKind.DATETIME, DetailColumnKind.TEXT, DetailColumnKind.OPTIONAL_NUMBER
+                HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.DATE, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT,
+                HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT,
+                HrReportDetailColumnKind.DATETIME, HrReportDetailColumnKind.DATETIME, HrReportDetailColumnKind.OPTIONAL_NUMBER, HrReportDetailColumnKind.TEXT,
+                HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT,
+                HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.NUMBER, HrReportDetailColumnKind.OPTIONAL_NUMBER, HrReportDetailColumnKind.NUMBER,
+                HrReportDetailColumnKind.NUMBER, HrReportDetailColumnKind.DATETIME, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.OPTIONAL_NUMBER
         ), (row, reportRow) -> {
             int c = 0;
             writeTextCell(row, c++, reportRow.employeeName(), styles, false);
@@ -1196,7 +1123,7 @@ public class HrReportExportService {
             writeTextCell(row, c++, reportRow.teamName(), styles, false);
             writeTextCell(row, c++, reportRow.jobTitle(), styles, false);
             writeTextCell(row, c++, reportRow.role(), styles, false);
-            writeTextCell(row, c++, displaySourceType(reportRow.sourceType()), styles, false);
+            writeTextCell(row, c++, HrReportExportLabels.displaySourceType(reportRow.sourceType()), styles, false);
             writeTextCell(row, c++, reportRow.requestSubtype(), styles, false);
             writeTextCell(row, c++, reportRow.status(), styles, false);
             writeTextCell(row, c++, reportRow.stage(), styles, false);
@@ -1219,7 +1146,7 @@ public class HrReportExportService {
         }, styles, Set.of(16, 17, 18, 19));
     }
 
-    private void createAuthorizationSheetIfIncluded(Workbook workbook, List<HrReportRowDto> rows, HrReportExportRequest request, WorkbookStyles styles) {
+    private void createAuthorizationSheetIfIncluded(Workbook workbook, List<HrReportRowDto> rows, HrReportExportRequest request, HrReportWorkbookStyles styles) {
         if (!shouldIncludeSheet(request, "AUTHORIZATIONS")) {
             return;
         }
@@ -1230,12 +1157,12 @@ public class HrReportExportService {
                 "Decision actor", "Employee reason", "HR note", "Rejection reason", "Cancellation reason",
                 "Authorization type", "Absence date", "Start date", "End date", "From time", "To time", "Equipment type"
         ), List.of(
-                DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.DATE, DetailColumnKind.TEXT, DetailColumnKind.TEXT,
-                DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.TEXT,
-                DetailColumnKind.DATETIME, DetailColumnKind.DATETIME, DetailColumnKind.OPTIONAL_NUMBER, DetailColumnKind.TEXT,
-                DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.TEXT,
-                DetailColumnKind.TEXT, DetailColumnKind.DATE, DetailColumnKind.DATE, DetailColumnKind.DATE,
-                DetailColumnKind.TIME, DetailColumnKind.TIME, DetailColumnKind.TEXT
+                HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.DATE, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT,
+                HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT,
+                HrReportDetailColumnKind.DATETIME, HrReportDetailColumnKind.DATETIME, HrReportDetailColumnKind.OPTIONAL_NUMBER, HrReportDetailColumnKind.TEXT,
+                HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT,
+                HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.DATE, HrReportDetailColumnKind.DATE, HrReportDetailColumnKind.DATE,
+                HrReportDetailColumnKind.TIME, HrReportDetailColumnKind.TIME, HrReportDetailColumnKind.TEXT
         ), (row, reportRow) -> {
             int c = 0;
             writeTextCell(row, c++, reportRow.employeeName(), styles, false);
@@ -1246,7 +1173,7 @@ public class HrReportExportService {
             writeTextCell(row, c++, reportRow.teamName(), styles, false);
             writeTextCell(row, c++, reportRow.jobTitle(), styles, false);
             writeTextCell(row, c++, reportRow.role(), styles, false);
-            writeTextCell(row, c++, displaySourceType(reportRow.sourceType()), styles, false);
+            writeTextCell(row, c++, HrReportExportLabels.displaySourceType(reportRow.sourceType()), styles, false);
             writeTextCell(row, c++, reportRow.requestSubtype(), styles, false);
             writeTextCell(row, c++, reportRow.status(), styles, false);
             writeTextCell(row, c++, reportRow.stage(), styles, false);
@@ -1268,28 +1195,28 @@ public class HrReportExportService {
         }, styles, Set.of(16, 17, 18, 19));
     }
 
-    private void createPendingAgingSheetIfIncluded(Workbook workbook, List<HrReportRowDto> rows, HrReportExportRequest request, WorkbookStyles styles) {
+    private void createPendingAgingSheetIfIncluded(Workbook workbook, List<HrReportRowDto> rows, HrReportExportRequest request, HrReportWorkbookStyles styles) {
         if (!shouldIncludeSheet(request, "PENDING_AGING")) {
             return;
         }
         List<HrReportRowDto> data = rows.stream()
                 .filter(row -> row.isPending() != null && row.isPending())
-                .sorted((left, right) -> compareLongs(right.pendingAgeDays(), left.pendingAgeDays()))
+                .sorted((left, right) -> HrReportExportLabels.compareLongs(right.pendingAgeDays(), left.pendingAgeDays()))
                 .toList();
         writeDetailedSheet(workbook, "Pending Aging", data, List.of(
                 "Employee name", "Username", "Department", "Team", "Request category", "Request type", "Status",
                 "Stage", "Submitted date", "Pending age days", "Aging bucket", "Decision actor", "Employee reason", "HR note"
         ), List.of(
-                DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.TEXT,
-                DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.DATETIME, DetailColumnKind.NUMBER, DetailColumnKind.TEXT, DetailColumnKind.TEXT,
-                DetailColumnKind.TEXT, DetailColumnKind.TEXT
+                HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT,
+                HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.DATETIME, HrReportDetailColumnKind.NUMBER, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT,
+                HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT
         ), (row, reportRow) -> {
             int c = 0;
             writeTextCell(row, c++, reportRow.employeeName(), styles, false);
             writeTextCell(row, c++, reportRow.username(), styles, false);
             writeTextCell(row, c++, reportRow.departmentName(), styles, false);
             writeTextCell(row, c++, reportRow.teamName(), styles, false);
-            writeTextCell(row, c++, displaySourceType(reportRow.sourceType()), styles, false);
+            writeTextCell(row, c++, HrReportExportLabels.displaySourceType(reportRow.sourceType()), styles, false);
             writeTextCell(row, c++, reportRow.requestSubtype(), styles, false);
             writeTextCell(row, c++, reportRow.status(), styles, false);
             writeTextCell(row, c++, reportRow.stage(), styles, false);
@@ -1302,7 +1229,7 @@ public class HrReportExportService {
         }, styles, Set.of(12, 13));
     }
 
-    private void createDecisionActivitySheetIfIncluded(Workbook workbook, List<HrReportRowDto> rows, HrReportExportRequest request, WorkbookStyles styles) {
+    private void createDecisionActivitySheetIfIncluded(Workbook workbook, List<HrReportRowDto> rows, HrReportExportRequest request, HrReportWorkbookStyles styles) {
         if (!shouldIncludeSheet(request, "DECISION_ACTIVITY")) {
             return;
         }
@@ -1314,14 +1241,14 @@ public class HrReportExportService {
                 "Decision date", "Decision actor", "Source type", "Request type", "Request ID", "Employee name",
                 "Status", "Stage", "Processing days", "Employee reason", "HR note", "Rejection reason", "Cancellation reason"
         ), List.of(
-                DetailColumnKind.DATETIME, DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.NUMBER, DetailColumnKind.TEXT,
-                DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.OPTIONAL_NUMBER, DetailColumnKind.TEXT, DetailColumnKind.TEXT, DetailColumnKind.TEXT,
-                DetailColumnKind.TEXT
+                HrReportDetailColumnKind.DATETIME, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.NUMBER, HrReportDetailColumnKind.TEXT,
+                HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.OPTIONAL_NUMBER, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT, HrReportDetailColumnKind.TEXT,
+                HrReportDetailColumnKind.TEXT
         ), (row, reportRow) -> {
             int c = 0;
             writeDateTimeCell(row, c++, reportRow.decisionAt(), styles);
             writeTextCell(row, c++, reportRow.decisionActorLabel(), styles, false);
-            writeTextCell(row, c++, displaySourceType(reportRow.sourceType()), styles, false);
+            writeTextCell(row, c++, HrReportExportLabels.displaySourceType(reportRow.sourceType()), styles, false);
             writeTextCell(row, c++, reportRow.requestSubtype(), styles, false);
             writeNumberCell(row, c++, reportRow.id(), styles);
             writeTextCell(row, c++, reportRow.employeeName(), styles, false);
@@ -1336,8 +1263,8 @@ public class HrReportExportService {
     }
 
     private void writeDetailedSheet(Workbook workbook, String sheetName, List<HrReportRowDto> rows,
-                                    List<String> headers, List<DetailColumnKind> columnKinds, BiConsumer<Row, HrReportRowDto> rowWriter,
-                                    WorkbookStyles styles, Set<Integer> wrapColumns) {
+                                    List<String> headers, List<HrReportDetailColumnKind> columnKinds, BiConsumer<Row, HrReportRowDto> rowWriter,
+                                    HrReportWorkbookStyles styles, Set<Integer> wrapColumns) {
         Sheet sheet = workbook.createSheet(sheetName);
         int rowIndex = 0;
         Row headerRow = sheet.createRow(rowIndex++);
@@ -1356,7 +1283,7 @@ public class HrReportExportService {
             for (HrReportRowDto row : rows) {
                 Row dataRow = sheet.createRow(rowIndex++);
                 rowWriter.accept(dataRow, row);
-                sanitizeDetailedRow(dataRow, columnKinds);
+                HrReportExportSanitizer.sanitizeDetailedRow(dataRow, columnKinds);
             }
         }
 
@@ -1367,7 +1294,7 @@ public class HrReportExportService {
 
     private void writeSourceSheet(Workbook workbook, String sheetName, List<HrReportRowDto> rows,
                                   List<String> headers, Function<HrReportRowDto, List<?>> rowMapper,
-                                  WorkbookStyles styles, Set<Integer> wrapColumns) {
+                                  HrReportWorkbookStyles styles, Set<Integer> wrapColumns) {
         Sheet sheet = workbook.createSheet(sheetName);
 
         int rowIndex = 0;
@@ -1402,8 +1329,8 @@ public class HrReportExportService {
     private void writeSimpleTable(Sheet sheet, int startRow, String title, List<String> headers,
                                   List<List<String>> rows, Workbook workbook) {
         int rowIndex = startRow;
-        CellStyle sectionStyle = boldStyle(workbook, 12, false);
-        CellStyle headerStyle = headerStyle(workbook);
+        CellStyle sectionStyle = HrReportExcelStyleHelper.boldStyle(workbook, 12, false);
+        CellStyle headerStyle = HrReportExcelStyleHelper.headerStyle(workbook);
 
         Row titleRow = sheet.createRow(rowIndex++);
         Cell titleCell = titleRow.createCell(0);
@@ -1430,15 +1357,15 @@ public class HrReportExportService {
         }
     }
 
-    private Cell writeTextCell(Row row, int column, Object value, WorkbookStyles styles, boolean wrap) {
+    private Cell writeTextCell(Row row, int column, Object value, HrReportWorkbookStyles styles, boolean wrap) {
         Cell cell = row.createCell(column);
-        String cleaned = sanitizeTextValue(value);
+        String cleaned = HrReportExportSanitizer.sanitizeTextValue(value);
         cell.setCellStyle(wrap ? styles.wrapTextStyle() : styles.textStyle());
         cell.setCellValue(cleaned == null ? "" : cleaned);
         return cell;
     }
 
-    private Cell writeDateCell(Row row, int column, Object value, WorkbookStyles styles) {
+    private Cell writeDateCell(Row row, int column, Object value, HrReportWorkbookStyles styles) {
         Cell cell = row.createCell(column);
         LocalDate date = value instanceof LocalDate localDate ? localDate : null;
         if (date == null) {
@@ -1451,7 +1378,7 @@ public class HrReportExportService {
         return cell;
     }
 
-    private Cell writeDateTimeCell(Row row, int column, Object value, WorkbookStyles styles) {
+    private Cell writeDateTimeCell(Row row, int column, Object value, HrReportWorkbookStyles styles) {
         Cell cell = row.createCell(column);
         LocalDateTime dateTime = value instanceof LocalDateTime localDateTime ? localDateTime : null;
         if (dateTime == null) {
@@ -1464,7 +1391,7 @@ public class HrReportExportService {
         return cell;
     }
 
-    private Cell writeTimeCell(Row row, int column, Object value, WorkbookStyles styles) {
+    private Cell writeTimeCell(Row row, int column, Object value, HrReportWorkbookStyles styles) {
         Cell cell = row.createCell(column);
         LocalTime time = value instanceof LocalTime localTime ? localTime : null;
         if (time == null) {
@@ -1472,12 +1399,12 @@ public class HrReportExportService {
             cell.setCellValue("");
             return cell;
         }
-        cell.setCellValue(time.format(TIME_FMT));
+        cell.setCellValue(HrReportExportLabels.formatTime(time));
         cell.setCellStyle(styles.timeStyle());
         return cell;
     }
 
-    private Cell writeNumberCell(Row row, int column, Object value, WorkbookStyles styles) {
+    private Cell writeNumberCell(Row row, int column, Object value, HrReportWorkbookStyles styles) {
         Cell cell = row.createCell(column);
         if (!(value instanceof Number number)) {
             cell.setCellStyle(styles.integerStyle());
@@ -1493,7 +1420,7 @@ public class HrReportExportService {
         return cell;
     }
 
-    private Cell writeOptionalNumberCell(Row row, int column, Object value, boolean applicable, WorkbookStyles styles) {
+    private Cell writeOptionalNumberCell(Row row, int column, Object value, boolean applicable, HrReportWorkbookStyles styles) {
         Cell cell = row.createCell(column);
         if (!applicable || !(value instanceof Number number)) {
             cell.setCellStyle(styles.integerStyle());
@@ -1509,95 +1436,12 @@ public class HrReportExportService {
         return cell;
     }
 
-    private void sanitizeDetailedRow(Row row, List<DetailColumnKind> columnKinds) {
-        if (row == null || columnKinds == null || columnKinds.isEmpty()) {
-            return;
-        }
-        for (int i = 0; i < columnKinds.size(); i++) {
-            Cell cell = row.getCell(i);
-            if (cell == null) {
-                continue;
-            }
-            DetailColumnKind kind = columnKinds.get(i);
-            if (kind == null) {
-                continue;
-            }
-            switch (kind) {
-                case TEXT -> sanitizeTextCell(cell);
-                case DATE, DATETIME, TIME -> sanitizeTemporalCell(cell);
-                case NUMBER, OPTIONAL_NUMBER -> sanitizeNumericCell(cell, kind == DetailColumnKind.OPTIONAL_NUMBER);
-            }
-        }
-    }
-
-    private void sanitizeTextCell(Cell cell) {
-        if (cell == null) {
-            return;
-        }
-        if (cell.getCellType() == CellType.NUMERIC) {
-            cell.setBlank();
-            return;
-        }
-        if (cell.getCellType() == CellType.STRING) {
-            String value = cell.getStringCellValue();
-            if (cleanTextValue(value) == null) {
-                cell.setBlank();
-            }
-        }
-    }
-
-    private void sanitizeTemporalCell(Cell cell) {
-        if (cell == null) {
-            return;
-        }
-        if (cell.getCellType() == CellType.STRING) {
-            if (cleanTextValue(cell.getStringCellValue()) == null) {
-                cell.setBlank();
-            }
-            return;
-        }
-        if (cell.getCellType() == CellType.NUMERIC && cell.getNumericCellValue() < 1000d) {
-            cell.setBlank();
-        }
-    }
-
-    private void sanitizeNumericCell(Cell cell, boolean optional) {
-        if (cell == null) {
-            return;
-        }
-        if (cell.getCellType() == CellType.STRING) {
-            if (cleanTextValue(cell.getStringCellValue()) == null) {
-                cell.setBlank();
-            }
-            return;
-        }
-        if (cell.getCellType() == CellType.NUMERIC && optional) {
-            return;
-        }
-    }
-
-    private String sanitizeTextValue(Object value) {
-        if (value == null) {
-            return null;
-        }
-        if (value instanceof Number || value instanceof LocalDate || value instanceof LocalDateTime || value instanceof LocalTime) {
-            return null;
-        }
-        if (value instanceof Boolean) {
-            return null;
-        }
-        if (value instanceof String text) {
-            return cleanTextValue(text);
-        }
-        return cleanTextValue(String.valueOf(value));
-    }
-
     private long count(List<HrReportRowDto> rows, Function<HrReportRowDto, Boolean> predicate) {
         return rows.stream().filter(row -> Boolean.TRUE.equals(predicate.apply(row))).count();
     }
 
     private String formatAverageDays(List<Long> values) {
-        return String.format(Locale.ROOT, "%.1f days", averageLong(values));
+        return String.format(Locale.ROOT, "%.1f days", HrReportExportLabels.averageLong(values));
     }
 
     private String resolveSourceScopeLabel(HrReportExportRequest request) {
@@ -1605,7 +1449,7 @@ public class HrReportExportService {
         if (sourceTypes == null || sourceTypes.isEmpty() || sourceTypes.size() == HrReportExportRequest.SourceType.values().length) {
             return "All sources";
         }
-        return sourceTypes.stream().map(this::displaySourceTypePlural).collect(Collectors.joining(", "));
+        return sourceTypes.stream().map(HrReportExportLabels::displaySourceTypePlural).collect(Collectors.joining(", "));
     }
 
     private String resolveDateBasisLabel(HrReportExportRequest request) {
@@ -1622,12 +1466,12 @@ public class HrReportExportService {
             return "All dates";
         }
         if (request.getDateFrom() != null && request.getDateTo() != null) {
-            return request.getDateFrom().format(DATE_FMT) + " → " + request.getDateTo().format(DATE_FMT);
+            return HrReportExportLabels.formatDate(request.getDateFrom()) + " → " + HrReportExportLabels.formatDate(request.getDateTo());
         }
         if (request.getDateFrom() != null) {
-            return "From " + request.getDateFrom().format(DATE_FMT);
+            return "From " + HrReportExportLabels.formatDate(request.getDateFrom());
         }
-        return "Until " + request.getDateTo().format(DATE_FMT);
+        return "Until " + HrReportExportLabels.formatDate(request.getDateTo());
     }
 
     private String resolveStatusLabel(HrReportExportRequest request) {
@@ -1664,14 +1508,14 @@ public class HrReportExportService {
                 .orElse("Team #" + request.getTeamId());
     }
 
-    private void writeObjectRow(Row row, List<Object> values, WorkbookStyles styles, Set<Integer> wrapColumns) {
+    private void writeObjectRow(Row row, List<Object> values, HrReportWorkbookStyles styles, Set<Integer> wrapColumns) {
         for (int i = 0; i < values.size(); i++) {
             Cell cell = row.createCell(i);
             writeCellValue(cell, values.get(i), styles, wrapColumns.contains(i));
         }
     }
 
-    private void writeCellValue(Cell cell, Object value, WorkbookStyles styles, boolean wrap) {
+    private void writeCellValue(Cell cell, Object value, HrReportWorkbookStyles styles, boolean wrap) {
         if (value == null) {
             cell.setCellStyle(wrap ? styles.wrapTextStyle() : styles.textStyle());
             cell.setCellValue("");
@@ -1688,7 +1532,7 @@ public class HrReportExportService {
             return;
         }
         if (value instanceof LocalTime localTime) {
-            cell.setCellValue(localTime.format(TIME_FMT));
+            cell.setCellValue(HrReportExportLabels.formatTime(localTime));
             cell.setCellStyle(styles.timeStyle());
             return;
         }
@@ -1709,115 +1553,6 @@ public class HrReportExportService {
         }
         cell.setCellValue(String.valueOf(value));
         cell.setCellStyle(wrap ? styles.wrapTextStyle() : styles.textStyle());
-    }
-
-    private WorkbookStyles createWorkbookStyles(Workbook workbook) {
-        Font titleFont = workbook.createFont();
-        titleFont.setBold(true);
-        titleFont.setFontHeightInPoints((short) 16);
-        titleFont.setColor(IndexedColors.WHITE.getIndex());
-
-        Font subtitleFont = workbook.createFont();
-        subtitleFont.setItalic(true);
-        subtitleFont.setColor(IndexedColors.GREY_50_PERCENT.getIndex());
-
-        Font sectionFont = workbook.createFont();
-        sectionFont.setBold(true);
-        sectionFont.setColor(IndexedColors.WHITE.getIndex());
-
-        Font headerFont = workbook.createFont();
-        headerFont.setBold(true);
-        headerFont.setColor(IndexedColors.WHITE.getIndex());
-
-        Font labelFont = workbook.createFont();
-        labelFont.setBold(true);
-
-        CellStyle titleStyle = workbook.createCellStyle();
-        titleStyle.setFont(titleFont);
-        titleStyle.setFillForegroundColor(IndexedColors.DARK_BLUE.getIndex());
-        titleStyle.setFillPattern(FillPatternType.SOLID_FOREGROUND);
-        titleStyle.setAlignment(HorizontalAlignment.LEFT);
-        titleStyle.setVerticalAlignment(VerticalAlignment.CENTER);
-        titleStyle.setWrapText(true);
-
-        CellStyle subtitleStyle = workbook.createCellStyle();
-        subtitleStyle.setFont(subtitleFont);
-        subtitleStyle.setWrapText(true);
-
-        CellStyle sectionHeaderStyle = workbook.createCellStyle();
-        sectionHeaderStyle.setFont(sectionFont);
-        sectionHeaderStyle.setFillForegroundColor(IndexedColors.BLUE_GREY.getIndex());
-        sectionHeaderStyle.setFillPattern(FillPatternType.SOLID_FOREGROUND);
-        sectionHeaderStyle.setAlignment(HorizontalAlignment.LEFT);
-
-        CellStyle tableHeaderStyle = workbook.createCellStyle();
-        tableHeaderStyle.setFont(headerFont);
-        tableHeaderStyle.setFillForegroundColor(IndexedColors.DARK_BLUE.getIndex());
-        tableHeaderStyle.setFillPattern(FillPatternType.SOLID_FOREGROUND);
-        tableHeaderStyle.setBorderBottom(BorderStyle.THIN);
-        tableHeaderStyle.setBorderTop(BorderStyle.THIN);
-        tableHeaderStyle.setBorderLeft(BorderStyle.THIN);
-        tableHeaderStyle.setBorderRight(BorderStyle.THIN);
-        tableHeaderStyle.setAlignment(HorizontalAlignment.CENTER);
-        tableHeaderStyle.setVerticalAlignment(VerticalAlignment.CENTER);
-
-        CellStyle sectionLabelStyle = workbook.createCellStyle();
-        sectionLabelStyle.setFont(labelFont);
-        sectionLabelStyle.setFillForegroundColor(IndexedColors.GREY_25_PERCENT.getIndex());
-        sectionLabelStyle.setFillPattern(FillPatternType.SOLID_FOREGROUND);
-        sectionLabelStyle.setBorderBottom(BorderStyle.THIN);
-
-        CellStyle textStyle = workbook.createCellStyle();
-        textStyle.setWrapText(false);
-        textStyle.setBorderBottom(BorderStyle.THIN);
-        textStyle.setBorderTop(BorderStyle.THIN);
-        textStyle.setBorderLeft(BorderStyle.THIN);
-        textStyle.setBorderRight(BorderStyle.THIN);
-
-        CellStyle wrapTextStyle = workbook.createCellStyle();
-        wrapTextStyle.setWrapText(true);
-        wrapTextStyle.setBorderBottom(BorderStyle.THIN);
-        wrapTextStyle.setBorderTop(BorderStyle.THIN);
-        wrapTextStyle.setBorderLeft(BorderStyle.THIN);
-        wrapTextStyle.setBorderRight(BorderStyle.THIN);
-
-        CellStyle dateStyle = workbook.createCellStyle();
-        dateStyle.setDataFormat(workbook.createDataFormat().getFormat("dd/mm/yyyy"));
-        dateStyle.setBorderBottom(BorderStyle.THIN);
-        dateStyle.setBorderTop(BorderStyle.THIN);
-        dateStyle.setBorderLeft(BorderStyle.THIN);
-        dateStyle.setBorderRight(BorderStyle.THIN);
-
-        CellStyle dateTimeStyle = workbook.createCellStyle();
-        dateTimeStyle.setDataFormat(workbook.createDataFormat().getFormat("dd/mm/yyyy hh:mm"));
-        dateTimeStyle.setBorderBottom(BorderStyle.THIN);
-        dateTimeStyle.setBorderTop(BorderStyle.THIN);
-        dateTimeStyle.setBorderLeft(BorderStyle.THIN);
-        dateTimeStyle.setBorderRight(BorderStyle.THIN);
-
-        CellStyle timeStyle = workbook.createCellStyle();
-        timeStyle.setDataFormat(workbook.createDataFormat().getFormat("hh:mm"));
-        timeStyle.setBorderBottom(BorderStyle.THIN);
-        timeStyle.setBorderTop(BorderStyle.THIN);
-        timeStyle.setBorderLeft(BorderStyle.THIN);
-        timeStyle.setBorderRight(BorderStyle.THIN);
-
-        CellStyle integerStyle = workbook.createCellStyle();
-        integerStyle.setDataFormat(workbook.createDataFormat().getFormat("0"));
-        integerStyle.setBorderBottom(BorderStyle.THIN);
-        integerStyle.setBorderTop(BorderStyle.THIN);
-        integerStyle.setBorderLeft(BorderStyle.THIN);
-        integerStyle.setBorderRight(BorderStyle.THIN);
-
-        CellStyle decimalStyle = workbook.createCellStyle();
-        decimalStyle.setDataFormat(workbook.createDataFormat().getFormat("0.00"));
-        decimalStyle.setBorderBottom(BorderStyle.THIN);
-        decimalStyle.setBorderTop(BorderStyle.THIN);
-        decimalStyle.setBorderLeft(BorderStyle.THIN);
-        decimalStyle.setBorderRight(BorderStyle.THIN);
-
-        return new WorkbookStyles(titleStyle, subtitleStyle, sectionHeaderStyle, tableHeaderStyle,
-                sectionLabelStyle, textStyle, wrapTextStyle, dateStyle, dateTimeStyle, timeStyle, integerStyle, decimalStyle);
     }
 
     private void setSummaryColumnWidths(Sheet sheet) {
@@ -1844,9 +1579,9 @@ public class HrReportExportService {
         }
         Set<String> normalized = includeSheets.stream()
                 .filter(value -> value != null && !value.isBlank())
-                .map(this::sheetKey)
+                .map(HrReportExportLabels::sheetKey)
                 .collect(Collectors.toCollection(HashSet::new));
-        return normalized.contains(sheetKey(sheetKey));
+        return normalized.contains(HrReportExportLabels.sheetKey(sheetKey));
     }
 
     private HrReportRowDto baseRow(Long id,
@@ -1872,181 +1607,33 @@ public class HrReportExportService {
         row.setId(id);
         row.setSourceType(sourceType);
         row.setRequestTypeLabel(requestTypeLabel);
-        row.setRequestSubtype(cleanTextValue(requestSubtype));
+        row.setRequestSubtype(HrReportExportSanitizer.cleanTextValue(requestSubtype));
         row.setStatus(readableStatusLabel(status));
         row.setStage(readableStageLabel(stage));
         row.setStatusGroup(statusGroup);
         row.setEmployeeId(employee.employeeId());
-        row.setEmployeeName(cleanProfileValue(employee.fullName()));
-        row.setUsername(cleanProfileValue(employee.username()));
-        row.setEmail(cleanProfileValue(employee.email()));
+        row.setEmployeeName(HrReportExportSanitizer.cleanProfileValue(employee.fullName()));
+        row.setUsername(HrReportExportSanitizer.cleanProfileValue(employee.username()));
+        row.setEmail(HrReportExportSanitizer.cleanProfileValue(employee.email()));
         row.setHireDate(employee.hireDate());
         row.setDepartmentId(employee.departmentId());
-        row.setDepartmentName(cleanProfileValue(employee.departmentName()));
+        row.setDepartmentName(HrReportExportSanitizer.cleanProfileValue(employee.departmentName()));
         row.setTeamId(employee.teamId());
-        row.setTeamName(cleanProfileValue(employee.teamName()));
-        row.setJobTitle(cleanProfileValue(employee.jobTitle()));
-        row.setRole(cleanProfileValue(employee.role()));
+        row.setTeamName(HrReportExportSanitizer.cleanProfileValue(employee.teamName()));
+        row.setJobTitle(HrReportExportSanitizer.cleanProfileValue(employee.jobTitle()));
+        row.setRole(HrReportExportSanitizer.cleanProfileValue(employee.role()));
         row.setSubmittedAt(submittedAt);
         row.setDecisionAt(decisionAt);
         row.setClosedAt(closedAt);
         row.setProcessingDays(processingDays);
         row.setPendingAgeDays(pendingAgeDays);
-        row.setDecisionActorId(cleanTextValue(decisionActorId));
-        row.setDecisionActorLabel(cleanTextValue(decisionActorLabel));
-        row.setReason(cleanWorkflowText(reason));
-        row.setHrNote(cleanWorkflowText(hrNote));
-        row.setRejectionReason(cleanWorkflowText(rejectionReason));
-        row.setCancellationReason(cleanWorkflowText(cancellationReason));
+        row.setDecisionActorId(HrReportExportSanitizer.cleanTextValue(decisionActorId));
+        row.setDecisionActorLabel(HrReportExportSanitizer.cleanTextValue(decisionActorLabel));
+        row.setReason(HrReportExportSanitizer.cleanWorkflowText(reason));
+        row.setHrNote(HrReportExportSanitizer.cleanWorkflowText(hrNote));
+        row.setRejectionReason(HrReportExportSanitizer.cleanWorkflowText(rejectionReason));
+        row.setCancellationReason(HrReportExportSanitizer.cleanWorkflowText(cancellationReason));
         return row;
-    }
-
-    private String sheetKey(String value) {
-        return value == null ? "" : value.trim()
-                .replace(' ', '_')
-                .replace('-', '_')
-                .toUpperCase(Locale.ROOT);
-    }
-
-    private String displaySourceType(HrReportExportRequest.SourceType sourceType) {
-        if (sourceType == null) {
-            return "";
-        }
-        return switch (sourceType) {
-            case LEAVE -> "Leave";
-            case DOCUMENT -> "Document";
-            case LOAN -> "Loan";
-            case AUTHORIZATION -> "Authorization";
-        };
-    }
-
-    private String displaySourceTypePlural(HrReportExportRequest.SourceType sourceType) {
-        if (sourceType == null) {
-            return "";
-        }
-        return switch (sourceType) {
-            case LEAVE -> "Leaves";
-            case DOCUMENT -> "Documents";
-            case LOAN -> "Loans";
-            case AUTHORIZATION -> "Authorizations";
-        };
-    }
-
-    private enum DetailColumnKind {
-        TEXT,
-        DATE,
-        DATETIME,
-        TIME,
-        NUMBER,
-        OPTIONAL_NUMBER
-    }
-
-    private String buildFilterSummary(HrReportExportRequest request) {
-        List<String> parts = new ArrayList<>();
-        if (request.getSourceTypes() != null && !request.getSourceTypes().isEmpty()) {
-            parts.add("sourceTypes=" + request.getSourceTypes().stream().map(Enum::name).collect(Collectors.joining(",")));
-        }
-        if (request.getDateBasis() != null) {
-            parts.add("dateBasis=" + request.getDateBasis().name());
-        }
-        if (request.getDateFrom() != null) {
-            parts.add("dateFrom=" + request.getDateFrom());
-        }
-        if (request.getDateTo() != null) {
-            parts.add("dateTo=" + request.getDateTo());
-        }
-        if (request.getStatus() != null && !request.getStatus().isBlank()) {
-            parts.add("status=" + request.getStatus());
-        }
-        if (request.getStatusGroup() != null) {
-            parts.add("statusGroup=" + request.getStatusGroup().name());
-        }
-        if (request.getDepartmentId() != null) {
-            parts.add("departmentId=" + request.getDepartmentId());
-        }
-        if (request.getTeamId() != null) {
-            parts.add("teamId=" + request.getTeamId());
-        }
-        return parts.isEmpty() ? "None" : String.join(" · ", parts);
-    }
-
-    private CellStyle headerStyle(Workbook workbook) {
-        CellStyle style = workbook.createCellStyle();
-        Font font = workbook.createFont();
-        font.setBold(true);
-        font.setColor(IndexedColors.WHITE.getIndex());
-        style.setFont(font);
-        style.setFillForegroundColor(IndexedColors.DARK_BLUE.getIndex());
-        style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
-        style.setBorderBottom(BorderStyle.THIN);
-        style.setBorderTop(BorderStyle.THIN);
-        style.setBorderLeft(BorderStyle.THIN);
-        style.setBorderRight(BorderStyle.THIN);
-        return style;
-    }
-
-    private CellStyle boldStyle(Workbook workbook, int fontSize, boolean underline) {
-        CellStyle style = workbook.createCellStyle();
-        Font font = workbook.createFont();
-        font.setBold(true);
-        font.setFontHeightInPoints((short) fontSize);
-        font.setUnderline(underline ? Font.U_SINGLE : Font.U_NONE);
-        style.setFont(font);
-        return style;
-    }
-
-    private String safe(String value) {
-        String cleaned = cleanTextValue(value);
-        return cleaned == null ? "" : cleaned;
-    }
-
-    private String safeString(String value) {
-        return safe(value);
-    }
-
-    private String safeBoolean(Boolean value) {
-        if (value == null) {
-            return "";
-        }
-        return value ? "Yes" : "No";
-    }
-
-    private String formatDate(LocalDate date) {
-        return date == null ? "" : date.format(DATE_FMT);
-    }
-
-    private String formatDateTime(LocalDateTime dateTime) {
-        return dateTime == null ? "" : dateTime.format(DATETIME_FMT);
-    }
-
-    private String formatTime(LocalTime time) {
-        return time == null ? "" : time.format(TIME_FMT);
-    }
-
-    private Double averageLong(List<Long> values) {
-        if (values == null || values.isEmpty()) {
-            return 0d;
-        }
-        long sum = 0L;
-        for (Long value : values) {
-            if (value != null) {
-                sum += value;
-            }
-        }
-        return sum / (double) values.size();
-    }
-
-    private int compareLongs(Long left, Long right) {
-        if (left == null && right == null) {
-            return 0;
-        }
-        if (left == null) {
-            return 1;
-        }
-        if (right == null) {
-            return -1;
-        }
-        return Long.compare(left, right);
     }
 
     private record EmployeeSnapshot(Long employeeId,
@@ -2198,19 +1785,5 @@ public class HrReportExportService {
                 return null;
             }
         }
-    }
-
-    private record WorkbookStyles(CellStyle titleStyle,
-                                  CellStyle subtitleStyle,
-                                  CellStyle sectionHeaderStyle,
-                                  CellStyle tableHeaderStyle,
-                                  CellStyle sectionLabelStyle,
-                                  CellStyle textStyle,
-                                  CellStyle wrapTextStyle,
-                                  CellStyle dateStyle,
-                                  CellStyle dateTimeStyle,
-                                  CellStyle timeStyle,
-                                  CellStyle integerStyle,
-                                  CellStyle decimalStyle) {
     }
 }
