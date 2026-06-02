@@ -11,6 +11,7 @@ import net.sf.jasperreports.engine.data.JRBeanCollectionDataSource;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
+import tn.isetbizerte.pfe.hrbackend.modules.employee.entity.EmployeeLeaveBalance;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.entity.DocumentRequest;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.entity.LoanRequest;
 
@@ -19,6 +20,10 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.Collections;
@@ -49,6 +54,15 @@ public class RequestReportService {
 
     // DOCUMENT PDF
     public byte[] generateDocumentPdf(DocumentRequest req) {
+        return generateDocumentPdf(req, null);
+    }
+
+    /**
+     * Renders the Leave Balance Statement PDF. The {@code balance} carries the current
+     * leave balance values for the request employee at generation time; when null
+     * (no managed balance row), the summary falls back to "N/A" without failing.
+     */
+    public byte[] generateDocumentPdf(DocumentRequest req, EmployeeLeaveBalance balance) {
         try (InputStream logo = new ClassPathResource(LOGO_PATH).getInputStream()) {
             Map<String, Object> p = new HashMap<>();
             p.put("companyName",        companyName);
@@ -62,6 +76,17 @@ public class RequestReportService {
             p.put("processedAt",        req.getProcessedAt() != null ? req.getProcessedAt().format(DATETIME_FMT) : "");
             p.put("hrNote",             req.getHrNote() != null ? req.getHrNote() : "");
             p.put("logoStream",         logo);
+
+            boolean hasBalance = balance != null;
+            p.put("balanceYear",        hasBalance ? String.valueOf(balance.getYear()) : String.valueOf(LocalDate.now().getYear()));
+            p.put("balanceLeaveType",   hasBalance ? leaveTypeLabel(balance.getLeaveType().name()) : "Annual Leave");
+            p.put("allocatedDays",      hasBalance ? formatDays(balance.getAllocatedDays())   : "N/A");
+            p.put("carryForwardDays",   hasBalance ? formatDays(balance.getCarryForwardDays()) : "N/A");
+            p.put("usedDays",           hasBalance ? formatDays(balance.getUsedDays())        : "N/A");
+            p.put("reservedDays",       hasBalance ? formatDays(balance.getReservedDays())    : "N/A");
+            p.put("availableDays",      hasBalance ? formatDays(balance.getAvailableDays())   : "N/A");
+            p.put("generatedOn",        LocalDateTime.now().format(DATETIME_FMT));
+
             return fill(documentReport, p);
         } catch (Exception e) { throw new IllegalStateException("Failed to generate document PDF", e); }
     }
@@ -122,6 +147,15 @@ public class RequestReportService {
         return Arrays.stream(enumName.split("_"))
                 .map(w -> w.charAt(0) + w.substring(1).toLowerCase())
                 .collect(Collectors.joining(" "));
+    }
+
+    private String leaveTypeLabel(String enumName) {
+        return fmt(enumName) + " Leave";
+    }
+
+    private String formatDays(BigDecimal value) {
+        if (value == null) return "N/A";
+        return value.setScale(2, RoundingMode.HALF_UP).toPlainString() + " days";
     }
 
     public static String documentReference(Long requestId) {

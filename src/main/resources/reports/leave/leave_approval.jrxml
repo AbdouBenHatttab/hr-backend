@@ -26,6 +26,7 @@
     <parameter name="teamLeaderDecision" class="java.lang.String"/>
     <parameter name="hrManagerDecision"  class="java.lang.String"/>
     <parameter name="approvalDate"       class="java.lang.String"/>
+    <parameter name="generatedOn"        class="java.lang.String"/>
     <parameter name="logoStream"         class="java.io.InputStream"/>
 
     <background><band splitType="Stretch"/></background>
@@ -67,7 +68,7 @@
                 <textElement verticalAlignment="Middle">
                     <font size="9" fontName="SansSerif"/>
                 </textElement>
-                <text><![CDATA[Leave Authorization Certificate]]></text>
+                <text><![CDATA[Leave Approval Certificate]]></text>
             </staticText>
 
             <!-- Reference number top-right -->
@@ -312,7 +313,7 @@
                 <textElement verticalAlignment="Middle">
                     <font size="10" isBold="true" fontName="SansSerif"/>
                 </textElement>
-                <textFieldExpression><![CDATA["✓  " + $P{teamLeaderDecision}]]></textFieldExpression>
+                <textFieldExpression><![CDATA[$P{teamLeaderDecision}]]></textFieldExpression>
             </textField>
 
             <!-- HR Manager box -->
@@ -330,7 +331,7 @@
                 <textElement verticalAlignment="Middle">
                     <font size="10" isBold="true" fontName="SansSerif"/>
                 </textElement>
-                <textFieldExpression><![CDATA["✓  " + $P{hrManagerDecision}]]></textFieldExpression>
+                <textFieldExpression><![CDATA[$P{hrManagerDecision}]]></textFieldExpression>
             </textField>
 
         </band>
@@ -367,6 +368,14 @@
                     <font size="6" fontName="SansSerif"/>
                 </textElement>
                 <textFieldExpression><![CDATA["Ref: " + $P{referenceNumber} + "  ·  Page 1 of 1"]]></textFieldExpression>
+            </textField>
+
+            <textField isBlankWhenNull="true">
+                <reportElement x="0" y="77" width="535" height="10" forecolor="#94A3B8"/>
+                <textElement textAlignment="Center" verticalAlignment="Middle">
+                    <font size="6" fontName="SansSerif"/>
+                </textElement>
+                <textFieldExpression><![CDATA[$P{generatedOn} != null && !$P{generatedOn}.isEmpty() ? "Generated on " + $P{generatedOn} : ""]]></textFieldExpression>
             </textField>
         </band>
 

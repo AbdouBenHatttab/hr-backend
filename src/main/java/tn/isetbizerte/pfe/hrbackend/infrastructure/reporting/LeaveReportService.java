@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import tn.isetbizerte.pfe.hrbackend.modules.employee.entity.LeaveRequest;
 
 import java.io.InputStream;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Collections;
 import java.util.HashMap;
@@ -52,16 +53,17 @@ public class LeaveReportService {
             parameters.put("employeeFullName",  leaveRequest.getEmployeeFullName());
             parameters.put("employeeEmail",     leaveRequest.getEmployeeEmail());
             parameters.put("employeeDepartment",dept);
-            parameters.put("leaveType",         formatEnum(leaveRequest.getLeaveType().name()));
+            parameters.put("leaveType",         formatLeaveType(leaveRequest.getLeaveType().name()));
             parameters.put("leaveStartDate",    leaveRequest.getStartDate().format(DATE_FORMATTER));
             parameters.put("leaveEndDate",       leaveRequest.getEndDate().format(DATE_FORMATTER));
-            parameters.put("numberOfDays",      leaveRequest.getNumberOfDays() + " working day(s)");
+            parameters.put("numberOfDays",      formatWorkingDays(leaveRequest.getNumberOfDays()));
             parameters.put("reason",            leaveRequest.getReason() == null ? "N/A" : leaveRequest.getReason());
             parameters.put("requestDate",       leaveRequest.getRequestDate().format(DATETIME_FORMATTER));
             parameters.put("teamLeaderDecision",formatEnum(leaveRequest.getTeamLeaderDecision().name()));
             parameters.put("hrManagerDecision", formatEnum(leaveRequest.getHrDecision().name()));
             parameters.put("approvalDate",
                     leaveRequest.getApprovalDate() == null ? "N/A" : leaveRequest.getApprovalDate().format(DATE_FORMATTER));
+            parameters.put("generatedOn",       LocalDateTime.now().format(DATETIME_FORMATTER));
             parameters.put("referenceNumber",   "LV-" + String.format("%06d", leaveRequest.getId()));
             parameters.put("logoStream", logoStream);
 
@@ -72,6 +74,24 @@ public class LeaveReportService {
         } catch (Exception ex) {
             throw new IllegalStateException("Failed to generate leave approval PDF", ex);
         }
+    }
+
+    /**
+     * Builds a readable leave-type label, e.g. "ANNUAL" -> "Annual Leave",
+     * "SICK" -> "Sick Leave". Mirrors the wording used by the document PDF.
+     */
+    private String formatLeaveType(String enumName) {
+        if (enumName == null) return "N/A";
+        return formatEnum(enumName) + " Leave";
+    }
+
+    /**
+     * Renders the approved duration with correct singular/plural wording,
+     * e.g. 1 -> "1 working day", 6 -> "6 working days".
+     */
+    private String formatWorkingDays(Integer days) {
+        if (days == null) return "N/A";
+        return days + (days == 1 ? " working day" : " working days");
     }
 
     /**

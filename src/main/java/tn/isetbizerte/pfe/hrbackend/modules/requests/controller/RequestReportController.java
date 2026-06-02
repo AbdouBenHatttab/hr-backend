@@ -9,6 +9,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 import tn.isetbizerte.pfe.hrbackend.infrastructure.reporting.RequestReportService;
+import tn.isetbizerte.pfe.hrbackend.modules.requests.service.DocumentReportBalanceService;
 import tn.isetbizerte.pfe.hrbackend.modules.requests.service.RequestsService;
 
 @RestController
@@ -17,17 +18,21 @@ public class RequestReportController {
 
     private final RequestsService      service;
     private final RequestReportService reportService;
+    private final DocumentReportBalanceService balanceService;
 
-    public RequestReportController(RequestsService service, RequestReportService reportService) {
+    public RequestReportController(RequestsService service,
+                                   RequestReportService reportService,
+                                   DocumentReportBalanceService balanceService) {
         this.service       = service;
         this.reportService = reportService;
+        this.balanceService = balanceService;
     }
 
     @PreAuthorize("hasAnyRole('EMPLOYEE','TEAM_LEADER','HR_MANAGER')")
     @GetMapping("/documents/{id}")
     public ResponseEntity<byte[]> getDocumentPdf(@PathVariable Long id, @AuthenticationPrincipal Jwt jwt) {
         var req  = service.getDocumentRequestForPdf(id, jwt.getSubject());
-        var pdf  = reportService.generateDocumentPdf(req);
+        var pdf  = reportService.generateDocumentPdf(req, balanceService.currentAnnualLeaveBalance(req));
         return pdfResponse(pdf, "document_" + req.getDocumentType().name().toLowerCase() + "_" + id + ".pdf");
     }
 
