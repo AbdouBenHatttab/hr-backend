@@ -855,6 +855,24 @@ public class FullDemoSeederService {
         history("AUTH", "CREATED", a3.getId(), users.get("sami.ayari").getKeycloakId(), a3.getReason(), null, "PENDING");
         history("AUTH", "HR_REJECTED", a3.getId(), hr2.getKeycloakId(), a3.getHrNote(), "PENDING", "REJECTED");
         notify(users.get("sami.ayari"), "Time permission request rejected", "AUTH_STATUS", "AUTH", a3.getId(), "/employee/authorizations?requestId=" + a3.getId());
+
+        // A4 — approved TIME_PERMISSION (Ines)
+        AuthorizationRequest a4 = new AuthorizationRequest();
+        a4.setUser(users.get("ines.cherif"));
+        a4.setAuthorizationType(AuthorizationType.TIME_PERMISSION);
+        a4.setReason("Medical appointment");
+        a4.setRequestedAt(LocalDateTime.now().minusDays(2));
+        a4.setAbsenceDate(future(1));
+        a4.setFromTime(LocalTime.of(9, 0));
+        a4.setToTime(LocalTime.of(11, 0));
+        a4.setStatus(RequestStatus.APPROVED);
+        a4.setApprovedBy(hr1.getKeycloakId());
+        a4.setProcessedAt(LocalDateTime.now().minusDays(1));
+        a4.setVerificationToken(UUID.randomUUID().toString());
+        a4 = authorizationRequestRepository.save(a4);
+        history("AUTH", "CREATED", a4.getId(), users.get("ines.cherif").getKeycloakId(), a4.getReason(), null, "PENDING");
+        history("AUTH", "HR_APPROVED", a4.getId(), hr1.getKeycloakId(), "Approved time permission.", "PENDING", "APPROVED");
+        notify(users.get("ines.cherif"), "Time permission request approved", "AUTH_STATUS", "AUTH", a4.getId(), "/employee/authorizations?requestId=" + a4.getId());
     }
 
     // ── Projects & tasks (4 projects, one per team; 16 tasks with full variety) ──
