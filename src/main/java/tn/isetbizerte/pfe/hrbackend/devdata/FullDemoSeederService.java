@@ -732,7 +732,7 @@ public class FullDemoSeederService {
         User hr2 = users.get("sofien.kefi");
 
         // Ln1 — pending loan (Maya)
-        LoanRequest ln1 = baseLoan(users.get("maya.saidi"), LoanType.PERSONAL_ADVANCE, "1500.00", null,
+        LoanRequest ln1 = baseLoan(users.get("maya.saidi"), LoanType.PERSONAL_ADVANCE, "1500.00", 6,
                 "Personal advance for a family expense.");
         ln1.setStatus(RequestStatus.PENDING);
         ln1.setSystemRecommendation("APPROVE");
